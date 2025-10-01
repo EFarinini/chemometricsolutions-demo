@@ -146,74 +146,7 @@ def show_home():
     
     st.markdown("---")
     
-    # Sample Data Preview
-    st.markdown("## Sample Data Preview")
-    st.markdown("*Quick look at the types of data we work with*")
-    
-    # Generate sample NIR spectrum
-    wavelengths = np.arange(900, 1700, 5)  # NIR range
-    n_spectra = 5
-    
-    fig = go.Figure()
-    
-    compounds = ['Paracetamol', 'Ibuprofen', 'Aspirin', 'Caffeine', 'Lactose']
-    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
-    
-    for i, (compound, color) in enumerate(zip(compounds, colors)):
-        # Generate realistic NIR spectrum
-        spectrum = np.random.normal(0.1, 0.02, len(wavelengths))
-        
-        # Add characteristic peaks based on compound
-        if compound == 'Paracetamol':
-            spectrum += 0.3 * np.exp(-((wavelengths - 1200)**2) / (2 * 50**2))
-            spectrum += 0.2 * np.exp(-((wavelengths - 1400)**2) / (2 * 30**2))
-        elif compound == 'Ibuprofen':
-            spectrum += 0.4 * np.exp(-((wavelengths - 1180)**2) / (2 * 40**2))
-            spectrum += 0.25 * np.exp(-((wavelengths - 1350)**2) / (2 * 45**2))
-        elif compound == 'Aspirin':
-            spectrum += 0.35 * np.exp(-((wavelengths - 1220)**2) / (2 * 35**2))
-            spectrum += 0.3 * np.exp(-((wavelengths - 1420)**2) / (2 * 50**2))
-        elif compound == 'Caffeine':
-            spectrum += 0.25 * np.exp(-((wavelengths - 1160)**2) / (2 * 60**2))
-            spectrum += 0.2 * np.exp(-((wavelengths - 1380)**2) / (2 * 40**2))
-        else:  # Lactose
-            spectrum += 0.2 * np.exp(-((wavelengths - 1250)**2) / (2 * 70**2))
-            spectrum += 0.15 * np.exp(-((wavelengths - 1450)**2) / (2 * 55**2))
-        
-        # Add baseline
-        spectrum += 0.05 * (wavelengths - 900) / 800
-        
-        fig.add_trace(go.Scatter(
-            x=wavelengths,
-            y=spectrum,
-            mode='lines',
-            name=compound,
-            line=dict(color=color, width=2)
-        ))
-    
-    fig.update_layout(
-        title='Sample NIR Spectra - Pharmaceutical Compounds',
-        xaxis_title='Wavelength (nm)',
-        yaxis_title='Absorbance',
-        height=400,
-        hovermode='x unified'
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Quick stats
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("Compounds", len(compounds))
-    with col2:
-        st.metric("Wavelengths", len(wavelengths))
-    with col3:
-        st.metric("Range", f"{wavelengths[0]}-{wavelengths[-1]} nm")
-    with col4:
-        st.metric("Data Points", len(wavelengths))
-    
-    st.markdown("---")
+
     
     # About Section
     st.markdown("## About These Demos")
