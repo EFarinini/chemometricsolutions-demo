@@ -12,6 +12,7 @@
 
 ## 🚀 Live Demo
 
+**Landing Page:** [chemometricsolutions-demo.streamlit.app]([https://chemometricsolutions-demo.streamlit.app]))
 **Try it now:** [chemometricsolutions-demo.streamlit.app](https://chemometricsolutions-demo.streamlit.app)
 
 ---
