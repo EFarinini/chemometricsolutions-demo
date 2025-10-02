@@ -13,7 +13,6 @@
 ## 🚀 Live Demo
 
 **Try it now:** [chemometricsolutions-demo.streamlit.app](https://chemometricsolutions-demo.streamlit.app)
-Landing Page: https://farininichemometricsolutions.github.io/chemometricsolutions-demo/
 
 ---
 
