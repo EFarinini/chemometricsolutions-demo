@@ -10,11 +10,12 @@
 
 ---
 
-## 🚀 Live Demo
+## 🔗 Live Demo
 
-**🚀 Live Demo:** [chemometricsolutions-demo.streamlit.app](https://chemometricsolutions-demo.streamlit.app)
+**Live Demo:** [chemometricsolutions-demo.streamlit.app](https://chemometricsolutions-demo.streamlit.app)
 
-**📄 Landing Page:** [efarinini.github.io/chemometricsolutions-demo](https://efarinini.github.io/chemometricsolutions-demo/)
+**Landing Page:** [efarinini.github.io/chemometricsolutions-demo](https://efarinini.github.io/chemometricsolutions-demo/)
+
 ---
 
 ## 📊 Featured Demos
