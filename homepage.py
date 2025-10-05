@@ -254,9 +254,7 @@ def show_home():
         - **Y-variable**: Karl Fischer (KF) moisture content (reference method)  
         - **Objective**: Build calibration model to predict moisture from spectra
         - **Challenges**: Spectral overlapping, baseline variations, noise
-        
-        **Typical workflow**: Data Handling → Transformations (SNV, derivatives) → PCA (exploratory) → MLR/PLS (calibration)
-        
+
         **Key spectral features**:
         - 1400-1500 nm: Primary water absorption bands
         - Baseline trends: Scattering effects from particle size
