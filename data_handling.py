@@ -1,5 +1,5 @@
 """
-CAT Data Handling Page - CORRECTED VERSION
+CAT Data Handling Page - UPDATED VERSION WITH TRANSFORMATION MEMORY
 Equivalent to DH_* R scripts for data import/export and workspace management
 """
 
@@ -80,7 +80,7 @@ def _load_csv_txt(uploaded_file, separator, decimal, encoding, has_header, has_i
     if data is None:
         raise ValueError("Unable to decode file with any encoding")
     
-    # CORREZIONE: Se non c'è una colonna indice, usa indici 1-based
+    # CORREZIONE: Se non c'Ã¨ una colonna indice, usa indici 1-based
     if not has_index:
         data.index = range(1, len(data) + 1)
         data.index.name = None  # Rimuovi il nome dell'indice
@@ -91,7 +91,7 @@ def _load_spectral_data(uploaded_file, separator, decimal, encoding, has_header,
     """Load spectral data (DAT/ASC files)"""
     data = _load_csv_txt(uploaded_file, separator, decimal, encoding, has_header, has_index, skip_rows, 0, "NA", '"')
     
-    if data_format == "Transposed (variables×samples)":
+    if data_format == "Transposed (variablesÃ—samples)":
         data = data.T
         
         # Rename columns to be more informative
@@ -104,8 +104,8 @@ def _load_spectral_data(uploaded_file, separator, decimal, encoding, has_header,
             # Generic variable names
             data.columns = [f"Var_{i+1}" for i in range(len(data.columns))]
         
-        st.success("Data transposed: variables×samples → samples×variables")
-        st.info(f"Final format: {data.shape[0]} samples × {data.shape[1]} variables")
+        st.success("Data transposed: variablesÃ—samples â†' samplesÃ—variables")
+        st.info(f"Final format: {data.shape[0]} samples Ã— {data.shape[1]} variables")
         
         # CORREZIONE: Dopo la trasposizione, forza indici 1-based se necessario
         if not has_index:
@@ -205,7 +205,7 @@ def _load_sam_data(uploaded_file, extract_metadata=True, wavelength_range="Auto-
                 st.success(f"NIR spectrum created: {detected_compound}")
                 st.info(f"Wavelength range: {wavelengths[0]:.1f} - {wavelengths[-1]:.1f} nm")
                 st.info(f"Data points: {n_points}")
-                st.info(f"Temperature: {temperature:.1f}°C")
+                st.info(f"Temperature: {temperature:.1f}Â°C")
                 st.info(f"Format: Compatible with NIR export standard")
             
             return spectral_matrix
@@ -336,7 +336,7 @@ def _load_raw_data(uploaded_file, encoding="utf-8"):
                 data.insert(0, 'Sample_ID', file_name)
                 
                 st.success(f"RAW file parsed successfully!")
-                st.info(f"Final shape: {data.shape[0]} points × {data.shape[1]} variables")
+                st.info(f"Final shape: {data.shape[0]} points Ã— {data.shape[1]} variables")
                 
                 return data
             
@@ -374,7 +374,7 @@ def _load_raw_data(uploaded_file, encoding="utf-8"):
                                     # Assume it's XRD data - CREATE CHEMOMETRIC FORMAT
                                     angles = np.linspace(5, 80, len(valid_values))
                                     
-                                    # Create chemometric format: samples × variables
+                                    # Create chemometric format: samples Ã— variables
                                     # One row = one sample, columns = 2Theta angles with intensities
                                     data_dict = {'Sample_ID': file_name}
                                     
@@ -385,8 +385,8 @@ def _load_raw_data(uploaded_file, encoding="utf-8"):
                                     data = pd.DataFrame([data_dict])
                                     
                                     st.success(f"XRD spectrum loaded in chemometric format!")
-                                    st.info(f"2θ range: {angles[0]:.2f}° to {angles[-1]:.2f}°")
-                                    st.info(f"Format: 1 sample × {len(valid_values)} variables (2θ angles)")
+                                    st.info(f"2Î¸ range: {angles[0]:.2f}Â° to {angles[-1]:.2f}Â°")
+                                    st.info(f"Format: 1 sample Ã— {len(valid_values)} variables (2Î¸ angles)")
                                 else:
                                     # Short data - create chemometric format
                                     data_dict = {'Sample_ID': file_name}
@@ -398,7 +398,7 @@ def _load_raw_data(uploaded_file, encoding="utf-8"):
                                     data = pd.DataFrame([data_dict])
                                 
                                 st.success(f"Binary RAW data extracted!")
-                                st.info(f"Shape: {data.shape[0]} points × {data.shape[1]} variables")
+                                st.info(f"Shape: {data.shape[0]} points Ã— {data.shape[1]} variables")
                                 
                                 return data
                                 
@@ -460,7 +460,7 @@ def _load_excel_data(uploaded_file, sheet_name, skip_rows, skip_cols, has_header
     if skip_cols > 0:
         data = data.iloc[:, skip_cols:]
     
-    # CORREZIONE: Se non c'è una colonna indice, usa indici 1-based
+    # CORREZIONE: Se non c'Ã¨ una colonna indice, usa indici 1-based
     if not has_index:
         data.index = range(1, len(data) + 1)
         data.index.name = None
@@ -472,8 +472,8 @@ def _save_original_to_history(data, dataset_name):
     if 'transformation_history' not in st.session_state:
         st.session_state.transformation_history = {}
     
-    # Salva l'originale solo se non esiste già
-    original_name = f"{dataset_name}_ORIGINAL"
+    # Save original only if not exists
+    original_name = f"{dataset_name.split('.')[0]}_ORIGINAL"
     
     if original_name not in st.session_state.transformation_history:
         st.session_state.transformation_history[original_name] = {
@@ -481,9 +481,9 @@ def _save_original_to_history(data, dataset_name):
             'transform': 'Original (Untransformed)',
             'params': {},
             'col_range': None,
-            'timestamp': pd.Timestamp.now()
+            'timestamp': pd.Timestamp.now(),
+            'transform_type': 'original'
         }
-
 
 # Export helper functions
 def _create_sam_export(data, include_header):
@@ -568,6 +568,15 @@ def show():
                 """)
             
             st.success("**Perfect for converting instrumental files to Excel format!**")
+            
+            # Professional Services Note - NUOVO
+            st.markdown("---")
+            st.info("""
+            💡 **Need support for additional formats or custom import/export workflows?**  
+            Professional data handling solutions available at [chemometricsolutions.com](https://chemometricsolutions.com)
+            
+            🔧 **Enterprise features:** Custom parsers • Batch processing • Database integration • API connectivity
+            """)
         
         elif load_method == "Upload File":
             st.markdown("### File Upload")
@@ -669,8 +678,6 @@ def show():
                         # Salva l'originale nella transformation history
                         _save_original_to_history(data, uploaded_file.name)
 
-                        st.success(f"Data loaded successfully: {data.shape[0]} rows × {data.shape[1]} columns")
-                        
                         st.success(f"Data loaded successfully: {data.shape[0]} rows × {data.shape[1]} columns")
                         
                         # Preview
@@ -810,15 +817,16 @@ def show():
                         "text/csv"
                     )
     
-    # ===== WORKSPACE TAB =====
+    # ===== WORKSPACE TAB - UPDATED =====
     with tab3:
         st.markdown("## Workspace Management")
         st.markdown("*Equivalent to DH_workspace_management.r*")
         
+        # Show current active dataset
         if 'current_data' in st.session_state:
             data = st.session_state.current_data
             
-            st.markdown("### Current Dataset Overview")
+            st.markdown("### 📊 Current Active Dataset")
             
             col1, col2, col3, col4 = st.columns(4)
             
@@ -832,17 +840,36 @@ def show():
                 memory_mb = data.memory_usage(deep=True).sum() / 1024 / 1024
                 st.metric("Size", f"{memory_mb:.1f} MB")
             
+            # Show if dataset is transformed
+            current_name = st.session_state.current_dataset
+            if '.' in current_name and not current_name.endswith('_ORIGINAL'):
+                # This is a transformed dataset
+                transform_type = current_name.split('.')[-1]
+                st.info(f"🔬 **Active dataset is transformed**: {transform_type}")
+                
+                # Find original dataset
+                base_name = current_name.split('.')[0]
+                original_key = f"{base_name}_ORIGINAL"
+                
+                if 'transformation_history' in st.session_state and original_key in st.session_state.transformation_history:
+                    original_data = st.session_state.transformation_history[original_key]['data']
+                    st.info(f"📋 **Original size**: {original_data.shape[0]} × {original_data.shape[1]} → **Current size**: {data.shape[0]} × {data.shape[1]}")
+            else:
+                st.success("📋 **Dataset**: Original (no transformations applied)")
+            
             # Preview
             st.markdown("### Data Preview")
             st.dataframe(data.head(10), use_container_width=True)
         else:
             st.info("Load a dataset to see workspace information")
 
+        # Show Dataset Splits
         if 'split_datasets' in st.session_state and st.session_state.split_datasets:
+            st.markdown("---")
             st.markdown("### 📦 Saved Dataset Splits")
             st.info(f"You have {len(st.session_state.split_datasets)} saved dataset splits")
             
-            # Raggruppa per parent dataset
+            # Group by parent dataset
             splits_by_parent = {}
             for name, info in st.session_state.split_datasets.items():
                 parent = info.get('parent', 'Unknown')
@@ -850,7 +877,7 @@ def show():
                     splits_by_parent[parent] = []
                 splits_by_parent[parent].append((name, info))
             
-            # Mostra per gruppo
+            # Show by group
             for parent, splits in splits_by_parent.items():
                 st.markdown(f"#### 📁 From: {parent}")
                 
@@ -865,7 +892,7 @@ def show():
                             st.write(f"• Variables: {info['data'].shape[1]}")
                             st.write(f"• Created: {info['creation_time'].strftime('%Y-%m-%d %H:%M:%S')}")
                             
-                            # Info aggiuntive se disponibili
+                            # Additional info if available
                             if 'selection_method' in info:
                                 st.write(f"• Selection: {info['selection_method']}")
                             if 'pc_axes' in info:
@@ -891,7 +918,7 @@ def show():
                                 st.success(f"Deleted: {name}")
                                 st.rerun()
             
-            # Bottone per pulire tutto
+            # Clear all splits button
             st.markdown("---")
             if st.button("🗑️ Clear All Splits", key="clear_all_splits"):
                 if st.session_state.get('confirm_clear_splits', False):
@@ -903,59 +930,107 @@ def show():
                     st.session_state.confirm_clear_splits = True
                     st.warning("⚠️ Click again to confirm deletion of all splits")
         
+        # Show Transformation History - ENHANCED
         if 'transformation_history' in st.session_state and st.session_state.transformation_history:
             st.markdown("---")
             st.markdown("### 🔬 Transformation History")
-            st.info(f"You have {len(st.session_state.transformation_history)} transformed datasets")
             
-            # Mostra trasformazioni per tipo
-            transforms_by_type = {}
+            # Count different types
+            originals = [name for name, info in st.session_state.transformation_history.items() if info.get('transform_type') == 'original']
+            transformations = [name for name, info in st.session_state.transformation_history.items() if info.get('transform_type') != 'original']
+            
+            st.info(f"📊 **Memory**: {len(originals)} original datasets • {len(transformations)} transformations")
+            
+            # Group transformations by original dataset
+            transforms_by_origin = {}
             for name, info in st.session_state.transformation_history.items():
-                transform_type = info.get('transform', 'Unknown')
-                if transform_type not in transforms_by_type:
-                    transforms_by_type[transform_type] = []
-                transforms_by_type[transform_type].append((name, info))
-            
-            for transform_type, transforms in transforms_by_type.items():
-                st.markdown(f"#### 🔧 {transform_type}")
+                if info.get('transform_type') == 'original':
+                    origin_key = name
+                else:
+                    origin_key = info.get('original_dataset', 'Unknown')
                 
-                for name, info in transforms:
-                    with st.expander(f"**{name}** ({info['data'].shape[0]} × {info['data'].shape[1]})"):
+                if origin_key not in transforms_by_origin:
+                    transforms_by_origin[origin_key] = {'original': None, 'transformations': []}
+                
+                if info.get('transform_type') == 'original':
+                    transforms_by_origin[origin_key]['original'] = (name, info)
+                else:
+                    transforms_by_origin[origin_key]['transformations'].append((name, info))
+            
+            # Display each original dataset and its transformations
+            for origin_key, group in transforms_by_origin.items():
+                
+                # Show original dataset
+                if group['original']:
+                    orig_name, orig_info = group['original']
+                    st.markdown(f"#### 📋 Original: {orig_name.replace('_ORIGINAL', '')}")
+                    
+                    with st.expander(f"**Original Data** ({orig_info['data'].shape[0]} × {orig_info['data'].shape[1]})"):
                         col1, col2 = st.columns(2)
                         
                         with col1:
-                            st.markdown("**Transform Info:**")
-                            st.write(f"• Type: {info['transform']}")
-                            st.write(f"• Shape: {info['data'].shape[0]} × {info['data'].shape[1]}")
-                            st.write(f"• Created: {info['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}")
-                            
-                            if 'params' in info and info['params']:
-                                st.write("**Parameters:**")
-                                for key, val in info['params'].items():
-                                    st.write(f"• {key}: {val}")
+                            st.markdown("**Dataset Info:**")
+                            st.write(f"• Status: {orig_info['transform']}")
+                            st.write(f"• Shape: {orig_info['data'].shape[0]} × {orig_info['data'].shape[1]}")
+                            st.write(f"• Loaded: {orig_info['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}")
+                            st.write(f"• Memory: {orig_info['data'].memory_usage(deep=True).sum() / 1024 / 1024:.1f} MB")
                         
                         with col2:
                             st.markdown("**Actions:**")
                             
-                            # Load button
-                            if st.button(f"📂 Load Dataset", key=f"load_transform_{name}", use_container_width=True):
-                                st.session_state.current_data = info['data']
-                                st.session_state.current_dataset = name
-                                st.success(f"✅ Loaded: {name}")
+                            # Load original
+                            if st.button(f"📂 Load Original", key=f"load_original_{orig_name}", use_container_width=True):
+                                st.session_state.current_data = orig_info['data']
+                                st.session_state.current_dataset = orig_name.replace('_ORIGINAL', '')
+                                st.success(f"✅ Loaded original dataset")
                                 st.rerun()
                             
-                            # Preview button
-                            if st.button(f"👁️ Preview", key=f"preview_transform_{name}", use_container_width=True):
-                                st.dataframe(info['data'].head(5), use_container_width=True)
+                            # Preview original
+                            if st.button(f"👁️ Preview Original", key=f"preview_original_{orig_name}", use_container_width=True):
+                                st.dataframe(orig_info['data'].head(5), use_container_width=True)
+                
+                # Show transformations
+                if group['transformations']:
+                    st.markdown(f"**🔄 Transformations ({len(group['transformations'])}):**")
+                    
+                    for name, info in group['transformations']:
+                        with st.expander(f"**{name.split('.')[-1]}** ({info['data'].shape[0]} × {info['data'].shape[1]})"):
+                            col1, col2 = st.columns(2)
                             
-                            # Delete button
-                            if st.button(f"🗑️ Delete", key=f"delete_transform_{name}", use_container_width=True):
-                                del st.session_state.transformation_history[name]
-                                st.success(f"Deleted: {name}")
-                                st.rerun()
+                            with col1:
+                                st.markdown("**Transform Info:**")
+                                st.write(f"• Type: {info['transform']}")
+                                st.write(f"• Shape: {info['data'].shape[0]} × {info['data'].shape[1]}")
+                                st.write(f"• Created: {info['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}")
+                                
+                                if 'params' in info and info['params']:
+                                    st.write("**Parameters:**")
+                                    for key, val in info['params'].items():
+                                        st.write(f"• {key}: {val}")
+                            
+                            with col2:
+                                st.markdown("**Actions:**")
+                                
+                                # Load transformation
+                                if st.button(f"📂 Load Dataset", key=f"load_transform_{name}", use_container_width=True):
+                                    st.session_state.current_data = info['data']
+                                    st.session_state.current_dataset = name
+                                    st.success(f"✅ Loaded: {name.split('.')[-1]}")
+                                    st.rerun()
+                                
+                                # Preview transformation
+                                if st.button(f"👁️ Preview", key=f"preview_transform_{name}", use_container_width=True):
+                                    st.dataframe(info['data'].head(5), use_container_width=True)
+                                
+                                # Delete transformation
+                                if st.button(f"🗑️ Delete", key=f"delete_transform_{name}", use_container_width=True):
+                                    del st.session_state.transformation_history[name]
+                                    st.success(f"Deleted: {name}")
+                                    st.rerun()
+                
+                st.markdown("---")
             
-            # Bottone per pulire tutto
-            st.markdown("---")
+            # Clear all transformations button
             if st.button("🗑️ Clear All Transformations", key="clear_all_transforms"):
                 if st.session_state.get('confirm_clear_transforms', False):
                     st.session_state.transformation_history = {}
@@ -965,9 +1040,10 @@ def show():
                 else:
                     st.session_state.confirm_clear_transforms = True
                     st.warning("⚠️ Click again to confirm deletion of all transformations")
-
         else:
-            st.info("No dataset splits saved yet. Use PCA Analysis → Scores Plots to create splits.")
+            st.info("📋 No dataset splits or transformations saved yet.")
+            st.info("• Use **PCA Analysis → Scores Plots** to create dataset splits")
+            st.info("• Use **Transformations** to create preprocessed datasets")
     
     # ===== DATASET OPERATIONS TAB =====
     with tab4:
@@ -1057,7 +1133,6 @@ def show():
                 
                 st.rerun()
 
-
     # ===== METADATA MANAGEMENT TAB =====
     with tab6:
         st.markdown("## Metadata Management")
@@ -1070,45 +1145,45 @@ def show():
             
             st.markdown("### Current Dataset Analysis")
             
-            # Analisi automatica del dataset
+            # Automatic dataset analysis
             col1, col2 = st.columns(2)
             
             with col1:
                 st.markdown("#### Variable Classification")
                 
-                # Classifica automaticamente le variabili
+                # Automatically classify variables
                 numeric_cols = data.select_dtypes(include=[np.number]).columns.tolist()
                 categorical_cols = data.select_dtypes(include=['object', 'category']).columns.tolist()
                 
-                # Euristica per identificare dati spettrali
-                # Algoritmo semplificato: se è un numero puro = spettrale, altrimenti = metadata
+                # Heuristic to identify spectral data
+                # Simplified algorithm: if it's a pure number = spectral, otherwise = metadata
                 potential_spectral = []
                 potential_metadata = []
                 
                 for col in numeric_cols:
                     col_str = str(col)
                     
-                    # Rimuovi spazi e controlla se è SOLO un numero
+                    # Remove spaces and check if it's ONLY a number
                     clean_col = col_str.strip()
                     
                     try:
-                        # Prova a convertire in float
+                        # Try to convert to float
                         num_val = float(clean_col)
                         
-                        # Se è un numero e sembra una wavelength/wavenumber, è spettrale
-                        # Range tipici: 400-2500 nm (NIR), 4000-400 cm-1 (IR), 200-800 nm (UV-Vis)
-                        if (200 <= num_val <= 25000):  # Range ampio per coprire tutte le spettroscopie
+                        # If it's a number and looks like wavelength/wavenumber, it's spectral
+                        # Typical ranges: 400-2500 nm (NIR), 4000-400 cm-1 (IR), 200-800 nm (UV-Vis)
+                        if (200 <= num_val <= 25000):  # Wide range to cover all spectroscopies
                             potential_spectral.append(col)
                         else:
-                            # Numero fuori range spettroscopico = metadata
+                            # Number outside spectroscopic range = metadata
                             potential_metadata.append(col)
                             
                     except ValueError:
-                        # Non è convertibile in numero = sicuramente metadata
-                        # (es: "Moisture", "Protein", "Sample_ID", "% (w/w) of Barley")
+                        # Not convertible to number = definitely metadata
+                        # (e.g.: "Moisture", "Protein", "Sample_ID", "% (w/w) of Barley")
                         potential_metadata.append(col)
                 
-                # Aggiungi categoriche a metadata
+                # Add categorical to metadata
                 potential_metadata.extend(categorical_cols)
                 
                 st.info(f"**Auto-detected:**")
@@ -1119,7 +1194,7 @@ def show():
             with col2:
                 st.markdown("#### Manual Variable Selection")
                 
-                # Selezione manuale
+                # Manual selection
                 st.markdown("**Mark as Metadata:**")
                 metadata_vars = st.multiselect(
                     "Select metadata/auxiliary variables:",
@@ -1133,7 +1208,7 @@ def show():
                 st.write(f"Spectral/measurement variables: {len(spectral_vars)}")
                 st.write(f"Metadata variables: {len(metadata_vars)}")
             
-            # Anteprima delle variabili
+            # Variable preview
             st.markdown("### Variable Preview")
             
             tab_spectral, tab_metadata = st.tabs(["Spectral Data", "Metadata"])
@@ -1150,7 +1225,7 @@ def show():
                     else:
                         st.dataframe(spectral_data.head(10), use_container_width=True)
                     
-                    # Statistics per dati spettrali
+                    # Statistics for spectral data
                     col_stat1, col_stat2, col_stat3 = st.columns(3)
                     with col_stat1:
                         st.metric("Min Value", f"{spectral_data.min().min():.4f}")
@@ -1167,7 +1242,7 @@ def show():
                     st.markdown(f"**Metadata Variables** ({len(metadata_vars)} variables)")
                     st.dataframe(metadata_data.head(10), use_container_width=True)
                     
-                    # Analisi metadata
+                    # Metadata analysis
                     st.markdown("#### Metadata Analysis")
                     for var in metadata_vars:
                         with st.expander(f"Variable: {var}"):
@@ -1191,11 +1266,11 @@ def show():
                 else:
                     st.info("No metadata variables selected")
             
-            # Salva classificazione
+            # Save classification
             st.markdown("### Save Classification")
             
             if st.button("Save Variable Classification"):
-                # Salva la classificazione nel session state
+                # Save classification to session state
                 if 'data_classification' not in st.session_state:
                     st.session_state.data_classification = {}
                 

@@ -1,5 +1,5 @@
 """
-CAT Transformations Page
+CAT Transformations Page - FIXED VERSION
 Complete suite for spectral/analytical data transformations
 Equivalent to TR_* R scripts
 """
@@ -9,7 +9,10 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from scipy.signal import savgol_filter
-from color_utils import get_unified_color_schemes, create_categorical_color_map
+# Import sistema di colori unificato
+from color_utils import (get_unified_color_schemes, create_categorical_color_map, 
+                        create_quantitative_color_map, is_quantitative_variable,
+                        get_continuous_color_for_value)
 
 # ===========================================
 # ROW TRANSFORMATIONS (Spectral/Analytical)
@@ -176,10 +179,9 @@ def block_scaling(data, blocks_config):
 # ===========================================
 
 def plot_comparison(original_data, transformed_data, title_original, title_transformed, 
-                   color_data=None, color_variable=None, dark_mode=True):
+                   color_data=None, color_variable=None):
     """Create two line plots for comparison"""
     
-    colors = get_unified_color_schemes(dark_mode)
     from plotly.subplots import make_subplots
     
     fig = make_subplots(
@@ -189,94 +191,186 @@ def plot_comparison(original_data, transformed_data, title_original, title_trans
     )
     
     if color_data is not None:
-        unique_values = pd.Series(color_data).dropna().unique()
-        color_discrete_map = create_categorical_color_map(unique_values, dark_mode)
+        # Converti color_data in lista per accesso facile con indici numerici
+        if hasattr(color_data, 'values'):
+            color_values = color_data.values
+        else:
+            color_values = list(color_data)
         
-        for group in unique_values:
-            group_mask = pd.Series(color_data) == group
-            group_color = color_discrete_map[group]
-            group_indices = original_data.index[group_mask].tolist()
-            first_idx = group_indices[0] if group_indices else None
+        # Determina se la variabile è quantitativa o categorica
+        is_quantitative = is_quantitative_variable(color_data)
+        
+        if is_quantitative:
+            # Variabile quantitativa: usa scala blu-rosso
+            color_data_series = pd.Series(color_values).dropna()
+            min_val = color_data_series.min()
+            max_val = color_data_series.max()
             
-            for idx in group_indices:
-                is_first = bool(idx == first_idx)
+            # Plot dei dati originali
+            for i, idx in enumerate(original_data.index):
+                if i < len(color_values) and pd.notna(color_values[i]):
+                    color = get_continuous_color_for_value(color_values[i], min_val, max_val, 'blue_to_red')
+                    hover_text = f'Sample: {idx}<br>{color_variable}: {color_values[i]:.3f}<br>Value: %{{y:.3f}}<extra></extra>'
+                else:
+                    color = 'rgb(128, 128, 128)'
+                    hover_text = f'Sample: {idx}<br>Value: %{{y:.3f}}<extra></extra>'
                 
                 fig.add_trace(
                     go.Scatter(
                         x=list(range(len(original_data.columns))),
-                        y=original_data.loc[idx].values,
+                        y=original_data.iloc[i].values,
                         mode='lines',
-                        name=str(group),
-                        line=dict(color=group_color, width=1),
-                        showlegend=is_first,
-                        legendgroup=str(group),
-                        hovertemplate=f'Sample: {idx}<br>Value: %{{y:.3f}}<extra></extra>'
+                        line=dict(color=color, width=1.5),
+                        showlegend=False,
+                        hovertemplate=hover_text
                     ),
                     row=1, col=1
                 )
             
-            transformed_indices = [idx for idx in group_indices if idx in transformed_data.index]
-            
-            for idx in transformed_indices:
+            # Plot dei dati trasformati
+            for i, idx in enumerate(transformed_data.index):
+                if i < len(color_values) and pd.notna(color_values[i]):
+                    color = get_continuous_color_for_value(color_values[i], min_val, max_val, 'blue_to_red')
+                    hover_text = f'Sample: {idx}<br>{color_variable}: {color_values[i]:.3f}<br>Value: %{{y:.3f}}<extra></extra>'
+                else:
+                    color = 'rgb(128, 128, 128)'
+                    hover_text = f'Sample: {idx}<br>Value: %{{y:.3f}}<extra></extra>'
+                
                 fig.add_trace(
                     go.Scatter(
                         x=list(range(len(transformed_data.columns))),
-                        y=transformed_data.loc[idx].values,
+                        y=transformed_data.iloc[i].values,
                         mode='lines',
-                        name=str(group),
-                        line=dict(color=group_color, width=1),
+                        line=dict(color=color, width=1.5),
                         showlegend=False,
-                        legendgroup=str(group),
-                        hovertemplate=f'Sample: {idx}<br>Value: %{{y:.3f}}<extra></extra>'
+                        hovertemplate=hover_text
                     ),
                     row=2, col=1
                 )
+            
+            # Aggiungi colorbar migliorata con valori e dettagli
+            n_ticks = 6
+            tick_vals = [min_val + i * (max_val - min_val) / (n_ticks - 1) for i in range(n_ticks)]
+            
+            fig.add_trace(
+                go.Scatter(
+                    x=[None], y=[None],
+                    mode='markers',
+                    marker=dict(
+                        colorscale=[[0, 'rgb(0,0,255)'], [1, 'rgb(255,0,0)']],
+                        cmin=min_val,
+                        cmax=max_val,
+                        colorbar=dict(
+                            title=dict(
+                                text=f"<b>{color_variable}</b>",
+                                side="right",
+                                font=dict(size=12)
+                            ),
+                            titleside="right",
+                            x=1.02,
+                            len=0.8,
+                            y=0.5,
+                            thickness=15,
+                            tickmode="array",
+                            tickvals=tick_vals,
+                            ticktext=[f"{val:.2f}" for val in tick_vals],
+                            tickfont=dict(size=10),
+                            showticklabels=True,
+                            ticks="outside",
+                            ticklen=5
+                        ),
+                        showscale=True
+                    ),
+                    showlegend=False
+                ),
+                row=1, col=1
+            )
+        
+        else:
+            # Variabile categorica: usa colori discreti
+            unique_values = pd.Series(color_values).dropna().unique()
+            color_discrete_map = create_categorical_color_map(unique_values)
+            
+            for group in unique_values:
+                group_indices = [i for i, val in enumerate(color_values) if val == group]
+                first_idx = group_indices[0] if group_indices else None
+                
+                for i in group_indices:
+                    is_first = bool(i == first_idx)
+                    if i < len(original_data):
+                        fig.add_trace(
+                            go.Scatter(
+                                x=list(range(len(original_data.columns))),
+                                y=original_data.iloc[i].values,
+                                mode='lines',
+                                name=str(group),
+                                line=dict(color=color_discrete_map[group], width=1),
+                                showlegend=is_first,
+                                legendgroup=str(group),
+                                hovertemplate=f'Sample: {original_data.index[i]}<br>{color_variable}: {group}<br>Value: %{{y:.3f}}<extra></extra>'
+                            ),
+                            row=1, col=1
+                        )
+                    
+                    if i < len(transformed_data):
+                        fig.add_trace(
+                            go.Scatter(
+                                x=list(range(len(transformed_data.columns))),
+                                y=transformed_data.iloc[i].values,
+                                mode='lines',
+                                name=str(group),
+                                line=dict(color=color_discrete_map[group], width=1),
+                                showlegend=False,
+                                legendgroup=str(group),
+                                hovertemplate=f'Sample: {transformed_data.index[i]}<br>{color_variable}: {group}<br>Value: %{{y:.3f}}<extra></extra>'
+                            ),
+                            row=2, col=1
+                        )
     else:
-        for idx in original_data.index:
+        # Nessuna colorazione
+        for i, idx in enumerate(original_data.index):
             fig.add_trace(
                 go.Scatter(
                     x=list(range(len(original_data.columns))),
-                    y=original_data.loc[idx].values,
+                    y=original_data.iloc[i].values,
                     mode='lines',
-                    name=str(idx),
-                    line=dict(color=colors['point_color'], width=1),
+                    line=dict(color='blue', width=1),
                     showlegend=False,
                     hovertemplate=f'Sample: {idx}<br>Value: %{{y:.3f}}<extra></extra>'
                 ),
                 row=1, col=1
             )
             
-            if idx in transformed_data.index:
+            if i < len(transformed_data):
                 fig.add_trace(
                     go.Scatter(
                         x=list(range(len(transformed_data.columns))),
-                        y=transformed_data.loc[idx].values,
+                        y=transformed_data.iloc[i].values,
                         mode='lines',
-                        name=str(idx),
-                        line=dict(color=colors['point_color'], width=1),
+                        line=dict(color='blue', width=1),
                         showlegend=False,
                         hovertemplate=f'Sample: {idx}<br>Value: %{{y:.3f}}<extra></extra>'
                     ),
                     row=2, col=1
                 )
     
-    fig.update_xaxes(title_text="Variable Index", row=1, col=1, gridcolor=colors['grid'])
-    fig.update_xaxes(title_text="Variable Index", row=2, col=1, gridcolor=colors['grid'])
-    fig.update_yaxes(title_text="Original Value", row=1, col=1, gridcolor=colors['grid'])
-    fig.update_yaxes(title_text="Transformed Value", row=2, col=1, gridcolor=colors['grid'])
+    fig.update_xaxes(title_text="Variable Index", row=1, col=1, gridcolor='lightgray')
+    fig.update_xaxes(title_text="Variable Index", row=2, col=1, gridcolor='lightgray')
+    fig.update_yaxes(title_text="Value", row=1, col=1, gridcolor='lightgray')
+    fig.update_yaxes(title_text="Value", row=2, col=1, gridcolor='lightgray')
     
     fig.update_layout(
         height=800,
-        plot_bgcolor=colors['background'],
-        paper_bgcolor=colors['paper'],
-        font=dict(color=colors['text']),
+        plot_bgcolor='rgba(0,0,0,0)',
+        paper_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='black'),
         hovermode='closest'
     )
     
     return fig
 
 # ===========================================
-# MAIN SHOW FUNCTION
+# MAIN SHOW FUNCTION - COMPLETELY FIXED
 # ===========================================
 
 def show():
@@ -284,7 +378,13 @@ def show():
     
     st.markdown("# Data Transformations")
     st.markdown("*Complete transformation suite for spectral and analytical data*")
-    st.markdown("*Equivalent to TR_* R scripts*")
+    
+    # Professional Services Note
+    st.info("""
+    💡 **Demo includes core transformations.** Professional versions include specialized transformations for different analytical techniques:
+    
+    🔧 **Contact:** [chemometricsolutions.com](https://chemometricsolutions.com)
+    """)
     
     if 'current_data' not in st.session_state:
         st.warning("No data loaded. Please go to Data Handling to load your dataset first.")
@@ -292,7 +392,7 @@ def show():
     
     data = st.session_state.current_data
     
-    # CRITICAL: Get original untransformed data for comparison
+    # Get original untransformed data for comparison
     original_dataset_name = st.session_state.get('current_dataset', 'Dataset')
     if original_dataset_name.endswith('_ORIGINAL'):
         original_data = data
@@ -393,6 +493,7 @@ def show():
                 st.warning(f"Number of variables ({n_vars}) must be multiple of bin width")
         
         st.markdown("### Visualization Options")
+        st.info("Professional light theme for clear data analysis")
         
         col_vis1, col_vis2 = st.columns(2)
         
@@ -408,9 +509,6 @@ def show():
             
             color_by = st.selectbox("Color profiles by:", all_color_options, key="row_transform_color")
         
-        with col_vis2:
-            use_dark_theme = st.checkbox("Dark mode colors", value=True, key="row_transform_dark")
-        
         color_data = None
         color_variable = None
         
@@ -423,6 +521,7 @@ def show():
             else:
                 color_data = data[color_by].reindex(data.index).fillna("Unknown")
         
+        # Store transformation results in session state to persist across save button clicks
         if st.button("Apply Transformation", type="primary", key="apply_row_transform"):
             try:
                 with st.spinner(f"Applying {selected_transform}..."):
@@ -444,90 +543,176 @@ def show():
                     elif transform_code == "bin":
                         transformed = binning_transform(data, col_range, params['bin_width'])
                     
-                    # CRITICAL: Always use original data for comparison
-                    original_slice = original_data.iloc[:, col_range[0]:col_range[1]]
+                    # Store in session state
+                    st.session_state.current_transform_result = {
+                        'transformed': transformed,
+                        'original_slice': original_data.iloc[:, col_range[0]:col_range[1]],
+                        'transform_code': transform_code,
+                        'selected_transform': selected_transform,
+                        'params': params,
+                        'col_range': col_range,
+                        'color_data': color_data,
+                        'color_variable': color_variable
+                    }
                     
-                    fig = plot_comparison(
-                        original_slice, 
-                        transformed,
-                        f"Original Data ({original_slice.shape[0]} × {original_slice.shape[1]})",
-                        f"Transformed Data ({transformed.shape[0]} × {transformed.shape[1]}) - {selected_transform}",
-                        color_data=color_data,
-                        color_variable=color_variable,
-                        dark_mode=use_dark_theme
-                    )
-                    
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                    # Statistics BEFORE saving
-                    st.markdown("### Transformation Statistics")
-                    
-                    col_stat1, col_stat2, col_stat3 = st.columns(3)
-                    
-                    with col_stat1:
-                        st.metric("Original Shape", f"{original_slice.shape[0]} × {original_slice.shape[1]}")
-                    with col_stat2:
-                        st.metric("Transformed Shape", f"{transformed.shape[0]} × {transformed.shape[1]}")
-                    with col_stat3:
-                        variance_ratio = transformed.var().mean() / original_slice.var().mean()
-                        st.metric("Variance Ratio", f"{variance_ratio:.3f}")
-                    
-                    # Save section - SEPARATED WITH BUTTON
-                    st.markdown("---")
-                    st.markdown("### Save Transformation")
-                    st.info("Review the transformation above, then save it to workspace if satisfied")
-                    
-                    if st.button("Save to Workspace", type="primary", key="save_row_transform"):
-                        full_transformed = data.copy()
-                        
-                        if transformed.shape[1] != (col_range[1] - col_range[0]):
-                            cols_before = list(range(col_range[0]))
-                            cols_after = list(range(col_range[1], len(data.columns)))
-                            
-                            if cols_before:
-                                before_data = data.iloc[:, cols_before]
-                            else:
-                                before_data = pd.DataFrame(index=data.index)
-                            
-                            if cols_after:
-                                after_data = data.iloc[:, cols_after]
-                            else:
-                                after_data = pd.DataFrame(index=data.index)
-                            
-                            if transformed.shape[0] != data.shape[0]:
-                                before_data = before_data.iloc[:transformed.shape[0], :]
-                                after_data = after_data.iloc[:transformed.shape[0], :]
-                            
-                            full_transformed = pd.concat([before_data, transformed, after_data], axis=1)
-                        else:
-                            full_transformed.iloc[:, col_range[0]:col_range[1]] = transformed
-                        
-                        dataset_name = st.session_state.get('current_dataset', 'Dataset')
-                        base_name = dataset_name.split('.')[0].replace('_ORIGINAL', '')
-                        transformed_name = f"{base_name}.{transform_code}"
-                        
-                        st.session_state.current_data = full_transformed
-                        st.session_state.current_dataset = transformed_name
-                        
-                        if 'transformation_history' not in st.session_state:
-                            st.session_state.transformation_history = {}
-                        
-                        st.session_state.transformation_history[transformed_name] = {
-                            'data': full_transformed,
-                            'transform': selected_transform,
-                            'params': params,
-                            'col_range': col_range,
-                            'timestamp': pd.Timestamp.now()
-                        }
-                        
-                        st.success(f"Transformation saved as: **{transformed_name}**")
-                        st.info("Dataset is now active in Data Handling and ready for PCA/DOE")
-                        st.rerun()
+                    st.success("Transformation applied successfully!")
                     
             except Exception as e:
                 st.error(f"Error applying transformation: {str(e)}")
                 import traceback
                 if st.checkbox("Show debug info", key="row_debug"):
+                    st.code(traceback.format_exc())
+        
+        # Display results if transformation has been applied
+        if 'current_transform_result' in st.session_state:
+            result = st.session_state.current_transform_result
+            
+            fig = plot_comparison(
+                result['original_slice'], 
+                result['transformed'],
+                f"Original Data ({result['original_slice'].shape[0]} × {result['original_slice'].shape[1]})",
+                f"Transformed Data ({result['transformed'].shape[0]} × {result['transformed'].shape[1]}) - {result['selected_transform']}",
+                color_data=result['color_data'],
+                color_variable=result['color_variable']
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Statistics
+            st.markdown("### Transformation Statistics")
+            
+            col_stat1, col_stat2, col_stat3 = st.columns(3)
+            
+            with col_stat1:
+                st.metric("Original Shape", f"{result['original_slice'].shape[0]} × {result['original_slice'].shape[1]}")
+            with col_stat2:
+                st.metric("Transformed Shape", f"{result['transformed'].shape[0]} × {result['transformed'].shape[1]}")
+            with col_stat3:
+                variance_ratio = result['transformed'].var().mean() / result['original_slice'].var().mean()
+                st.metric("Variance Ratio", f"{variance_ratio:.3f}")
+            
+            # Save section
+            st.markdown("---")
+            st.markdown("### Save Transformation")
+            st.info("Review the transformation above, then save it to workspace if satisfied")
+            
+            # FIXED SAVE LOGIC FOR ROW TRANSFORMATIONS
+            if st.button("Save to Workspace", type="primary", key="save_row_transform"):
+                try:
+                    # Ensure transformation_history exists
+                    if 'transformation_history' not in st.session_state:
+                        st.session_state.transformation_history = {}
+                    
+                    # Get current transformation result
+                    result = st.session_state.current_transform_result
+                    
+                    # CORREZIONE: Preserva SEMPRE la struttura originale del dataset
+                    full_transformed = data.copy()  # Copia completa del dataset originale
+                    transformed = result['transformed']
+                    col_range = result['col_range']
+                    
+                    # Handle shape changes properly - MA PRESERVA METADATA
+                    if transformed.shape[1] != (col_range[1] - col_range[0]):
+                        # Variables were removed (derivatives, etc.)
+                        
+                        # Handle row changes FIRST se necessario
+                        if transformed.shape[0] != data.shape[0]:
+                            # Row reduction (derivatives) - taglia tutto il dataset
+                            full_transformed = full_transformed.iloc[:transformed.shape[0], :].copy()
+                        
+                        # Calcola quante colonne sono state rimosse
+                        original_cols = col_range[1] - col_range[0]
+                        transformed_cols = transformed.shape[1]
+                        cols_removed = original_cols - transformed_cols
+                        
+                        if cols_removed > 0:
+                            # Alcune colonne sono state rimosse (es. derivate)
+                            # SOLUZIONE SEMPLIFICATA: Sostituisci le colonne trasformate e shifta le successive
+                            
+                            # Colonne prima della trasformazione: mantieni invariate
+                            before_data = full_transformed.iloc[:, :col_range[0]] if col_range[0] > 0 else pd.DataFrame(index=full_transformed.index)
+                            
+                            # Colonne dopo la trasformazione: shifta indietro
+                            after_start = col_range[1]
+                            if after_start < len(data.columns):
+                                after_data = full_transformed.iloc[:, after_start:]
+                            else:
+                                after_data = pd.DataFrame(index=full_transformed.index)
+                            
+                            # Concatena: before + transformed + after
+                            data_parts = []
+                            column_names = []
+                            
+                            if col_range[0] > 0:
+                                data_parts.append(before_data)
+                                column_names.extend(before_data.columns.tolist())
+                            
+                            data_parts.append(transformed)
+                            # Mantieni nomi originali per le colonne trasformate (se possibile)
+                            original_transform_cols = data.columns[col_range[0]:col_range[0]+transformed.shape[1]]
+                            column_names.extend(original_transform_cols.tolist())
+                            
+                            if after_start < len(data.columns):
+                                data_parts.append(after_data)
+                                column_names.extend(after_data.columns.tolist())
+                            
+                            # Combina tutto
+                            full_transformed = pd.concat(data_parts, axis=1)
+                            full_transformed.columns = column_names
+                        else:
+                            # Nessuna colonna rimossa - semplice sostituzione
+                            full_transformed.iloc[:, col_range[0]:col_range[1]] = transformed
+                            
+                    else:
+                        # NO shape changes - semplice sostituzione
+                        if transformed.shape[0] != data.shape[0]:
+                            # Handle row reduction (derivatives)
+                            full_transformed = full_transformed.iloc[:transformed.shape[0], :].copy()
+                        
+                        # SOSTITUISCI SOLO LE COLONNE TRASFORMATE
+                        full_transformed.iloc[:, col_range[0]:col_range[1]] = transformed
+                    
+                    # Create transformation name
+                    dataset_name = st.session_state.get('current_dataset', 'Dataset')
+                    base_name = dataset_name.split('.')[0].replace('_ORIGINAL', '')
+                    transformed_name = f"{base_name}.{result['transform_code']}"
+                    
+                    # Save to workspace with all required metadata
+                    st.session_state.transformation_history[transformed_name] = {
+                        'data': full_transformed,
+                        'transform': result['selected_transform'],
+                        'params': result['params'],
+                        'col_range': col_range,
+                        'timestamp': pd.Timestamp.now(),
+                        'original_dataset': dataset_name,
+                        'transform_type': 'row_transformation'
+                    }
+                    
+                    # Update current data
+                    st.session_state.current_data = full_transformed
+                    st.session_state.current_dataset = transformed_name
+                    
+                    # Clear the transformation result
+                    del st.session_state.current_transform_result
+                    
+                    # Show success messages
+                    st.success(f"✅ Transformation saved as: **{transformed_name}**")
+                    st.info("📊 Dataset is now active in Data Handling and ready for PCA/DOE")
+                    st.info(f"🔒 **Structure preserved**: All metadata columns maintained")
+                    
+                    # Debug info
+                    st.write(f"DEBUG: Saved shape: {full_transformed.shape}")
+                    st.write(f"DEBUG: Columns preserved: {full_transformed.columns.tolist()[:5]}...")
+                    
+                    # Force refresh of the interface
+                    st.rerun()
+                    
+                except Exception as e:
+                    st.error(f"❌ Error saving transformation: {str(e)}")
+                    st.error("Please try applying the transformation again")
+                    
+                    # Debug traceback
+                    import traceback
                     st.code(traceback.format_exc())
     
     # ===== COLUMN TRANSFORMATIONS TAB =====
@@ -561,6 +746,7 @@ def show():
         
         st.markdown("### Variable Selection")
         
+        # Reuse variables from row transformations
         st.info(f"Dataset: {len(all_columns)} total columns, {len(numeric_columns)} numeric (positions {first_numeric_pos}-{last_numeric_pos})")
         
         col1_sel, col2_sel = st.columns(2)
@@ -643,92 +829,175 @@ def show():
                     elif transform_code_col == "blsc":
                         transformed_col = block_scaling(data, params_col['blocks'])
                     
-                    # CRITICAL: Always use original data for comparison
+                    # Store in session state
                     if transform_code_col != "blsc":
                         original_slice_col = original_data.iloc[:, col_range_c[0]:col_range_c[1]]
                     else:
                         original_slice_col = original_data
                     
-                    fig_col = plot_comparison(
-                        original_slice_col,
-                        transformed_col,
-                        f"Original Data ({original_slice_col.shape[0]} × {original_slice_col.shape[1]})",
-                        f"Transformed Data ({transformed_col.shape[0]} × {transformed_col.shape[1]}) - {selected_transform_col}",
-                        dark_mode=use_dark_theme_col
-                    )
+                    st.session_state.current_col_transform_result = {
+                        'transformed_col': transformed_col,
+                        'original_slice_col': original_slice_col,
+                        'transform_code_col': transform_code_col,
+                        'selected_transform_col': selected_transform_col,
+                        'params_col': params_col,
+                        'col_range_c': col_range_c
+                    }
                     
-                    st.plotly_chart(fig_col, use_container_width=True)
-                    
-                    # Statistics BEFORE saving
-                    st.markdown("### Transformation Statistics")
-                    
-                    col_stat1, col_stat2, col_stat3 = st.columns(3)
-                    
-                    with col_stat1:
-                        st.metric("Original Shape", f"{original_slice_col.shape[0]} × {original_slice_col.shape[1]}")
-                    with col_stat2:
-                        st.metric("Transformed Shape", f"{transformed_col.shape[0]} × {transformed_col.shape[1]}")
-                    with col_stat3:
-                        mean_val = transformed_col.mean().mean()
-                        st.metric("Mean Value", f"{mean_val:.3f}")
-                    
-                    # Save section - SEPARATED WITH BUTTON
-                    st.markdown("---")
-                    st.markdown("### Save Transformation")
-                    st.info("Review the transformation above, then save it to workspace if satisfied")
-                    
-                    if st.button("Save to Workspace", type="primary", key="save_col_transform"):
-                        full_transformed_col = data.copy()
-                        
-                        if transform_code_col == "blsc":
-                            full_transformed_col = transformed_col
-                        else:
-                            if transformed_col.shape != original_slice_col.shape:
-                                if transformed_col.shape[0] != original_slice_col.shape[0]:
-                                    full_transformed_col = full_transformed_col.iloc[:transformed_col.shape[0], :]
-                            
-                            full_transformed_col.iloc[:, col_range_c[0]:col_range_c[1]] = transformed_col
-                        
-                        dataset_name = st.session_state.get('current_dataset', 'Dataset')
-                        base_name = dataset_name.split('.')[0].replace('_ORIGINAL', '')
-                        transformed_name_col = f"{base_name}.{transform_code_col}"
-                        
-                        st.session_state.current_data = full_transformed_col
-                        st.session_state.current_dataset = transformed_name_col
-                        
-                        if 'transformation_history' not in st.session_state:
-                            st.session_state.transformation_history = {}
-                        
-                        st.session_state.transformation_history[transformed_name_col] = {
-                            'data': full_transformed_col,
-                            'transform': selected_transform_col,
-                            'params': params_col,
-                            'col_range': col_range_c,
-                            'timestamp': pd.Timestamp.now()
-                        }
-                        
-                        st.success(f"Transformation saved as: **{transformed_name_col}**")
-                        st.info("Dataset is now active and ready for PCA/DOE")
-                        st.rerun()
+                    st.success("Column transformation applied successfully!")
                     
             except Exception as e:
                 st.error(f"Error applying transformation: {str(e)}")
                 import traceback
                 if st.checkbox("Show debug info", key="col_debug"):
                     st.code(traceback.format_exc())
+        
+        # Display column transformation results
+        if 'current_col_transform_result' in st.session_state:
+            result_col = st.session_state.current_col_transform_result
+            
+            fig_col = plot_comparison(
+                result_col['original_slice_col'],
+                result_col['transformed_col'],
+                f"Original Data ({result_col['original_slice_col'].shape[0]} × {result_col['original_slice_col'].shape[1]})",
+                f"Transformed Data ({result_col['transformed_col'].shape[0]} × {result_col['transformed_col'].shape[1]}) - {result_col['selected_transform_col']}"
+            )
+            
+            st.plotly_chart(fig_col, use_container_width=True)
+            
+            # Statistics
+            st.markdown("### Transformation Statistics")
+            
+            col_stat1, col_stat2, col_stat3 = st.columns(3)
+            
+            with col_stat1:
+                st.metric("Original Shape", f"{result_col['original_slice_col'].shape[0]} × {result_col['original_slice_col'].shape[1]}")
+            with col_stat2:
+                st.metric("Transformed Shape", f"{result_col['transformed_col'].shape[0]} × {result_col['transformed_col'].shape[1]}")
+            with col_stat3:
+                mean_val = result_col['transformed_col'].mean().mean()
+                st.metric("Mean Value", f"{mean_val:.3f}")
+            
+            # Save section
+            st.markdown("---")
+            st.markdown("### Save Transformation")
+            st.info("Review the transformation above, then save it to workspace if satisfied")
+            
+            # FIXED SAVE LOGIC FOR COLUMN TRANSFORMATIONS
+            if st.button("Save to Workspace", type="primary", key="save_col_transform"):
+                try:
+                    # Ensure transformation_history exists
+                    if 'transformation_history' not in st.session_state:
+                        st.session_state.transformation_history = {}
+                    
+                    # Get current transformation result
+                    result_col = st.session_state.current_col_transform_result
+                    
+                    # CORREZIONE: Preserva SEMPRE la struttura originale del dataset
+                    full_transformed_col = data.copy()  # Copia completa del dataset originale
+                    transformed_col = result_col['transformed_col']
+                    transform_code_col = result_col['transform_code_col']
+                    col_range_c = result_col['col_range_c']
+                    
+                    if transform_code_col == "blsc":
+                        # Block scaling affects entire dataset - CASO SPECIALE
+                        full_transformed_col = transformed_col
+                    else:
+                        # Handle shape changes - MA PRESERVA METADATA
+                        if transformed_col.shape[0] != data.shape[0]:
+                            # Row reduction (column derivatives)
+                            full_transformed_col = full_transformed_col.iloc[:transformed_col.shape[0], :].copy()
+                        
+                        # SOSTITUISCI SOLO LE COLONNE TRASFORMATE - MANTIENI TUTTO IL RESTO
+                        full_transformed_col.iloc[:, col_range_c[0]:col_range_c[1]] = transformed_col
+                    
+                    # Create transformation name
+                    dataset_name = st.session_state.get('current_dataset', 'Dataset')
+                    base_name = dataset_name.split('.')[0].replace('_ORIGINAL', '')
+                    transformed_name_col = f"{base_name}.{transform_code_col}"
+                    
+                    # Save to workspace with all required metadata
+                    st.session_state.transformation_history[transformed_name_col] = {
+                        'data': full_transformed_col,
+                        'transform': result_col['selected_transform_col'],
+                        'params': result_col['params_col'],
+                        'col_range': col_range_c,
+                        'timestamp': pd.Timestamp.now(),
+                        'original_dataset': dataset_name,
+                        'transform_type': 'column_transformation'
+                    }
+                    
+                    # Update current data
+                    st.session_state.current_data = full_transformed_col
+                    st.session_state.current_dataset = transformed_name_col
+                    
+                    # Clear the transformation result
+                    del st.session_state.current_col_transform_result
+                    
+                    # Show success messages
+                    st.success(f"✅ Transformation saved as: **{transformed_name_col}**")
+                    st.info("📊 Dataset is now active and ready for PCA/DOE")
+                    st.info(f"🔒 **Structure preserved**: All metadata columns maintained")
+                    
+                    # Debug info
+                    st.write(f"DEBUG: Saved shape: {full_transformed_col.shape}")
+                    st.write(f"DEBUG: Columns preserved: {full_transformed_col.columns.tolist()[:5]}...")
+                    
+                    # Force refresh of the interface
+                    st.rerun()
+                    
+                except Exception as e:
+                    st.error(f"❌ Error saving transformation: {str(e)}")
+                    st.error("Please try applying the transformation again")
+                    
+                    # Debug traceback
+                    import traceback
+                    st.code(traceback.format_exc())
     
+    # IMPORTANTE: Posiziona la sidebar FUORI dai tabs
+    display_transformation_sidebar()
+
+def display_transformation_sidebar():
+    """Display transformation history in sidebar - VERSIONE CORRETTA"""
     if 'transformation_history' in st.session_state and st.session_state.transformation_history:
         with st.sidebar:
-            st.markdown("### Transformation History")
+            st.markdown("### 🔬 Transformation History")
             
-            for name, info in st.session_state.transformation_history.items():
-                with st.expander(name):
-                    st.write(f"**Transform:** {info['transform']}")
+            # Debug info
+            st.write(f"Total transformations: {len(st.session_state.transformation_history)}")
+            
+            # Show recent transformations (last 5)
+            recent_transforms = sorted(
+                st.session_state.transformation_history.items(),
+                key=lambda x: x[1]['timestamp'],
+                reverse=True
+            )[:5]
+            
+            for name, info in recent_transforms:
+                # Create a cleaner display name
+                display_name = name.split('.')[-1] if '.' in name else name
+                
+                with st.expander(f"**{display_name}**", expanded=False):
+                    st.write(f"**Transform:** {info.get('transform', 'Unknown')}")
                     st.write(f"**Shape:** {info['data'].shape[0]} × {info['data'].shape[1]}")
                     st.write(f"**Time:** {info['timestamp'].strftime('%H:%M:%S')}")
                     
-                    if st.button(f"Load {name}", key=f"load_{name}"):
+                    # Load button with unique key
+                    button_key = f"sidebar_load_{name.replace('.', '_').replace(' ', '_')}"
+                    if st.button(f"Load {display_name}", key=button_key):
                         st.session_state.current_data = info['data']
                         st.session_state.current_dataset = name
-                        st.success(f"Loaded: {name}")
+                        st.success(f"✅ Loaded: {display_name}")
                         st.rerun()
+            
+            if len(st.session_state.transformation_history) > 5:
+                st.info(f"+ {len(st.session_state.transformation_history) - 5} more in workspace")
+    else:
+        # Debug per capire perché non appare
+        with st.sidebar:
+            st.markdown("### 🔬 Transformation History")
+            st.write("No transformations saved yet")
+            if 'transformation_history' in st.session_state:
+                st.write(f"History exists but empty: {len(st.session_state.transformation_history)} items")
+            else:
+                st.write("transformation_history not in session_state")

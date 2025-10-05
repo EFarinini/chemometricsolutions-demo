@@ -1,21 +1,20 @@
 """
 Unified Color Mapping System for PCA Analysis
-Consistent color schemes for both pca.py and pca_diagnostics_complete.py
+Light theme only - simplified color system
 """
 
-def get_unified_color_schemes(dark_mode=False):
+import numpy as np
+import pandas as pd
+
+def get_unified_color_schemes():
     """
-    Unified color schemes for consistent theming across PCA modules
-    Returns both categorical colors and plot styling colors
-    
-    Args:
-        dark_mode (bool): If True, returns dark mode colors, else light mode
+    Unified color schemes for light theme only
     
     Returns:
         dict: Complete color scheme with categorical colors and plot styling
     """
     
-    # Colori per tema chiaro (sfondo bianco) - da PCA.py
+    # Colori per tema chiaro (sfondo bianco)
     light_theme_colors = [
         'black', 'red', 'green', 'blue', 'orange', 'purple', 'brown', 'hotpink', 
         'gray', 'olive', 'cyan', 'magenta', 'gold', 'navy', 'darkgreen', 'darkred', 
@@ -23,68 +22,38 @@ def get_unified_color_schemes(dark_mode=False):
         'darkslategray', 'royalblue', 'saddlebrown'
     ]
     
-    # Colori per tema scuro (sfondo nero/grigio scuro) - da PCA.py
-    dark_theme_colors = [
-        'white', 'lightcoral', 'lightgreen', 'lightblue', 'orange', 'violet', 'tan', 
-        'hotpink', 'lightgray', 'yellowgreen', 'cyan', 'magenta', 'gold', 'cornflowerblue', 
-        'lime', 'tomato', 'mediumpurple', 'coral', 'turquoise', 'sandybrown', 'crimson', 
-        'plum', 'darkorange', 'lightsteelblue', 'royalblue', 'wheat'
-    ]
-    
-    if dark_mode:
-        return {
-            # Plot styling colors for diagnostics
-            'background': 'rgba(0,0,0,0)',  # Transparent - let Streamlit handle
-            'paper': 'rgba(0,0,0,0)', 
-            'text': '#ffffff',
-            'grid': '#404040',
-            'control_colors': ['lime', 'orange', 'red'],  # Bright colors for dark theme
-            'point_color': 'lightblue',
-            'line_colors': ['lightblue', 'lightcoral'],
-            
-            # Categorical colors for data points
-            'categorical_colors': dark_theme_colors,
-            
-            # Color mapping dictionary (for backward compatibility)
-            'color_map': {chr(65+i): color for i, color in enumerate(dark_theme_colors)},
-            
-            # Theme identifier
-            'theme': 'dark'
-        }
-    else:
-        return {
-            # Plot styling colors for diagnostics
-            'background': 'rgba(0,0,0,0)',  # Transparent - let Streamlit handle
-            'paper': 'rgba(0,0,0,0)', 
-            'text': 'black',
-            'grid': '#e6e6e6',
-            'control_colors': ['green', 'orange', 'red'],  # Standard colors for light theme
-            'point_color': 'blue',
-            'line_colors': ['blue', 'red'],
-            
-            # Categorical colors for data points
-            'categorical_colors': light_theme_colors,
-            
-            # Color mapping dictionary (for backward compatibility)
-            'color_map': {chr(65+i): color for i, color in enumerate(light_theme_colors)},
-            
-            # Theme identifier
-            'theme': 'light'
-        }
+    return {
+        # Plot styling colors
+        'background': 'white',
+        'paper': 'white', 
+        'text': 'black',
+        'grid': '#e6e6e6',
+        'control_colors': ['green', 'orange', 'red'],  # Standard colors for light theme
+        'point_color': 'blue',
+        'line_colors': ['blue', 'red'],
+        
+        # Categorical colors for data points
+        'categorical_colors': light_theme_colors,
+        
+        # Color mapping dictionary (for backward compatibility)
+        'color_map': {chr(65+i): color for i, color in enumerate(light_theme_colors)},
+        
+        # Theme identifier
+        'theme': 'light'
+    }
 
 
-def create_categorical_color_map(unique_values, dark_mode=False):
+def create_categorical_color_map(unique_values):
     """
     Create a color mapping for categorical variables
     
     Args:
         unique_values (list): List of unique categorical values
-        dark_mode (bool): Whether to use dark mode colors
     
     Returns:
         dict: Mapping of values to colors
     """
-    color_scheme = get_unified_color_schemes(dark_mode)
+    color_scheme = get_unified_color_schemes()
     colors = color_scheme['categorical_colors']
     
     # Create mapping for unique values
@@ -100,113 +69,140 @@ def create_categorical_color_map(unique_values, dark_mode=False):
     return color_discrete_map
 
 
-# Updated function for pca_diagnostics_complete.py
-def get_color_schemes(dark_mode=False):
+def create_quantitative_color_map(values, colorscale='blue_to_red'):
     """
-    UPDATED VERSION - now uses unified color system
-    Get color schemes for light and dark modes - using exact PCA.py colors
-    """
-    return get_unified_color_schemes(dark_mode)
-
-
-# Updated function for pca.py
-def get_custom_color_map(theme='auto'):
-    """
-    UPDATED VERSION - now uses unified color system
-    Mappa colori personalizzata per variabili categoriche
-    theme: 'light', 'dark', o 'auto'
-    """
-    if theme == 'light':
-        return get_unified_color_schemes(dark_mode=False)['color_map']
-    elif theme == 'dark':
-        return get_unified_color_schemes(dark_mode=True)['color_map']
-    else:
-        # Auto: usa tema scuro come default (più comune)
-        return get_unified_color_schemes(dark_mode=True)['color_map']
-
-
-# Helper function for creating plotly scatter plots with consistent colors
-def create_scatter_with_unified_colors(x, y, color_data=None, dark_mode=False, **kwargs):
-    """
-    Create a plotly scatter plot with unified color scheme
+    Create a color mapping for quantitative variables
+    Genera una scala cromatica continua dal blu puro al rosso puro
     
     Args:
-        x, y: Data for scatter plot
-        color_data: Categorical data for coloring points
-        dark_mode: Whether to use dark mode colors
-        **kwargs: Additional arguments for px.scatter
+        values (array-like): Array of quantitative values
+        colorscale (str): Type of color scale ('blue_to_red', 'viridis', etc.)
     
     Returns:
-        plotly figure with consistent colors
+        dict: Mapping of values to RGB colors
     """
-    import plotly.express as px
-    import pandas as pd
+    values = pd.Series(values).dropna()
     
-    if color_data is not None:
-        unique_values = pd.Series(color_data).dropna().unique()
-        color_discrete_map = create_categorical_color_map(unique_values, dark_mode)
+    if len(values) == 0:
+        return {}
+    
+    # Normalizza i valori tra 0 e 1
+    min_val = values.min()
+    max_val = values.max()
+    
+    if min_val == max_val:
+        # Tutti i valori sono uguali, usa un colore singolo
+        return {val: 'rgb(128, 0, 128)' for val in values.unique()}
+    
+    normalized_values = (values - min_val) / (max_val - min_val)
+    
+    color_map = {}
+    
+    for i, val in enumerate(values):
+        if pd.isna(val):
+            color_map[val] = 'rgb(128, 128, 128)'  # Grigio per valori mancanti
+            continue
+            
+        norm_val = normalized_values.iloc[i]
         
-        return px.scatter(
-            x=x, y=y, color=color_data,
-            color_discrete_map=color_discrete_map,
-            **kwargs
-        )
-    else:
-        color_scheme = get_unified_color_schemes(dark_mode)
-        return px.scatter(
-            x=x, y=y,
-            color_discrete_sequence=[color_scheme['point_color']],
-            **kwargs
-        )
+        if colorscale == 'blue_to_red':
+            # Scala dal blu puro (0) al rosso puro (1)
+            r = int(255 * norm_val)
+            g = 0
+            b = int(255 * (1 - norm_val))
+            color_map[val] = f'rgb({r},{g},{b})'
+        
+        elif colorscale == 'viridis':
+            # Scala viridis approssimata
+            if norm_val < 0.25:
+                r, g, b = int(68 + norm_val * 4 * (85-68)), int(1 + norm_val * 4 * (104-1)), int(84 + norm_val * 4 * (109-84))
+            elif norm_val < 0.5:
+                r, g, b = int(85 + (norm_val-0.25) * 4 * (59-85)), int(104 + (norm_val-0.25) * 4 * (142-104)), int(109 + (norm_val-0.25) * 4 * (140-109))
+            elif norm_val < 0.75:
+                r, g, b = int(59 + (norm_val-0.5) * 4 * (94-59)), int(142 + (norm_val-0.5) * 4 * (201-142)), int(140 + (norm_val-0.5) * 4 * (98-140))
+            else:
+                r, g, b = int(94 + (norm_val-0.75) * 4 * (253-94)), int(201 + (norm_val-0.75) * 4 * (231-201)), int(98 + (norm_val-0.75) * 4 * (37-98))
+            
+            color_map[val] = f'rgb({r},{g},{b})'
+        
+        else:
+            # Default: blue to red
+            r = int(255 * norm_val)
+            g = 0
+            b = int(255 * (1 - norm_val))
+            color_map[val] = f'rgb({r},{g},{b})'
+    
+    return color_map
 
 
-# Example usage and integration instructions
-def integration_example():
+def get_continuous_color_for_value(value, min_val, max_val, colorscale='blue_to_red'):
     """
-    Example of how to integrate this unified system
+    Get a single color for a specific value in a continuous range
+    
+    Args:
+        value (float): The value to get color for
+        min_val (float): Minimum value in the range
+        max_val (float): Maximum value in the range
+        colorscale (str): Color scale type
+    
+    Returns:
+        str: RGB color string
     """
+    if pd.isna(value):
+        return 'rgb(128, 128, 128)'
     
-    # For pca.py - replace existing get_custom_color_map function
-    # def get_custom_color_map(theme='auto'):
-    #     return get_custom_color_map(theme)  # Use the updated version above
+    if min_val == max_val:
+        return 'rgb(128, 0, 128)'
     
-    # For pca_diagnostics_complete.py - replace existing get_color_schemes function  
-    # def get_color_schemes(dark_mode=False):
-    #     return get_color_schemes(dark_mode)  # Use the updated version above
+    # Normalizza il valore
+    norm_val = (value - min_val) / (max_val - min_val)
+    norm_val = max(0, min(1, norm_val))  # Clamp tra 0 e 1
     
-    # Example usage in both files:
-    dark_mode = True  # or False
-    color_scheme = get_unified_color_schemes(dark_mode)
+    if colorscale == 'blue_to_red':
+        # Scala dal blu puro al rosso puro
+        r = int(255 * norm_val)
+        g = 0
+        b = int(255 * (1 - norm_val))
+        return f'rgb({r},{g},{b})'
     
-    # For categorical data coloring
-    unique_categories = ['A', 'B', 'C', 'D']
-    color_map = create_categorical_color_map(unique_categories, dark_mode)
-    
-    # For plot styling
-    plot_colors = color_scheme['control_colors']  # For control lines
-    point_color = color_scheme['point_color']     # For single-color points
-    
-    print(f"Theme: {color_scheme['theme']}")
-    print(f"Categorical colors available: {len(color_scheme['categorical_colors'])}")
-    print(f"Color map for categories: {color_map}")
-    
-    return color_scheme, color_map
+    # Default
+    r = int(255 * norm_val)
+    g = 0
+    b = int(255 * (1 - norm_val))
+    return f'rgb({r},{g},{b})'
 
 
-# Test the unified system
-if __name__ == "__main__":
-    print("=== Unified Color System Test ===")
+def is_quantitative_variable(data):
+    """
+    Determine if a variable is quantitative (numeric and continuous)
     
-    # Test light mode
-    print("\nLight Mode:")
-    light_scheme, light_map = integration_example()
+    Args:
+        data (pd.Series or array-like): Data to check
     
-    # Test dark mode  
-    print("\nDark Mode:")
-    dark_mode = True
-    dark_scheme = get_unified_color_schemes(dark_mode)
-    dark_map = create_categorical_color_map(['Group1', 'Group2', 'Group3'], dark_mode)
-    print(f"Theme: {dark_scheme['theme']}")
-    print(f"Color map: {dark_map}")
+    Returns:
+        bool: True if quantitative, False if categorical
+    """
+    if not hasattr(data, 'dtype'):
+        data = pd.Series(data)
     
-    print("\n=== Integration Complete ===")
+    # Check if numeric
+    if not pd.api.types.is_numeric_dtype(data):
+        return False
+    
+    # Check if too many unique values suggest continuous data
+    n_unique = data.nunique()
+    n_total = len(data.dropna())
+    
+    if n_total == 0:
+        return False
+    
+    # If more than 50% unique values, consider it continuous
+    # Or if more than 20 unique values
+    return (n_unique / n_total > 0.5) or (n_unique > 20)
+
+
+def get_custom_color_map():
+    """
+    Mappa colori personalizzata per variabili categoriche - VERSIONE UNIFICATA
+    """
+    return get_unified_color_schemes()['color_map']
