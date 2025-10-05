@@ -590,7 +590,7 @@ def show():
         st.markdown("### 👁️ Data Preview")
         with st.expander("Show current dataset", expanded=True):
             # Full scrollable dataframe
-            st.dataframe(data, use_container_width=True, height=400)
+            st.dataframe(data, width='stretch', height=400)
             
             col_info1, col_info2, col_info3 = st.columns(3)
             with col_info1:
@@ -691,7 +691,7 @@ def show():
             # Show selected samples preview
             if len(selected_samples) < len(data):
                 with st.expander("Preview selected samples"):
-                    st.dataframe(data.loc[selected_samples].head(10), use_container_width=True)
+                    st.dataframe(data.loc[selected_samples].head(10), width='stretch')
         
         st.markdown("---")
         
@@ -732,7 +732,7 @@ def show():
             # Editable matrix
             edited_matrix = st.data_editor(
                 interaction_df,
-                use_container_width=True,
+                width='stretch',
                 hide_index=False
             )
             
@@ -870,7 +870,7 @@ def show():
                             })
                         
                         rep_df = pd.DataFrame(rep_data)
-                        st.dataframe(rep_df, use_container_width=True)
+                        st.dataframe(rep_df, width='stretch')
                         
                         st.markdown(f"""
                         **Pooled Standard Deviation Formula:**
@@ -1051,7 +1051,7 @@ def show():
                             for col in central_X.columns:
                                 central_display[col] = central_X[col].values
                             
-                            st.dataframe(central_display, use_container_width=True)
+                            st.dataframe(central_display, width='stretch')
                             
                         st.info("""
                         **Central Point Validation**: Use these points for model validation in the Predictions tab.
@@ -1088,7 +1088,7 @@ def show():
                             })
                         
                         rep_df = pd.DataFrame(rep_data)
-                        st.dataframe(rep_df, use_container_width=True)
+                        st.dataframe(rep_df, width='stretch')
                     
                     st.info(f"""
                     **Model Data Experimental Error** = {replicate_info['pooled_std']:.4f} 
@@ -1174,7 +1174,7 @@ def show():
                     index=model_results['X'].columns,
                     columns=model_results['X'].columns
                 )
-                st.dataframe(dispersion_df.round(4), use_container_width=True)
+                st.dataframe(dispersion_df.round(4), width='stretch')
                 
                 trace = np.trace(model_results['XtX_inv'])
                 st.info(f"**Trace of Dispersion Matrix:** {trace:.4f}")
@@ -1200,7 +1200,7 @@ def show():
                                 return "❌ High multicollinearity"
                         
                         vif_df_clean['Interpretation'] = vif_df_clean['VIF'].apply(interpret_vif)
-                        st.dataframe(vif_df_clean.round(4), use_container_width=True)
+                        st.dataframe(vif_df_clean.round(4), width='stretch')
                         
                         st.info("""
                         **VIF Interpretation:**
@@ -1216,7 +1216,7 @@ def show():
                 # Leverage
                 st.markdown("#### Leverage of Experimental Points")
                 leverage_series = pd.Series(model_results['leverage'], index=range(1, len(model_results['leverage'])+1))
-                st.dataframe(leverage_series.to_frame('Leverage').T.round(4), use_container_width=True)
+                st.dataframe(leverage_series.to_frame('Leverage').T.round(4), width='stretch')
                 st.info(f"**Maximum Leverage:** {model_results['leverage'].max():.4f}")
 
                 # Comparison between model error and experimental error
@@ -1266,7 +1266,7 @@ def show():
                     
                     coef_df['Sig.'] = coef_df['p-value'].apply(add_stars)
 
-                st.dataframe(coef_df.round(4), use_container_width=True)
+                st.dataframe(coef_df.round(4), width='stretch')
                 st.info("Significance codes: *** p≤0.001, ** p≤0.01, * p≤0.05")
 
                 # Coefficients bar plot
@@ -1354,7 +1354,7 @@ def show():
                         yaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='gray')
                     )
                     
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width='stretch')
                     
                     st.markdown("""
                     **Color legend:** 
@@ -1448,7 +1448,7 @@ def show():
                     showlegend=True
                 )
                 
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
                 
                 # Statistics
                 col1, col2, col3 = st.columns(3)
@@ -1487,7 +1487,7 @@ def show():
                     showlegend=False
                 )
                 
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             
             elif diagnostic_type == "📐 Coefficients Bar Plot":
                 st.markdown("### 📐 Model Coefficients")
@@ -1553,7 +1553,7 @@ def show():
                         xaxis={'tickangle': 45}
                     )
                     
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width='stretch')
                     
                     st.info("Red=Linear, Green=Interactions, Cyan=Quadratic")
                     st.info("Significance: *** p≤0.001, ** p≤0.01, * p≤0.05")
@@ -1661,7 +1661,7 @@ def show():
                 
                 # Display
                 st.markdown("### Generated Design Matrix")
-                st.dataframe(candidate_points, use_container_width=True)
+                st.dataframe(candidate_points, width='stretch')
                 
                 # Statistics
                 col1, col2, col3 = st.columns(3)
@@ -1716,7 +1716,7 @@ def show():
             
             for name, df in export_options.items():
                 with st.expander(f"{name} ({df.shape[0]}×{df.shape[1]})"):
-                    st.dataframe(df, use_container_width=True)
+                    st.dataframe(df, width='stretch')
                     
                     csv_data = df.to_csv(index=True)
                     clean_name = name.replace("📐 ", "").replace("📈 ", "").replace("📉 ", "").replace("🔄 ", "").replace("📊 ", "").replace("🔢 ", "").replace(" ", "_")

@@ -682,7 +682,7 @@ def show():
                         
                         # Preview
                         st.markdown("### Data Preview")
-                        st.dataframe(data.head(10), use_container_width=True)
+                        st.dataframe(data.head(10), width='stretch')
                         
                         # Stats
                         col1, col2, col3, col4 = st.columns(4)
@@ -732,7 +732,7 @@ def show():
                 _save_original_to_history(data, selected_sample)
     
                 st.success(f"Sample data loaded: {data.shape[0]} rows × {data.shape[1]} columns")
-                st.dataframe(data.head(), use_container_width=True)
+                st.dataframe(data.head(), width='stretch')
     
     # ===== EXPORT DATA TAB =====
     with tab2:
@@ -859,7 +859,7 @@ def show():
             
             # Preview
             st.markdown("### Data Preview")
-            st.dataframe(data.head(10), use_container_width=True)
+            st.dataframe(data.head(10), width='stretch')
         else:
             st.info("Load a dataset to see workspace information")
 
@@ -902,18 +902,18 @@ def show():
                             st.markdown("**Actions:**")
                             
                             # Load button
-                            if st.button(f"📂 Load Dataset", key=f"load_{name}", use_container_width=True):
+                            if st.button(f"📂 Load Dataset", key=f"load_{name}", width='stretch'):
                                 st.session_state.current_data = info['data']
                                 st.session_state.current_dataset = name
                                 st.success(f"✅ Loaded: {name}")
                                 st.rerun()
                             
                             # Preview button
-                            if st.button(f"👁️ Preview Data", key=f"preview_{name}", use_container_width=True):
-                                st.dataframe(info['data'].head(5), use_container_width=True)
+                            if st.button(f"👁️ Preview Data", key=f"preview_{name}", width='stretch'):
+                                st.dataframe(info['data'].head(5), width='stretch')
                             
                             # Delete button
-                            if st.button(f"🗑️ Delete", key=f"delete_{name}", use_container_width=True):
+                            if st.button(f"🗑️ Delete", key=f"delete_{name}", width='stretch'):
                                 del st.session_state.split_datasets[name]
                                 st.success(f"Deleted: {name}")
                                 st.rerun()
@@ -979,15 +979,15 @@ def show():
                             st.markdown("**Actions:**")
                             
                             # Load original
-                            if st.button(f"📂 Load Original", key=f"load_original_{orig_name}", use_container_width=True):
+                            if st.button(f"📂 Load Original", key=f"load_original_{orig_name}", width='stretch'):
                                 st.session_state.current_data = orig_info['data']
                                 st.session_state.current_dataset = orig_name.replace('_ORIGINAL', '')
                                 st.success(f"✅ Loaded original dataset")
                                 st.rerun()
                             
                             # Preview original
-                            if st.button(f"👁️ Preview Original", key=f"preview_original_{orig_name}", use_container_width=True):
-                                st.dataframe(orig_info['data'].head(5), use_container_width=True)
+                            if st.button(f"👁️ Preview Original", key=f"preview_original_{orig_name}", width='stretch'):
+                                st.dataframe(orig_info['data'].head(5), width='stretch')
                 
                 # Show transformations
                 if group['transformations']:
@@ -1012,18 +1012,18 @@ def show():
                                 st.markdown("**Actions:**")
                                 
                                 # Load transformation
-                                if st.button(f"📂 Load Dataset", key=f"load_transform_{name}", use_container_width=True):
+                                if st.button(f"📂 Load Dataset", key=f"load_transform_{name}", width='stretch'):
                                     st.session_state.current_data = info['data']
                                     st.session_state.current_dataset = name
                                     st.success(f"✅ Loaded: {name.split('.')[-1]}")
                                     st.rerun()
                                 
                                 # Preview transformation
-                                if st.button(f"👁️ Preview", key=f"preview_transform_{name}", use_container_width=True):
-                                    st.dataframe(info['data'].head(5), use_container_width=True)
+                                if st.button(f"👁️ Preview", key=f"preview_transform_{name}", width='stretch'):
+                                    st.dataframe(info['data'].head(5), width='stretch')
                                 
                                 # Delete transformation
-                                if st.button(f"🗑️ Delete", key=f"delete_transform_{name}", use_container_width=True):
+                                if st.button(f"🗑️ Delete", key=f"delete_transform_{name}", width='stretch'):
                                     del st.session_state.transformation_history[name]
                                     st.success(f"Deleted: {name}")
                                     st.rerun()
@@ -1072,11 +1072,11 @@ def show():
                 
                 with col1:
                     st.markdown("**Current Data:**")
-                    st.dataframe(data.head(3), use_container_width=True)
+                    st.dataframe(data.head(3), width='stretch')
                 
                 with col2:
                     st.markdown("**Transposed Preview:**")
-                    st.dataframe(data.T.head(3), use_container_width=True)
+                    st.dataframe(data.T.head(3), width='stretch')
                 
                 if st.button("Transpose Data"):
                     transposed_data = data.T
@@ -1221,9 +1221,9 @@ def show():
                     if len(spectral_vars) > 20:
                         st.info("Showing first and last 10 variables (large spectral dataset)")
                         preview_cols = spectral_vars[:10] + spectral_vars[-10:]
-                        st.dataframe(data[preview_cols].head(10), use_container_width=True)
+                        st.dataframe(data[preview_cols].head(10), width='stretch')
                     else:
-                        st.dataframe(spectral_data.head(10), use_container_width=True)
+                        st.dataframe(spectral_data.head(10), width='stretch')
                     
                     # Statistics for spectral data
                     col_stat1, col_stat2, col_stat3 = st.columns(3)
@@ -1240,7 +1240,7 @@ def show():
                 if metadata_vars:
                     metadata_data = data[metadata_vars]
                     st.markdown(f"**Metadata Variables** ({len(metadata_vars)} variables)")
-                    st.dataframe(metadata_data.head(10), use_container_width=True)
+                    st.dataframe(metadata_data.head(10), width='stretch')
                     
                     # Metadata analysis
                     st.markdown("#### Metadata Analysis")

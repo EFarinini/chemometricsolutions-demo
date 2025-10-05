@@ -424,7 +424,7 @@ def show_advanced_diagnostics_tab(processed_data, scores, pca_params, timestamps
             color_variable=color_variable,
             show_sample_names=show_sample_names
         )
-        st.plotly_chart(fig_diagnostic, use_container_width=True)
+        st.plotly_chart(fig_diagnostic, width='stretch')
         
         # Time series plots if requested
         if plot_type == "Include Time Series":
@@ -437,9 +437,9 @@ def show_advanced_diagnostics_tab(processed_data, scores, pca_params, timestamps
             
             col_t2, col_q = st.columns(2)
             with col_t2:
-                st.plotly_chart(t2_time_fig, use_container_width=True)
+                st.plotly_chart(t2_time_fig, width='stretch')
             with col_q:
-                st.plotly_chart(q_time_fig, use_container_width=True)
+                st.plotly_chart(q_time_fig, width='stretch')
     
     else:  # Joint T²/Q analysis
         st.markdown("### 📊 Joint T² and Q Analysis")

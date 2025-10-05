@@ -96,7 +96,7 @@ def show_home():
         """)
         
         if DATA_HANDLING_AVAILABLE:
-            if st.button("🚀 Launch Data Handling Demo", key="data_handling"):
+            if st.button("🚀 Launch Data Handling Demo", key="launch_data_handling"):
                 st.session_state.current_page = "Data Handling"
                 st.rerun()
         else:
@@ -116,7 +116,7 @@ def show_home():
         """)
         
         if PCA_AVAILABLE:
-            if st.button("🚀 Launch PCA Demo", key="pca_demo"):
+            if st.button("🚀 Launch PCA Demo", key="launch_pca_demo"):
                 st.session_state.current_page = "PCA Analysis"
                 st.rerun()
         else:
@@ -149,14 +149,14 @@ def show_home():
         """)
         
         if TRANSFORMATIONS_AVAILABLE:
-            if st.button("🚀 Launch Transformations", key="transformations"):
+            if st.button("🚀 Launch Transformations", key="launch_transformations"):
                 st.session_state.current_page = "Transformations"
                 st.rerun()
         else:
             st.info("🚧 Transformations coming soon")
         
         if MLR_DOE_AVAILABLE:
-            if st.button("🚀 Launch MLR/DOE Demo", key="mlr_doe"):
+            if st.button("🚀 Launch MLR/DOE Demo", key="launch_mlr_doe"):
                 st.session_state.current_page = "MLR/DOE"
                 st.rerun()
         else:
@@ -221,7 +221,7 @@ def show_home():
         annotation_position="top left"
     )
     
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
     
     # Real data statistics
     col1, col2, col3, col4 = st.columns(4)
@@ -264,7 +264,7 @@ def show_home():
         """)
     
     # Load data button
-    if st.button("📥 Load This Dataset", type="primary"):
+    if st.button("📥 Load This Dataset", type="primary", key="load_nir_dataset"):
         # Create DataFrame in proper format for the application
         data_for_app = pd.DataFrame(spectra_data).T
         data_for_app.columns = [f"{wl:.3f}" for wl in wavelengths]
@@ -399,40 +399,40 @@ def main():
     st.sidebar.markdown("---")
     
     # Navigation buttons
-    if st.sidebar.button("🏠 Home", use_container_width=True):
+    if st.sidebar.button("🏠 Home", use_container_width=True, key="nav_home"):
         st.session_state.current_page = "Home"
         st.rerun()
     
     if DATA_HANDLING_AVAILABLE:
-        if st.sidebar.button("📊 Data Handling", use_container_width=True):
+        if st.sidebar.button("📊 Data Handling", use_container_width=True, key="nav_data_handling"):
             st.session_state.current_page = "Data Handling"
             st.rerun()
     else:
-        st.sidebar.button("📊 Data Handling", disabled=True, use_container_width=True)
+        st.sidebar.button("📊 Data Handling", disabled=True, use_container_width=True, key="nav_data_handling_disabled")
         st.sidebar.caption("Module not found")
     
     if PCA_AVAILABLE:
-        if st.sidebar.button("🎯 PCA Analysis", use_container_width=True):
+        if st.sidebar.button("🎯 PCA Analysis", use_container_width=True, key="nav_pca"):
             st.session_state.current_page = "PCA Analysis"
             st.rerun()
     else:
-        st.sidebar.button("🎯 PCA Analysis", disabled=True, use_container_width=True)
+        st.sidebar.button("🎯 PCA Analysis", disabled=True, use_container_width=True, key="nav_pca_disabled")
         st.sidebar.caption("Module not found")
     
     if MLR_DOE_AVAILABLE:
-        if st.sidebar.button("🧪 MLR/DOE", use_container_width=True):
+        if st.sidebar.button("🧪 MLR/DOE", use_container_width=True, key="nav_mlr_doe"):
             st.session_state.current_page = "MLR/DOE"
             st.rerun()
     else:
-        st.sidebar.button("🧪 MLR/DOE", disabled=True, use_container_width=True)
+        st.sidebar.button("🧪 MLR/DOE", disabled=True, use_container_width=True, key="nav_mlr_doe_disabled")
         st.sidebar.caption("Module not found")
 
     if TRANSFORMATIONS_AVAILABLE:
-        if st.sidebar.button("🔬 Transformations", use_container_width=True):
+        if st.sidebar.button("🔬 Transformations", use_container_width=True, key="nav_transformations"):
             st.session_state.current_page = "Transformations"
             st.rerun()
     else:
-        st.sidebar.button("🔬 Transformations", disabled=True, use_container_width=True)
+        st.sidebar.button("🔬 Transformations", disabled=True, use_container_width=True, key="nav_transformations_disabled")
         st.sidebar.caption("Module not found")
         
         st.sidebar.markdown("---")

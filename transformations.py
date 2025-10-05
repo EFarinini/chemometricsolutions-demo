@@ -576,7 +576,7 @@ def show():
                 color_variable=result['color_variable']
             )
             
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
             
             # Statistics
             st.markdown("### Transformation Statistics")
@@ -863,7 +863,7 @@ def show():
                 f"Transformed Data ({result_col['transformed_col'].shape[0]} × {result_col['transformed_col'].shape[1]}) - {result_col['selected_transform_col']}"
             )
             
-            st.plotly_chart(fig_col, use_container_width=True)
+            st.plotly_chart(fig_col, width='stretch')
             
             # Statistics
             st.markdown("### Transformation Statistics")

@@ -914,7 +914,7 @@ def show():
                     height=500
                 )
                 
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             
             elif plot_type == "📊 Cumulative Variance":
                 title_suffix = " (Varimax)" if is_varimax else ""
@@ -948,7 +948,7 @@ def show():
                     height=500
                 )
                 
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             
             elif plot_type == "🎯 Individual Variable Contribution":
                 comp_label = "Factor" if is_varimax else "PC"
@@ -1009,7 +1009,7 @@ def show():
                     xaxis={'tickangle': 45}
                 )
                 
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
                 
                 # Step 3: Tabella dettagliata
                 st.markdown("#### Step 3: Detailed Contribution Table")
@@ -1145,7 +1145,7 @@ def show():
                             height=600
                         )
                         
-                        st.plotly_chart(fig_random, use_container_width=True)
+                        st.plotly_chart(fig_random, width='stretch')
                         
                         # Summary
                         significant_components = sum(original_variance > random_ci_upper)
@@ -1244,7 +1244,7 @@ def show():
                         colorbar=dict(title="Loading Magnitude")
                     ))
                 
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, uwidth='stretch')
                 
                 if is_varimax:
                     st.info("💡 In Varimax rotation, variables should load highly on few factors (simple structure)")
@@ -1291,7 +1291,7 @@ def show():
                         height=500
                     )
                     
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, width='stretch')
 
     # ===== SCORE PLOTS TAB =====
     with tab4:
@@ -1507,7 +1507,7 @@ def show():
                     )
                 )
                 
-                st.plotly_chart(fig, use_container_width=True, key="pca_scores_plot")
+                st.plotly_chart(fig, width='stretch', key="pca_scores_plot")
 
                 # === SELEZIONE PER COORDINATE ===
                 st.markdown("### 🎯 Coordinate Selection")
@@ -1826,7 +1826,7 @@ def show():
                         yaxis=dict(range=axis_range, constrain="domain")
                     )
                     
-                    st.plotly_chart(fig_selected, use_container_width=True, key="selection_visualization")
+                    st.plotly_chart(fig_selected, width='stretch', key="selection_visualization")
                     
                     # Export and Actions
                     st.markdown("### 💾 Export & Actions")
@@ -2112,7 +2112,7 @@ def show():
                         scene=scene_dict
                     )
                     
-                    st.plotly_chart(fig_3d, use_container_width=True)
+                    st.plotly_chart(fig_3d, width='stretch')
                     
                     # Metriche varianza per 3D
                     col1, col2, col3, col4 = st.columns(4)
@@ -2194,7 +2194,7 @@ def show():
                 )
                 
                 fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.7)
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
                 
                 # Statistics
                 st.markdown("#### 📊 Profile Statistics")
