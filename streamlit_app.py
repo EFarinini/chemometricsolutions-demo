@@ -168,9 +168,43 @@ st.markdown("""
         border-radius: 6px !important;
     }
     
-    /* Plotly charts - ensure white background */
-    .js-plotly-plot .plotly .main-svg {
+    /* CORREZIONE PRINCIPALE: Plotly charts - Background fix più robusto */
+    /* Forza background bianco per tutti i grafici Plotly */
+    div[data-testid="stPlotlyChart"] > div {
         background-color: white !important;
+    }
+    
+    /* Forza background per l'SVG principale */
+    .js-plotly-plot .plotly .main-svg,
+    .js-plotly-plot .bg,
+    .plotly-graph-div .bg {
+        background-color: white !important;
+        fill: white !important;
+    }
+    
+    /* Assicura che il contenitore Plotly abbia sfondo bianco */
+    .plotly-graph-div {
+        background-color: white !important;
+    }
+    
+    /* Forza colore del testo nei grafici */
+    .js-plotly-plot .plotly text {
+        fill: black !important;
+        color: black !important;
+    }
+    
+    /* Assi e labels */
+    .js-plotly-plot .plotly .xtick text,
+    .js-plotly-plot .plotly .ytick text,
+    .js-plotly-plot .plotly .g-xtitle text,
+    .js-plotly-plot .plotly .g-ytitle text {
+        fill: black !important;
+    }
+    
+    /* Griglia */
+    .js-plotly-plot .plotly .gridlayer .xgrid path,
+    .js-plotly-plot .plotly .gridlayer .ygrid path {
+        stroke: #e0e0e0 !important;
     }
     
     /* Professional branding with logo-inspired gradient */
