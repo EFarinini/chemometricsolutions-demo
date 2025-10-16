@@ -65,13 +65,12 @@ def calculate_control_limits(n_samples, n_variables, n_components, confidence_le
 
 def create_t2_q_plot(t2_values, q_values, control_limits, sample_names=None, 
                      title="T² vs Q Plot", color_data=None, color_variable=None, 
-                     show_sample_names=True):
+                     show_sample_names=True, dark_mode=False):
     """
     Create T² vs Q diagnostic plot with FIXED color consistency
     """
-
     # Get unified color scheme
-    colors = get_unified_color_schemes()
+    colors = get_unified_color_schemes(dark_mode)
     
     # Handle sample names properly
     if sample_names is None or not show_sample_names:
@@ -85,7 +84,7 @@ def create_t2_q_plot(t2_values, q_values, control_limits, sample_names=None,
     if color_data is not None:
         # SEMPRE crea color_discrete_map per garantire coerenza
         unique_values = pd.Series(color_data).dropna().unique()
-        color_discrete_map = create_categorical_color_map(unique_values)
+        color_discrete_map = create_categorical_color_map(unique_values, dark_mode)
         
         fig = px.scatter(
             x=t2_values,
@@ -173,9 +172,9 @@ def create_t2_q_plot(t2_values, q_values, control_limits, sample_names=None,
     return fig
 
 def create_time_series_plots(t2_values, q_values, control_limits, sample_names, 
-                           timestamps=None):
+                           timestamps=None, dark_mode=False):
     """Create T² and Q time series plots with unified color scheme"""
-    colors = get_unified_color_schemes()
+    colors = get_unified_color_schemes(dark_mode)
     
     # Use timestamps if provided, otherwise sample numbers
     if timestamps is not None:
@@ -324,7 +323,9 @@ def show_advanced_diagnostics_tab(processed_data, scores, pca_params, timestamps
                 help="Time series shows T² and Q trends over sample number/time"
             )
         
-
+        with col_viz3:
+            # Dark mode toggle - consistent with PCA.py pattern
+            use_dark_theme = st.checkbox("🌙 Dark mode colors", value=True, key="dark_mode_diag_colors")
         
         # Prepare color data
         color_data = None
@@ -344,6 +345,7 @@ def show_advanced_diagnostics_tab(processed_data, scores, pca_params, timestamps
         color_data = None
         color_variable = None
         plot_type = "T² vs Q Only"
+        use_dark_theme = True
         st.info("Original dataset not available for coloring options")
     
     # Calculate diagnostics
@@ -407,7 +409,10 @@ def show_advanced_diagnostics_tab(processed_data, scores, pca_params, timestamps
         else:
             settings_info += "Names OFF, "
         
-        settings_info += "Light Mode"
+        if use_dark_theme:
+            settings_info += "Dark Mode"
+        else:
+            settings_info += "Light Mode"
         
         st.info(settings_info)
         
@@ -422,9 +427,10 @@ def show_advanced_diagnostics_tab(processed_data, scores, pca_params, timestamps
             f"Independent T² vs Q Analysis ({n_components} components)",
             color_data=color_data,
             color_variable=color_variable,
-            show_sample_names=show_sample_names
+            show_sample_names=show_sample_names,
+            dark_mode=use_dark_theme
         )
-        st.plotly_chart(fig_diagnostic, width='stretch')
+        st.plotly_chart(fig_diagnostic, use_container_width=True)
         
         # Time series plots if requested
         if plot_type == "Include Time Series":
@@ -432,14 +438,14 @@ def show_advanced_diagnostics_tab(processed_data, scores, pca_params, timestamps
             
             t2_time_fig, q_time_fig = create_time_series_plots(
                 t2_values, q_values, control_limits, sample_names, 
-                timestamps
+                timestamps, dark_mode=use_dark_theme
             )
             
             col_t2, col_q = st.columns(2)
             with col_t2:
-                st.plotly_chart(t2_time_fig, width='stretch')
+                st.plotly_chart(t2_time_fig, use_container_width=True)
             with col_q:
-                st.plotly_chart(q_time_fig, width='stretch')
+                st.plotly_chart(q_time_fig, use_container_width=True)
     
     else:  # Joint T²/Q analysis
         st.markdown("### 📊 Joint T² and Q Analysis")
@@ -461,17 +467,23 @@ def show_advanced_diagnostics_tab(processed_data, scores, pca_params, timestamps
         status_names = "✅ ON" if show_sample_names else "❌ OFF"
         st.metric("Sample Names", status_names)
     with col4:
-        st.metric("Display Mode", "☀️ Light")
+        mode_status = "🌙 Dark" if use_dark_theme else "☀️ Light"
+        st.metric("Display Mode", mode_status)
     
     # Interpretation guide with mode-specific styling
     st.markdown("### 📋 Interpretation Guide")
     
     # Use unified color scheme for styling
-    colors = get_unified_color_schemes()
+    colors = get_unified_color_schemes(use_dark_theme)
     
-    guide_style = """
-    <div style='background-color: #f0f8ff; padding: 1rem; border-radius: 5px; border-left: 4px solid green;'>
-    """
+    if use_dark_theme:
+        guide_style = """
+        <div style='background-color: #2d2d2d; padding: 1rem; border-radius: 5px; color: #ffffff; border-left: 4px solid #00ff00;'>
+        """
+    else:
+        guide_style = """
+        <div style='background-color: #f0f8ff; padding: 1rem; border-radius: 5px; border-left: 4px solid green;'>
+        """
     
     with st.expander("📖 Understanding the Analysis"):
         st.markdown(guide_style + """

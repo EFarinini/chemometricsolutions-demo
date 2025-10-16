@@ -33,12 +33,3 @@ pathlib2>=2.3.6         # Path handling (Python < 3.4 compatibility)
 # Development and debugging (optional)
 # streamlit-aggrid>=0.3.0  # Advanced tables
 # streamlit-plotly-events>=0.0.6  # Interactive plotly events
-
-# Existing dependencies...
-streamlit>=1.28.0
-pandas>=1.5.0
-numpy>=1.21.0
-
-# Optional AI dependencies
-datapizza-ai>=0.1.0
-datapizza-ai-clients-openai>=0.1.0

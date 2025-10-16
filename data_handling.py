@@ -1,5 +1,5 @@
 """
-CAT Data Handling Page - UPDATED VERSION WITH TRANSFORMATION MEMORY
+CAT Data Handling Page - CORRECTED VERSION
 Equivalent to DH_* R scripts for data import/export and workspace management
 """
 
@@ -80,7 +80,7 @@ def _load_csv_txt(uploaded_file, separator, decimal, encoding, has_header, has_i
     if data is None:
         raise ValueError("Unable to decode file with any encoding")
     
-    # CORREZIONE: Se non c'Ã¨ una colonna indice, usa indici 1-based
+    # CORREZIONE: Se non c'è una colonna indice, usa indici 1-based
     if not has_index:
         data.index = range(1, len(data) + 1)
         data.index.name = None  # Rimuovi il nome dell'indice
@@ -91,7 +91,7 @@ def _load_spectral_data(uploaded_file, separator, decimal, encoding, has_header,
     """Load spectral data (DAT/ASC files)"""
     data = _load_csv_txt(uploaded_file, separator, decimal, encoding, has_header, has_index, skip_rows, 0, "NA", '"')
     
-    if data_format == "Transposed (variablesÃ—samples)":
+    if data_format == "Transposed (variables×samples)":
         data = data.T
         
         # Rename columns to be more informative
@@ -104,8 +104,8 @@ def _load_spectral_data(uploaded_file, separator, decimal, encoding, has_header,
             # Generic variable names
             data.columns = [f"Var_{i+1}" for i in range(len(data.columns))]
         
-        st.success("Data transposed: variablesÃ—samples â†' samplesÃ—variables")
-        st.info(f"Final format: {data.shape[0]} samples Ã— {data.shape[1]} variables")
+        st.success("Data transposed: variables×samples → samples×variables")
+        st.info(f"Final format: {data.shape[0]} samples × {data.shape[1]} variables")
         
         # CORREZIONE: Dopo la trasposizione, forza indici 1-based se necessario
         if not has_index:
@@ -205,7 +205,7 @@ def _load_sam_data(uploaded_file, extract_metadata=True, wavelength_range="Auto-
                 st.success(f"NIR spectrum created: {detected_compound}")
                 st.info(f"Wavelength range: {wavelengths[0]:.1f} - {wavelengths[-1]:.1f} nm")
                 st.info(f"Data points: {n_points}")
-                st.info(f"Temperature: {temperature:.1f}Â°C")
+                st.info(f"Temperature: {temperature:.1f}°C")
                 st.info(f"Format: Compatible with NIR export standard")
             
             return spectral_matrix
@@ -336,7 +336,7 @@ def _load_raw_data(uploaded_file, encoding="utf-8"):
                 data.insert(0, 'Sample_ID', file_name)
                 
                 st.success(f"RAW file parsed successfully!")
-                st.info(f"Final shape: {data.shape[0]} points Ã— {data.shape[1]} variables")
+                st.info(f"Final shape: {data.shape[0]} points × {data.shape[1]} variables")
                 
                 return data
             
@@ -374,7 +374,7 @@ def _load_raw_data(uploaded_file, encoding="utf-8"):
                                     # Assume it's XRD data - CREATE CHEMOMETRIC FORMAT
                                     angles = np.linspace(5, 80, len(valid_values))
                                     
-                                    # Create chemometric format: samples Ã— variables
+                                    # Create chemometric format: samples × variables
                                     # One row = one sample, columns = 2Theta angles with intensities
                                     data_dict = {'Sample_ID': file_name}
                                     
@@ -385,8 +385,8 @@ def _load_raw_data(uploaded_file, encoding="utf-8"):
                                     data = pd.DataFrame([data_dict])
                                     
                                     st.success(f"XRD spectrum loaded in chemometric format!")
-                                    st.info(f"2Î¸ range: {angles[0]:.2f}Â° to {angles[-1]:.2f}Â°")
-                                    st.info(f"Format: 1 sample Ã— {len(valid_values)} variables (2Î¸ angles)")
+                                    st.info(f"2θ range: {angles[0]:.2f}° to {angles[-1]:.2f}°")
+                                    st.info(f"Format: 1 sample × {len(valid_values)} variables (2θ angles)")
                                 else:
                                     # Short data - create chemometric format
                                     data_dict = {'Sample_ID': file_name}
@@ -398,7 +398,7 @@ def _load_raw_data(uploaded_file, encoding="utf-8"):
                                     data = pd.DataFrame([data_dict])
                                 
                                 st.success(f"Binary RAW data extracted!")
-                                st.info(f"Shape: {data.shape[0]} points Ã— {data.shape[1]} variables")
+                                st.info(f"Shape: {data.shape[0]} points × {data.shape[1]} variables")
                                 
                                 return data
                                 
@@ -460,7 +460,7 @@ def _load_excel_data(uploaded_file, sheet_name, skip_rows, skip_cols, has_header
     if skip_cols > 0:
         data = data.iloc[:, skip_cols:]
     
-    # CORREZIONE: Se non c'Ã¨ una colonna indice, usa indici 1-based
+    # CORREZIONE: Se non c'è una colonna indice, usa indici 1-based
     if not has_index:
         data.index = range(1, len(data) + 1)
         data.index.name = None
@@ -472,8 +472,8 @@ def _save_original_to_history(data, dataset_name):
     if 'transformation_history' not in st.session_state:
         st.session_state.transformation_history = {}
     
-    # Save original only if not exists
-    original_name = f"{dataset_name.split('.')[0]}_ORIGINAL"
+    # Salva l'originale solo se non esiste già
+    original_name = f"{dataset_name}_ORIGINAL"
     
     if original_name not in st.session_state.transformation_history:
         st.session_state.transformation_history[original_name] = {
@@ -481,9 +481,9 @@ def _save_original_to_history(data, dataset_name):
             'transform': 'Original (Untransformed)',
             'params': {},
             'col_range': None,
-            'timestamp': pd.Timestamp.now(),
-            'transform_type': 'original'
+            'timestamp': pd.Timestamp.now()
         }
+
 
 # Export helper functions
 def _create_sam_export(data, include_header):
@@ -508,100 +508,6 @@ def _create_sam_export(data, include_header):
         sam_content.append("\t".join(row_data))
     
     return '\n'.join(sam_content)
-
-def _parse_clipboard_data(clipboard_text, separator, decimal, has_header, has_index, na_values):
-    """Parse clipboard data into pandas DataFrame"""
-    try:
-        # Split into lines
-        lines = clipboard_text.strip().split('\n')
-        
-        if not lines:
-            raise ValueError("No data found in clipboard")
-        
-        # Process NA values
-        na_list = [x.strip() for x in na_values.split(',') if x.strip()]
-        
-        # Detect separator if auto-detection is enabled
-        if separator == "Auto-detect":
-            # Test common separators on first line
-            first_line = lines[0]
-            separators = ['\t', ',', ';', ' ']
-            separator_counts = {sep: first_line.count(sep) for sep in separators}
-            separator = max(separator_counts, key=separator_counts.get)
-            
-            if separator_counts[separator] == 0:
-                # Fallback to comma if no separator found
-                separator = ','
-        
-        # Parse data manually
-        rows = []
-        for line in lines:
-            # Split by separator
-            if separator == ' ':
-                # Handle multiple spaces
-                row = [cell.strip() for cell in line.split() if cell.strip()]
-            else:
-                row = [cell.strip() for cell in line.split(separator)]
-            rows.append(row)
-        
-        # Find maximum row length for padding
-        max_cols = max(len(row) for row in rows) if rows else 0
-        
-        # Pad rows to same length
-        for row in rows:
-            while len(row) < max_cols:
-                row.append('')
-        
-        # Convert to DataFrame
-        if has_header and len(rows) > 0:
-            columns = rows[0]
-            data_rows = rows[1:]
-        else:
-            columns = [f"Col_{i+1}" for i in range(max_cols)]
-            data_rows = rows
-        
-        # Create DataFrame
-        if not data_rows:
-            # Empty data, create empty DataFrame with columns
-            data = pd.DataFrame(columns=columns)
-        else:
-            data = pd.DataFrame(data_rows, columns=columns)
-        
-        # Handle index column
-        if has_index and len(data.columns) > 0:
-            data = data.set_index(data.columns[0])
-        elif not has_index:
-            # Use 1-based index
-            data.index = range(1, len(data) + 1)
-            data.index.name = None
-        
-        # Convert numeric columns
-        for col in data.columns:
-            # Try to convert to numeric, replacing NA values
-            numeric_data = pd.to_numeric(data[col], errors='coerce')
-            
-            # If more than 50% of values are numeric, treat as numeric column
-            if numeric_data.notna().sum() / len(data) > 0.5:
-                data[col] = numeric_data
-            
-            # Replace NA values
-            for na_val in na_list:
-                data[col] = data[col].replace(na_val, np.nan)
-        
-        # Handle decimal separator conversion
-        if decimal == ',':
-            for col in data.select_dtypes(include=['object']).columns:
-                try:
-                    # Try to convert comma decimals to dot decimals
-                    data[col] = data[col].astype(str).str.replace(',', '.', regex=False)
-                    data[col] = pd.to_numeric(data[col], errors='ignore')
-                except:
-                    pass
-        
-        return data, separator
-        
-    except Exception as e:
-        raise ValueError(f"Error parsing clipboard data: {str(e)}")
 
 def show():
     """Display the Data Handling page"""
@@ -662,15 +568,6 @@ def show():
                 """)
             
             st.success("**Perfect for converting instrumental files to Excel format!**")
-            
-            # Professional Services Note
-            st.markdown("---")
-            st.info("""
-            💡 **Need support for additional formats or custom import/export workflows?**  
-            Professional data handling solutions available at [chemometricsolutions.com](https://chemometricsolutions.com)
-            
-            🔧 **Enterprise features:** Custom parsers • Batch processing • Database integration • API connectivity
-            """)
         
         elif load_method == "Upload File":
             st.markdown("### File Upload")
@@ -769,9 +666,11 @@ def show():
                         # Store data
                         st.session_state.current_data = data
                         st.session_state.current_dataset = uploaded_file.name
-                        # Save original to transformation history
+                        # Salva l'originale nella transformation history
                         _save_original_to_history(data, uploaded_file.name)
 
+                        st.success(f"Data loaded successfully: {data.shape[0]} rows × {data.shape[1]} columns")
+                        
                         st.success(f"Data loaded successfully: {data.shape[0]} rows × {data.shape[1]} columns")
                         
                         # Preview
@@ -792,204 +691,6 @@ def show():
                         
                     except Exception as e:
                         st.error(f"Error loading file: {str(e)}")
-        
-        elif load_method == "Copy/Paste":
-            st.markdown("### Copy/Paste Data")
-            st.markdown("*Copy data from Excel, web tables, or any text source and paste directly*")
-            
-            # Instructions
-            with st.expander("📋 **How to use Copy/Paste**"):
-                st.markdown("""
-                **Instructions:**
-                1. **Copy data** from Excel, Google Sheets, web tables, or any text source
-                2. **Paste below** using Ctrl+V (Windows) or Cmd+V (Mac) 
-                3. **Configure settings** if needed
-                4. **Load data** into CAT Python
-                
-                **Supported Sources:**
-                - Excel spreadsheets (copy selected cells)
-                - Google Sheets / LibreOffice Calc
-                - Web tables from research papers
-                - Text files with delimited data
-                - Scientific instrument output (copy from software)
-                - Spectral data from equipment software
-                
-                **Tips:**
-                - Data will be auto-formatted for chemometric analysis
-                - Column headers and row names are automatically detected
-                - Mixed data types (numbers + text) are handled correctly
-                - Missing values (empty cells) are converted to NaN
-                """)
-            
-            # Text area for pasting
-            clipboard_data = st.text_area(
-                "📋 **Paste your data here**:",
-                height=200,
-                placeholder="Paste your data here using Ctrl+V or Cmd+V...\n\nExample:\nSample_ID\tWave_1000\tWave_1100\tWave_1200\nSample1\t0.534\t0.623\t0.445\nSample2\t0.612\t0.534\t0.523\nSample3\t0.445\t0.678\t0.599",
-                key="clipboard_input"
-            )
-            
-            if clipboard_data.strip():
-                newline_char = '\n'
-                st.success(f"✅ **Data detected**: {len(clipboard_data.strip().split(newline_char))} lines")
-                
-                # Configuration options
-                st.markdown("#### ⚙️ Parse Settings")
-                
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    separator_paste = st.selectbox(
-                        "Separator:", 
-                        ["Auto-detect", "\t (Tab)", ", (Comma)", "; (Semicolon)", "  (Space)"],
-                        key="sep_paste"
-                    )
-                    
-                    # Convert display names to actual separators
-                    sep_map = {
-                        "Auto-detect": "Auto-detect",
-                        "\t (Tab)": "\t",
-                        ", (Comma)": ",",
-                        "; (Semicolon)": ";",
-                        "  (Space)": " "
-                    }
-                    actual_separator = sep_map[separator_paste]
-                
-                with col2:
-                    has_header_paste = st.checkbox("First row = headers", value=True, key="header_paste")
-                    has_index_paste = st.checkbox("First column = row names", value=False, key="index_paste")
-                
-                with col3:
-                    decimal_paste = st.selectbox("Decimal separator:", [".", ","], key="dec_paste")
-                    na_values_paste = st.text_input("Missing value indicators:", value="NA,N/A,NULL,null,#N/A", key="na_paste")
-                
-                # Preview parsing
-                if st.checkbox("🔍 **Preview parsing**", key="preview_parsing"):
-                    try:
-                        preview_data, detected_sep = _parse_clipboard_data(
-                            clipboard_data, actual_separator, decimal_paste, 
-                            has_header_paste, has_index_paste, na_values_paste
-                        )
-                        
-                        st.markdown("#### 👀 Data Preview")
-                        col_prev1, col_prev2 = st.columns(2)
-                        
-                        with col_prev1:
-                            tab_char = '\t'
-                            sep_display = 'Tab' if detected_sep == tab_char else detected_sep
-                            st.info(f"**Detected separator**: `{detected_sep}` ({sep_display})")
-                            st.info(f"**Shape**: {preview_data.shape[0]} rows × {preview_data.shape[1]} columns")
-                        
-                        with col_prev2:
-                            numeric_cols = preview_data.select_dtypes(include=[np.number]).columns
-                            st.info(f"**Numeric variables**: {len(numeric_cols)}")
-                            st.info(f"**Missing values**: {preview_data.isnull().sum().sum()}")
-                        
-                        # Show preview table
-                        st.dataframe(preview_data.head(10), use_container_width=True)
-                        
-                        # Data quality indicators
-                        if preview_data.shape[1] > 50:
-                            st.success("🧬 **Spectral/High-dimensional data detected** - Perfect for PCA analysis!")
-                        elif preview_data.shape[1] > 10:
-                            st.success("📊 **Multi-variable dataset** - Great for chemometric analysis!")
-                        else:
-                            st.info("📋 **Standard dataset** - Ready for analysis!")
-                        
-                    except Exception as e:
-                        st.error(f"❌ **Parse error**: {str(e)}")
-                        st.info("💡 Try adjusting the separator or format settings above")
-                
-                # Load button
-                if st.button("🚀 **Load Data from Clipboard**", type="primary", key="load_clipboard"):
-                    try:
-                        data, detected_sep = _parse_clipboard_data(
-                            clipboard_data, actual_separator, decimal_paste, 
-                            has_header_paste, has_index_paste, na_values_paste
-                        )
-                        
-                        # Store data
-                        dataset_name = f"Clipboard_Data_{pd.Timestamp.now().strftime('%H%M%S')}"
-                        st.session_state.current_data = data
-                        st.session_state.current_dataset = dataset_name
-                        
-                        # Save original to transformation history
-                        _save_original_to_history(data, dataset_name)
-                        
-                        # Success message with details
-                        st.success(f"🎉 **Data loaded successfully!**")
-                        
-                        col_success1, col_success2, col_success3, col_success4 = st.columns(4)
-                        with col_success1:
-                            st.metric("Samples", data.shape[0])
-                        with col_success2:
-                            st.metric("Variables", data.shape[1])
-                        with col_success3:
-                            tab_char = '\t'
-                            sep_display = 'Tab' if detected_sep == tab_char else detected_sep
-                            st.metric("Separator Used", sep_display)
-                        with col_success4:
-                            numeric_cols = data.select_dtypes(include=[np.number]).columns
-                            st.metric("Numeric Vars", len(numeric_cols))
-                        
-                        # Data preview
-                        st.markdown("#### 📊 **Loaded Dataset Preview**")
-                        st.dataframe(data.head(10), use_container_width=True)
-                        
-                        # Auto-suggestions based on data
-                        st.markdown("#### 🎯 **Suggested Next Steps**")
-                        
-                        if data.shape[1] > 20:
-                            st.info("🧬 **High-dimensional data** → Try **PCA Analysis** for dimensionality reduction")
-                        
-                        if data.shape[0] > 100:
-                            st.info("📈 **Large dataset** → Consider **Data Transformations** before analysis")
-                        
-                        if data.isnull().sum().sum() > 0:
-                            st.warning(f"⚠️ **{data.isnull().sum().sum()} missing values** detected → Use **Transformations → Handle Missing Data**")
-                        
-                    except Exception as e:
-                        st.error(f"❌ **Loading failed**: {str(e)}")
-                        
-                        # Troubleshooting suggestions
-                        st.markdown("#### 🔧 **Troubleshooting**")
-                        st.info("Try these solutions:")
-                        st.info("• Change the **separator** setting")
-                        st.info("• Check **decimal separator** (. vs ,)")
-                        st.info("• Verify **header/index** settings")
-                        st.info("• Remove special characters from data")
-                        st.info("• Copy smaller data chunks")
-            
-            else:
-                # When no data is pasted, show example
-                st.info("👆 **Paste your data above to get started**")
-                
-                with st.expander("📝 **Example Data Formats**"):
-                    st.markdown("**Example 1: Excel/Spreadsheet Data**")
-                    st.code("""Sample_ID	Moisture	Protein	Fat	Ash
-Sample1	12.5	18.2	3.4	1.2
-Sample2	11.8	19.1	3.8	1.1
-Sample3	13.2	17.9	3.2	1.3""")
-                    
-                    st.markdown("**Example 2: Spectral Data (NIR/IR)**")
-                    st.code("""Sample_ID	1000nm	1100nm	1200nm	1300nm
-Wheat1	0.534	0.623	0.445	0.567
-Wheat2	0.612	0.534	0.523	0.589
-Wheat3	0.445	0.678	0.599	0.523""")
-                    
-                    st.markdown("**Example 3: Chemical Analysis Data**")
-                    st.code("""Compound,Concentration,pH,Temperature,Yield
-Aspirin,95.2,6.8,25.5,87.3
-Ibuprofen,98.1,7.2,26.1,91.5
-Paracetamol,96.8,6.9,25.8,89.2""")
-                
-                # Quick start tips
-                st.markdown("#### 🚀 **Quick Start Tips**")
-                st.info("✅ **Best practices for Copy/Paste:**")
-                st.info("• Include column headers for automatic variable naming")
-                st.info("• Use consistent missing value indicators (NA, N/A, etc.)")
-                st.info("• Check decimal separators match your data (, vs .)")
-                st.info("• For large datasets, start with a small sample to test settings")
         
         elif load_method == "Sample Data":
             st.markdown("### Sample Datasets")
@@ -1025,7 +726,7 @@ Paracetamol,96.8,6.9,25.8,89.2""")
     
                 st.success(f"Sample data loaded: {data.shape[0]} rows × {data.shape[1]} columns")
                 st.dataframe(data.head(), use_container_width=True)
-
+    
     # ===== EXPORT DATA TAB =====
     with tab2:
         st.markdown("## Export Data")
@@ -1109,16 +810,15 @@ Paracetamol,96.8,6.9,25.8,89.2""")
                         "text/csv"
                     )
     
-    # ===== WORKSPACE TAB - UPDATED =====
+    # ===== WORKSPACE TAB =====
     with tab3:
         st.markdown("## Workspace Management")
         st.markdown("*Equivalent to DH_workspace_management.r*")
         
-        # Show current active dataset
         if 'current_data' in st.session_state:
             data = st.session_state.current_data
             
-            st.markdown("### 📊 Current Active Dataset")
+            st.markdown("### Current Dataset Overview")
             
             col1, col2, col3, col4 = st.columns(4)
             
@@ -1132,36 +832,17 @@ Paracetamol,96.8,6.9,25.8,89.2""")
                 memory_mb = data.memory_usage(deep=True).sum() / 1024 / 1024
                 st.metric("Size", f"{memory_mb:.1f} MB")
             
-            # Show if dataset is transformed
-            current_name = st.session_state.current_dataset
-            if '.' in current_name and not current_name.endswith('_ORIGINAL'):
-                # This is a transformed dataset
-                transform_type = current_name.split('.')[-1]
-                st.info(f"🔬 **Active dataset is transformed**: {transform_type}")
-                
-                # Find original dataset
-                base_name = current_name.split('.')[0]
-                original_key = f"{base_name}_ORIGINAL"
-                
-                if 'transformation_history' in st.session_state and original_key in st.session_state.transformation_history:
-                    original_data = st.session_state.transformation_history[original_key]['data']
-                    st.info(f"📋 **Original size**: {original_data.shape[0]} × {original_data.shape[1]} → **Current size**: {data.shape[0]} × {data.shape[1]}")
-            else:
-                st.success("📋 **Dataset**: Original (no transformations applied)")
-            
             # Preview
             st.markdown("### Data Preview")
             st.dataframe(data.head(10), use_container_width=True)
         else:
             st.info("Load a dataset to see workspace information")
 
-        # Show Dataset Splits
         if 'split_datasets' in st.session_state and st.session_state.split_datasets:
-            st.markdown("---")
             st.markdown("### 📦 Saved Dataset Splits")
             st.info(f"You have {len(st.session_state.split_datasets)} saved dataset splits")
             
-            # Group by parent dataset
+            # Raggruppa per parent dataset
             splits_by_parent = {}
             for name, info in st.session_state.split_datasets.items():
                 parent = info.get('parent', 'Unknown')
@@ -1169,7 +850,7 @@ Paracetamol,96.8,6.9,25.8,89.2""")
                     splits_by_parent[parent] = []
                 splits_by_parent[parent].append((name, info))
             
-            # Show by group
+            # Mostra per gruppo
             for parent, splits in splits_by_parent.items():
                 st.markdown(f"#### 📁 From: {parent}")
                 
@@ -1184,7 +865,7 @@ Paracetamol,96.8,6.9,25.8,89.2""")
                             st.write(f"• Variables: {info['data'].shape[1]}")
                             st.write(f"• Created: {info['creation_time'].strftime('%Y-%m-%d %H:%M:%S')}")
                             
-                            # Additional info if available
+                            # Info aggiuntive se disponibili
                             if 'selection_method' in info:
                                 st.write(f"• Selection: {info['selection_method']}")
                             if 'pc_axes' in info:
@@ -1194,23 +875,23 @@ Paracetamol,96.8,6.9,25.8,89.2""")
                             st.markdown("**Actions:**")
                             
                             # Load button
-                            if st.button(f"📂 Load Dataset", key=f"load_{name}"):
+                            if st.button(f"📂 Load Dataset", key=f"load_{name}", use_container_width=True):
                                 st.session_state.current_data = info['data']
                                 st.session_state.current_dataset = name
                                 st.success(f"✅ Loaded: {name}")
                                 st.rerun()
                             
                             # Preview button
-                            if st.button(f"👁️ Preview Data", key=f"preview_{name}"):
+                            if st.button(f"👁️ Preview Data", key=f"preview_{name}", use_container_width=True):
                                 st.dataframe(info['data'].head(5), use_container_width=True)
                             
                             # Delete button
-                            if st.button(f"🗑️ Delete", key=f"delete_{name}"):
+                            if st.button(f"🗑️ Delete", key=f"delete_{name}", use_container_width=True):
                                 del st.session_state.split_datasets[name]
                                 st.success(f"Deleted: {name}")
                                 st.rerun()
             
-            # Clear all splits button
+            # Bottone per pulire tutto
             st.markdown("---")
             if st.button("🗑️ Clear All Splits", key="clear_all_splits"):
                 if st.session_state.get('confirm_clear_splits', False):
@@ -1222,107 +903,59 @@ Paracetamol,96.8,6.9,25.8,89.2""")
                     st.session_state.confirm_clear_splits = True
                     st.warning("⚠️ Click again to confirm deletion of all splits")
         
-        # Show Transformation History - ENHANCED
         if 'transformation_history' in st.session_state and st.session_state.transformation_history:
             st.markdown("---")
             st.markdown("### 🔬 Transformation History")
+            st.info(f"You have {len(st.session_state.transformation_history)} transformed datasets")
             
-            # Count different types
-            originals = [name for name, info in st.session_state.transformation_history.items() if info.get('transform_type') == 'original']
-            transformations = [name for name, info in st.session_state.transformation_history.items() if info.get('transform_type') != 'original']
-            
-            st.info(f"📊 **Memory**: {len(originals)} original datasets • {len(transformations)} transformations")
-            
-            # Group transformations by original dataset
-            transforms_by_origin = {}
+            # Mostra trasformazioni per tipo
+            transforms_by_type = {}
             for name, info in st.session_state.transformation_history.items():
-                if info.get('transform_type') == 'original':
-                    origin_key = name
-                else:
-                    origin_key = info.get('original_dataset', 'Unknown')
-                
-                if origin_key not in transforms_by_origin:
-                    transforms_by_origin[origin_key] = {'original': None, 'transformations': []}
-                
-                if info.get('transform_type') == 'original':
-                    transforms_by_origin[origin_key]['original'] = (name, info)
-                else:
-                    transforms_by_origin[origin_key]['transformations'].append((name, info))
+                transform_type = info.get('transform', 'Unknown')
+                if transform_type not in transforms_by_type:
+                    transforms_by_type[transform_type] = []
+                transforms_by_type[transform_type].append((name, info))
             
-            # Display each original dataset and its transformations
-            for origin_key, group in transforms_by_origin.items():
+            for transform_type, transforms in transforms_by_type.items():
+                st.markdown(f"#### 🔧 {transform_type}")
                 
-                # Show original dataset
-                if group['original']:
-                    orig_name, orig_info = group['original']
-                    st.markdown(f"#### 📋 Original: {orig_name.replace('_ORIGINAL', '')}")
-                    
-                    with st.expander(f"**Original Data** ({orig_info['data'].shape[0]} × {orig_info['data'].shape[1]})"):
+                for name, info in transforms:
+                    with st.expander(f"**{name}** ({info['data'].shape[0]} × {info['data'].shape[1]})"):
                         col1, col2 = st.columns(2)
                         
                         with col1:
-                            st.markdown("**Dataset Info:**")
-                            st.write(f"• Status: {orig_info['transform']}")
-                            st.write(f"• Shape: {orig_info['data'].shape[0]} × {orig_info['data'].shape[1]}")
-                            st.write(f"• Loaded: {orig_info['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}")
-                            st.write(f"• Memory: {orig_info['data'].memory_usage(deep=True).sum() / 1024 / 1024:.1f} MB")
+                            st.markdown("**Transform Info:**")
+                            st.write(f"• Type: {info['transform']}")
+                            st.write(f"• Shape: {info['data'].shape[0]} × {info['data'].shape[1]}")
+                            st.write(f"• Created: {info['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}")
+                            
+                            if 'params' in info and info['params']:
+                                st.write("**Parameters:**")
+                                for key, val in info['params'].items():
+                                    st.write(f"• {key}: {val}")
                         
                         with col2:
                             st.markdown("**Actions:**")
                             
-                            # Load original
-                            if st.button(f"📂 Load Original", key=f"load_original_{orig_name}"):
-                                st.session_state.current_data = orig_info['data']
-                                st.session_state.current_dataset = orig_name.replace('_ORIGINAL', '')
-                                st.success(f"✅ Loaded original dataset")
+                            # Load button
+                            if st.button(f"📂 Load Dataset", key=f"load_transform_{name}", use_container_width=True):
+                                st.session_state.current_data = info['data']
+                                st.session_state.current_dataset = name
+                                st.success(f"✅ Loaded: {name}")
                                 st.rerun()
                             
-                            # Preview original
-                            if st.button(f"👁️ Preview Original", key=f"preview_original_{orig_name}"):
-                                st.dataframe(orig_info['data'].head(5), use_container_width=True)
-                
-                # Show transformations
-                if group['transformations']:
-                    st.markdown(f"**🔄 Transformations ({len(group['transformations'])}):**")
-                    
-                    for name, info in group['transformations']:
-                        with st.expander(f"**{name.split('.')[-1]}** ({info['data'].shape[0]} × {info['data'].shape[1]})"):
-                            col1, col2 = st.columns(2)
+                            # Preview button
+                            if st.button(f"👁️ Preview", key=f"preview_transform_{name}", use_container_width=True):
+                                st.dataframe(info['data'].head(5), use_container_width=True)
                             
-                            with col1:
-                                st.markdown("**Transform Info:**")
-                                st.write(f"• Type: {info['transform']}")
-                                st.write(f"• Shape: {info['data'].shape[0]} × {info['data'].shape[1]}")
-                                st.write(f"• Created: {info['timestamp'].strftime('%Y-%m-%d %H:%M:%S')}")
-                                
-                                if 'params' in info and info['params']:
-                                    st.write("**Parameters:**")
-                                    for key, val in info['params'].items():
-                                        st.write(f"• {key}: {val}")
-                            
-                            with col2:
-                                st.markdown("**Actions:**")
-                                
-                                # Load transformation
-                                if st.button(f"📂 Load Dataset", key=f"load_transform_{name}"):
-                                    st.session_state.current_data = info['data']
-                                    st.session_state.current_dataset = name
-                                    st.success(f"✅ Loaded: {name.split('.')[-1]}")
-                                    st.rerun()
-                                
-                                # Preview transformation
-                                if st.button(f"👁️ Preview", key=f"preview_transform_{name}"):
-                                    st.dataframe(info['data'].head(5), use_container_width=True)
-                                
-                                # Delete transformation
-                                if st.button(f"🗑️ Delete", key=f"delete_transform_{name}"):
-                                    del st.session_state.transformation_history[name]
-                                    st.success(f"Deleted: {name}")
-                                    st.rerun()
-                
-                st.markdown("---")
+                            # Delete button
+                            if st.button(f"🗑️ Delete", key=f"delete_transform_{name}", use_container_width=True):
+                                del st.session_state.transformation_history[name]
+                                st.success(f"Deleted: {name}")
+                                st.rerun()
             
-            # Clear all transformations button
+            # Bottone per pulire tutto
+            st.markdown("---")
             if st.button("🗑️ Clear All Transformations", key="clear_all_transforms"):
                 if st.session_state.get('confirm_clear_transforms', False):
                     st.session_state.transformation_history = {}
@@ -1332,10 +965,9 @@ Paracetamol,96.8,6.9,25.8,89.2""")
                 else:
                     st.session_state.confirm_clear_transforms = True
                     st.warning("⚠️ Click again to confirm deletion of all transformations")
+
         else:
-            st.info("📋 No dataset splits or transformations saved yet.")
-            st.info("• Use **PCA Analysis → Scores Plots** to create dataset splits")
-            st.info("• Use **Transformations** to create preprocessed datasets")
+            st.info("No dataset splits saved yet. Use PCA Analysis → Scores Plots to create splits.")
     
     # ===== DATASET OPERATIONS TAB =====
     with tab4:
@@ -1425,6 +1057,7 @@ Paracetamol,96.8,6.9,25.8,89.2""")
                 
                 st.rerun()
 
+
     # ===== METADATA MANAGEMENT TAB =====
     with tab6:
         st.markdown("## Metadata Management")
@@ -1437,45 +1070,45 @@ Paracetamol,96.8,6.9,25.8,89.2""")
             
             st.markdown("### Current Dataset Analysis")
             
-            # Automatic dataset analysis
+            # Analisi automatica del dataset
             col1, col2 = st.columns(2)
             
             with col1:
                 st.markdown("#### Variable Classification")
                 
-                # Automatically classify variables
+                # Classifica automaticamente le variabili
                 numeric_cols = data.select_dtypes(include=[np.number]).columns.tolist()
                 categorical_cols = data.select_dtypes(include=['object', 'category']).columns.tolist()
                 
-                # Heuristic to identify spectral data
-                # Simplified algorithm: if it's a pure number = spectral, otherwise = metadata
+                # Euristica per identificare dati spettrali
+                # Algoritmo semplificato: se è un numero puro = spettrale, altrimenti = metadata
                 potential_spectral = []
                 potential_metadata = []
                 
                 for col in numeric_cols:
                     col_str = str(col)
                     
-                    # Remove spaces and check if it's ONLY a number
+                    # Rimuovi spazi e controlla se è SOLO un numero
                     clean_col = col_str.strip()
                     
                     try:
-                        # Try to convert to float
+                        # Prova a convertire in float
                         num_val = float(clean_col)
                         
-                        # If it's a number and looks like wavelength/wavenumber, it's spectral
-                        # Typical ranges: 400-2500 nm (NIR), 4000-400 cm-1 (IR), 200-800 nm (UV-Vis)
-                        if (200 <= num_val <= 25000):  # Wide range to cover all spectroscopies
+                        # Se è un numero e sembra una wavelength/wavenumber, è spettrale
+                        # Range tipici: 400-2500 nm (NIR), 4000-400 cm-1 (IR), 200-800 nm (UV-Vis)
+                        if (200 <= num_val <= 25000):  # Range ampio per coprire tutte le spettroscopie
                             potential_spectral.append(col)
                         else:
-                            # Number outside spectroscopic range = metadata
+                            # Numero fuori range spettroscopico = metadata
                             potential_metadata.append(col)
                             
                     except ValueError:
-                        # Not convertible to number = definitely metadata
-                        # (e.g.: "Moisture", "Protein", "Sample_ID", "% (w/w) of Barley")
+                        # Non è convertibile in numero = sicuramente metadata
+                        # (es: "Moisture", "Protein", "Sample_ID", "% (w/w) of Barley")
                         potential_metadata.append(col)
                 
-                # Add categorical to metadata
+                # Aggiungi categoriche a metadata
                 potential_metadata.extend(categorical_cols)
                 
                 st.info(f"**Auto-detected:**")
@@ -1486,7 +1119,7 @@ Paracetamol,96.8,6.9,25.8,89.2""")
             with col2:
                 st.markdown("#### Manual Variable Selection")
                 
-                # Manual selection
+                # Selezione manuale
                 st.markdown("**Mark as Metadata:**")
                 metadata_vars = st.multiselect(
                     "Select metadata/auxiliary variables:",
@@ -1500,7 +1133,7 @@ Paracetamol,96.8,6.9,25.8,89.2""")
                 st.write(f"Spectral/measurement variables: {len(spectral_vars)}")
                 st.write(f"Metadata variables: {len(metadata_vars)}")
             
-            # Variable preview
+            # Anteprima delle variabili
             st.markdown("### Variable Preview")
             
             tab_spectral, tab_metadata = st.tabs(["Spectral Data", "Metadata"])
@@ -1517,7 +1150,7 @@ Paracetamol,96.8,6.9,25.8,89.2""")
                     else:
                         st.dataframe(spectral_data.head(10), use_container_width=True)
                     
-                    # Statistics for spectral data
+                    # Statistics per dati spettrali
                     col_stat1, col_stat2, col_stat3 = st.columns(3)
                     with col_stat1:
                         st.metric("Min Value", f"{spectral_data.min().min():.4f}")
@@ -1534,7 +1167,7 @@ Paracetamol,96.8,6.9,25.8,89.2""")
                     st.markdown(f"**Metadata Variables** ({len(metadata_vars)} variables)")
                     st.dataframe(metadata_data.head(10), use_container_width=True)
                     
-                    # Metadata analysis
+                    # Analisi metadata
                     st.markdown("#### Metadata Analysis")
                     for var in metadata_vars:
                         with st.expander(f"Variable: {var}"):
@@ -1558,11 +1191,11 @@ Paracetamol,96.8,6.9,25.8,89.2""")
                 else:
                     st.info("No metadata variables selected")
             
-            # Save classification
+            # Salva classificazione
             st.markdown("### Save Classification")
             
             if st.button("Save Variable Classification"):
-                # Save classification to session state
+                # Salva la classificazione nel session state
                 if 'data_classification' not in st.session_state:
                     st.session_state.data_classification = {}
                 

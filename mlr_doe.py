@@ -64,7 +64,7 @@ def create_model_matrix(X, include_intercept=True, include_interactions=True,
     Args:
         X: DataFrame with predictor variables
         include_intercept: bool, include intercept term
-        include_interactions: bool, include two-term interactions
+        include_interactions: bool, include two-way interactions
         include_quadratic: bool, include quadratic terms
         interaction_matrix: optional matrix specifying which interactions to include
     
@@ -435,12 +435,9 @@ def calculate_lack_of_fit(y_data, y_pred, replicate_info, n_parameters):
         'p_value': p_value
     }
 
-def detect_central_points(X_data, tolerance=1e-6):
+def detect_central_points(X_data, tolerance=1e-10):
     """
-    Detect central points in the design matrix 
-    A central point has ALL variables at their central value:
-    - For coded variables: ALL must be 0
-    - For natural variables: ALL must be at the midpoint of their range
+    Detect central points in the design matrix (rows with all zeros or all middle values)
     
     Args:
         X_data: DataFrame with predictor variables
@@ -452,101 +449,31 @@ def detect_central_points(X_data, tolerance=1e-6):
     central_indices = []
     X_values = X_data.values
     
+    # Method 1: Check for rows with all zeros
     for i in range(len(X_data)):
-        # Method 1: Check for rows with ALL zeros (coded variables)
         if np.allclose(X_values[i], 0, atol=tolerance):
             central_indices.append(i)
             continue
         
-        # Method 2: Check if ALL values are at the midpoint of their respective ranges
+        # Method 2: Check if all values are at the midpoint of their range
+        # (for coded variables, this would be 0; for natural variables, the middle value)
         is_central = True
         for j in range(X_data.shape[1]):
             col_values = X_values[:, j]
-            unique_vals = np.unique(col_values)
+            min_val = col_values.min()
+            max_val = col_values.max()
+            mid_val = (min_val + max_val) / 2
             
-            # Skip if only one unique value (no variation in this column)
-            if len(unique_vals) <= 1:
-                continue
-                
-            # For coded variables (-1, 0, 1), center MUST be 0
-            if set(unique_vals).issubset({-1, 0, 1}):
-                if not np.isclose(X_values[i, j], 0, atol=tolerance):
-                    is_central = False
-                    break
-            else:
-                # For natural variables, center MUST be at midpoint
-                min_val = col_values.min()
-                max_val = col_values.max()
-                mid_val = (min_val + max_val) / 2
-                
-                if not np.isclose(X_values[i, j], mid_val, atol=tolerance):
-                    is_central = False
-                    break
+            # Check if this row's value is NOT at the extreme
+            if not np.isclose(X_values[i, j], mid_val, atol=tolerance):
+                is_central = False
+                break
         
-        # Only add if ALL columns passed the central point test
         if is_central:
             central_indices.append(i)
     
     return central_indices
 
-
-def detect_coded_matrix(data):
-    """
-    Detect if the data matrix contains coded variables (typically -1, 0, +1)
-    Returns info about coding status and suggestions
-    """
-    numeric_data = data.select_dtypes(include=[np.number])
-    
-    if numeric_data.empty:
-        return None
-    
-    coded_indicators = {
-        'likely_coded': False,
-        'columns_analysis': {},
-        'suggestion': None
-    }
-    
-    coded_columns = 0
-    
-    for col in numeric_data.columns:
-        col_data = numeric_data[col].dropna()
-        unique_vals = sorted(col_data.unique())
-        
-        analysis = {
-            'unique_values': unique_vals,
-            'n_unique': len(unique_vals),
-            'range': col_data.max() - col_data.min() if len(col_data) > 0 else 0,
-            'is_likely_coded': False
-        }
-        
-        # Check for typical coded patterns
-        if len(unique_vals) <= 5:  # Few levels suggest factorial design
-            # Common coded patterns
-            if set(unique_vals).issubset({-1, 0, 1}):
-                analysis['is_likely_coded'] = True
-                analysis['coding_type'] = 'Standard coded (-1, 0, +1)'
-                coded_columns += 1
-            elif set(unique_vals).issubset({-1, 1}):
-                analysis['is_likely_coded'] = True
-                analysis['coding_type'] = 'Two-level coded (-1, +1)'
-                coded_columns += 1
-            elif len(unique_vals) == 2 and analysis['range'] == 1:
-                analysis['is_likely_coded'] = True
-                analysis['coding_type'] = 'Binary coded (0, 1)'
-                coded_columns += 1
-            elif len(unique_vals) <= 3 and all(abs(v) <= 2 for v in unique_vals):
-                analysis['is_likely_coded'] = True
-                analysis['coding_type'] = 'Possible coded values'
-                coded_columns += 1
-        
-        coded_indicators['columns_analysis'][col] = analysis
-    
-    # Overall assessment
-    if coded_columns >= len(numeric_data.columns) * 0.7:  # 70% of columns appear coded
-        coded_indicators['likely_coded'] = True
-        coded_indicators['suggestion'] = 'transformation_menu'
-    
-    return coded_indicators
 
 def show():
     """Display the MLR/DOE Analysis page"""
@@ -560,29 +487,86 @@ def show():
     
     data = st.session_state.current_data
     
-    # Detect coded matrix
-    coded_info = detect_coded_matrix(data)
-    if coded_info and coded_info['likely_coded']:
-        st.info("🔍 **Coded Data Matrix Detected** - Variables appear to be coded (-1, 0, +1). For natural units transformation, go to **Menu → Transformation**.")
-        
-        with st.expander("📋 Coding Analysis Details"):
-            for col, analysis in coded_info['columns_analysis'].items():
-                if analysis['is_likely_coded']:
-                    st.write(f"**{col}**: {analysis.get('coding_type', 'Unknown coding')} - Values: {analysis['unique_values']}")
-
-    # Main tabs - FIXED SYNTAX ERROR
+    # Main tabs
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        "🎯 Candidate Points",
         "🔧 Model Computation", 
         "📊 Model Diagnostics",
         "📈 Response Surface",
         "🎨 Confidence Intervals",
         "🔮 Predictions",
-        "🎯 Generate Matrix",
         "💾 Extract & Export"
     ])
     
-    # ===== MODEL COMPUTATION TAB =====
+    # ===== CANDIDATE POINTS TAB =====
     with tab1:
+        st.markdown("## 🎯 Generate Candidate Points")
+        st.markdown("*Equivalent to DOE_candidate_points.r*")
+        
+        st.info("Create a full factorial design by specifying factor levels")
+        
+        n_variables = st.number_input("Number of variables:", min_value=2, max_value=10, value=3)
+        
+        variables_config = {}
+        
+        st.markdown("### Variable Configuration")
+        
+        for i in range(n_variables):
+            col1, col2, col3 = st.columns([1, 2, 1])
+            
+            with col1:
+                var_name = st.text_input(f"Variable {i+1} name:", value=f"X{i+1}", key=f"var_name_{i}")
+            
+            with col2:
+                var_type = st.selectbox(f"Type:", ["Numeric", "Categorical"], key=f"var_type_{i}")
+            
+            with col3:
+                if var_type == "Numeric":
+                    levels_input = st.text_input(f"Levels:", value="0,1,2", key=f"var_levels_{i}",
+                                                help="Comma-separated numeric values")
+                else:
+                    levels_input = st.text_input(f"Levels:", value="Low,Medium,High", key=f"var_levels_{i}",
+                                                help="Comma-separated text values")
+            
+            variables_config[var_name] = levels_input
+        
+        if st.button("🚀 Generate Candidate Points", type="primary"):
+            try:
+                candidate_points = generate_candidate_points(variables_config)
+                
+                st.success(f"✅ Generated {len(candidate_points)} candidate points")
+                
+                # Store in session state
+                st.session_state.candidate_points = candidate_points
+                
+                # Display
+                st.markdown("### Generated Design Matrix")
+                st.dataframe(candidate_points, use_container_width=True)
+                
+                # Statistics
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Total Points", len(candidate_points))
+                with col2:
+                    st.metric("Variables", len(variables_config))
+                with col3:
+                    memory_kb = candidate_points.memory_usage(deep=True).sum() / 1024
+                    st.metric("Size (KB)", f"{memory_kb:.1f}")
+                
+                # Export option
+                csv_data = candidate_points.to_csv(index=False)
+                st.download_button(
+                    "💾 Download Candidate Points CSV",
+                    csv_data,
+                    "candidate_points.csv",
+                    "text/csv"
+                )
+                
+            except Exception as e:
+                st.error(f"❌ Error generating candidate points: {str(e)}")
+    
+    # ===== MODEL COMPUTATION TAB =====
+    with tab2:
         st.markdown("## 🔧 MLR Model Computation")
         st.markdown("*Equivalent to DOE_model_computation.r*")
         
@@ -631,11 +615,9 @@ def show():
                 st.warning("⚠️ Select at least one X variable")
                 return
             
-            # Show selected variables info - FIX FOR TYPEERROR
+            # Show selected variables info
             if x_vars and y_var:
-                # Ensure x_vars are strings
-                x_vars_str = [str(var) for var in x_vars]
-                st.info(f"Model: {y_var} ~ {' + '.join(x_vars_str)}")
+                st.info(f"Model: {y_var} ~ {' + '.join(x_vars)}")
         
         with col2:
             st.markdown("### 🎯 Sample Selection")
@@ -695,11 +677,12 @@ def show():
         
         st.markdown("---")
         
+
         # Model Settings
         st.markdown("### ⚙️ Model Settings")
 
         include_intercept = st.checkbox("Include intercept", value=True)
-        include_interactions = st.checkbox("Include two-term interactions", value=True)
+        include_interactions = st.checkbox("Include two-way interactions", value=True)
         include_quadratic = st.checkbox("Include quadratic terms", value=True)
         exclude_central_points = st.checkbox("Exclude central points (0,0,0...)", value=False,
                                             help="Central points are typically used only for validation in factorial designs")
@@ -741,29 +724,14 @@ def show():
         # Fit model button
         if st.button("🚀 Fit MLR Model", type="primary"):
             try:
-                # DEBUG - Aggiungi queste righe
-                st.write("DEBUG - Selected X vars:", x_vars)
-                st.write("DEBUG - Selected Y var:", y_var)
-                st.write("DEBUG - Data shape:", data.shape)
-                
                 # Prepare data with selected samples
                 X_data = data.loc[selected_samples, x_vars].copy()
                 y_data = data.loc[selected_samples, y_var].copy()
-                
-                # DEBUG - Aggiungi queste righe
-                st.write("DEBUG - X_data shape:", X_data.shape)
-                st.write("DEBUG - X_data columns:", X_data.columns.tolist())
-                st.write("DEBUG - y_data shape:", y_data.shape)
-                st.write("DEBUG - X_data preview:")
-                st.dataframe(X_data.head())
                 
                 # Remove missing values
                 valid_idx = ~(X_data.isnull().any(axis=1) | y_data.isnull())
                 X_data = X_data[valid_idx]
                 y_data = y_data[valid_idx]
-                
-                # DEBUG - Aggiungi questa riga
-                st.write("DEBUG - After removing missing values - X_data shape:", X_data.shape)
                 
                 if len(X_data) < len(x_vars) + 1:
                     st.error("❌ Not enough samples for model fitting!")
@@ -773,7 +741,7 @@ def show():
                 
                 # Detect and optionally exclude central points
                 central_points = detect_central_points(X_data)
-
+                
                 if central_points:
                     st.info(f"🎯 Detected {len(central_points)} central point(s) at indices: {[i+1 for i in central_points]}")
                     
@@ -796,7 +764,7 @@ def show():
                         }
                     else:
                         st.info("ℹ️ Central points included in the model")
-
+                
                 # Create model matrix
                 with st.spinner("Creating model matrix..."):
                     X_model, term_names = create_model_matrix(
@@ -806,59 +774,41 @@ def show():
                         include_quadratic=include_quadratic,
                         interaction_matrix=interaction_matrix
                     )
-
+                
                 st.success(f"✅ Model matrix created: {X_model.shape[0]} × {X_model.shape[1]}")
-
+                
                 # Fit model
                 with st.spinner("Fitting MLR model..."):
                     model_results = fit_mlr_model(X_model, y_data, return_diagnostics=run_cv)
-
+                
                 if model_results is None:
                     return
-
+                
                 # Store results
                 st.session_state.mlr_model = model_results
                 st.session_state.mlr_y_var = y_var
                 st.session_state.mlr_x_vars = x_vars
-
+                
                 st.success("✅ MLR model fitted successfully!")
                 
-                # Show number of experiments used for fitting
-                st.info(f"📊 **Model fitted using {model_results['n_samples']} experiments** (after excluding central points if selected)")
-
-                # Model Quality Summary - SIMPLIFIED
-                st.markdown("### 📈 Model Quality Summary")
-                
-                summary_col1, summary_col2 = st.columns(2)
-                
-                with summary_col1:
-                    if 'r_squared' in model_results:
-                        var_explained_pct = model_results['r_squared'] * 100
-                        st.metric("% Explained Variance (R²)", f"{var_explained_pct:.2f}%")
-                
-                with summary_col2:
-                    if 'rmse' in model_results:
-                        st.metric("Std Dev of Residuals (RMSE)", f"{model_results['rmse']:.4f}")
-
                 # ========== EXPERIMENTAL VARIABILITY ANALYSIS ==========
-
-                # ALWAYS use ALL original data (including central points) for experimental variability calculation
-                # This gives the true experimental error regardless of modeling choices
+                
+                # Check for replicates INCLUDING central points (if excluded from model)
+                # This is done on the ORIGINAL data before filtering
                 all_X_data = data.loc[selected_samples, x_vars].copy()
                 all_y_data = data.loc[selected_samples, y_var].copy()
                 all_valid_idx = ~(all_X_data.isnull().any(axis=1) | all_y_data.isnull())
                 all_X_data = all_X_data[all_valid_idx]
                 all_y_data = all_y_data[all_valid_idx]
-
+                
                 replicate_info_full = detect_replicates(all_X_data, all_y_data)
-                st.write("DEBUG - replicate_info_full:", replicate_info_full)
-
+                
                 if replicate_info_full:
                     st.markdown("### 🔬 Experimental Variability (Pure Error)")
                     st.info("""
                     **Pure experimental error** estimated from replicate measurements 
-                    (including ALL points - central points always included for experimental error calculation). 
-                    This represents the baseline measurement variability.
+                    (including central points if present). This represents the baseline 
+                    measurement variability.
                     """)
                     
                     rep_col1, rep_col2, rep_col3, rep_col4 = st.columns(4)
@@ -886,7 +836,7 @@ def show():
                             })
                         
                         rep_df = pd.DataFrame(rep_data)
-                        st.dataframe(rep_df, )
+                        st.dataframe(rep_df, use_container_width=True)
                         
                         st.markdown(f"""
                         **Pooled Standard Deviation Formula:**
@@ -904,41 +854,23 @@ def show():
                     st.markdown("---")
                     st.markdown("### 📊 Statistical Analysis of Model Quality")
                     
-                    # 1. Compare DoE variability vs experimental variability (F-test)
-                    st.markdown("#### 1️⃣ DoE Factor Variability vs Experimental Variability")
+                    # 1. Compare global variability vs experimental variability (F-test)
+                    st.markdown("#### 1️⃣ Global Variability vs Experimental Variability")
                     
                     if 'var_y' in model_results:
-                        # CORRECTED: Use only DoE data (excluding central points if excluded from model)
-                        if central_points and exclude_central_points:
-                            # Use only the modeling data (DoE points without central points)
-                            doe_y_data = y_data  # This already excludes central points
-                            var_y_doe = np.var(doe_y_data, ddof=1)
-                            dof_y_doe = len(doe_y_data) - 1
-                            
-                            st.info(f"""
-                            **DoE Variability**: Calculated from {len(doe_y_data)} DoE experimental points 
-                            (central points excluded as they don't contribute to factor-induced variation).
-                            """)
-                        else:
-                            # Use all data if central points are included in model
-                            var_y_doe = model_results['var_y']
-                            dof_y_doe = len(all_y_data) - 1
-                            
-                            st.info("""
-                            **DoE Variability**: Calculated from all experimental points 
-                            (central points included in model).
-                            """)
+                        var_y = model_results['var_y']
+                        dof_y = len(all_y_data) - 1
                         
-                        # F-test: σ²_DoE / σ²_exp
-                        f_global = var_y_doe / replicate_info_full['pooled_variance']
-                        f_crit_global = stats.f.ppf(0.95, dof_y_doe, replicate_info_full['pooled_dof'])
-                        p_global = 1 - stats.f.cdf(f_global, dof_y_doe, replicate_info_full['pooled_dof'])
+                        # F-test: σ²_global / σ²_exp
+                        f_global = var_y / replicate_info_full['pooled_variance']
+                        f_crit_global = stats.f.ppf(0.95, dof_y, replicate_info_full['pooled_dof'])
+                        p_global = 1 - stats.f.cdf(f_global, dof_y, replicate_info_full['pooled_dof'])
                         
                         test_col1, test_col2, test_col3 = st.columns(3)
                         
                         with test_col1:
-                            st.metric("DoE Variance (σ²_DoE)", f"{var_y_doe:.6f}")
-                            st.metric("DOF", dof_y_doe)
+                            st.metric("Global Variance (σ²_y)", f"{var_y:.6f}")
+                            st.metric("DOF", dof_y)
                         
                         with test_col2:
                             st.metric("Experimental Variance (σ²_exp)", f"{replicate_info_full['pooled_variance']:.6f}")
@@ -949,21 +881,11 @@ def show():
                             st.metric("p-value", f"{p_global:.4f}")
                         
                         if p_global < 0.05:
-                            st.success(f"✅ DoE factors induce significant variation in response (p={p_global:.4f})")
-                            st.info("The experimental factors have meaningful effects on the response variable.")
+                            st.success(f"✅ Global variability significantly exceeds experimental error (p={p_global:.4f})")
+                            st.info("This indicates that the DOE factors induce meaningful variation in the response.")
                         else:
-                            st.warning(f"⚠️ DoE factor effects not significantly different from experimental noise (p={p_global:.4f})")
-                            st.info("The factors may have weak effects or the experimental error is too large.")
-                        
-                        # Show variance ratio for interpretation
-                        variance_ratio = var_y_doe / replicate_info_full['pooled_variance']
-                        st.markdown(f"""
-                        **Variance Ratio**: σ²_DoE / σ²_exp = {variance_ratio:.2f}
-                        
-                        - Ratio > 4: Strong factor effects
-                        - Ratio 2-4: Moderate factor effects  
-                        - Ratio < 2: Weak factor effects
-                        """)
+                            st.warning(f"⚠️ Global variability not significantly different from experimental error (p={p_global:.4f})")
+                            st.info("The factors may not have strong effects on the response.")
                     
                     # 2. Lack of Fit test (residual error vs experimental error)
                     st.markdown("---")
@@ -1009,55 +931,42 @@ def show():
                         
                         with result_col2:
                             if p_lof > 0.05:
-                                st.success(f"✅ No significant Lack of Fit (p={p_lof:.4f})")
+                                st.success(f"No significant Lack of Fit (p={p_lof:.4f})")
                                 if ratio < 1.2:
-                                    st.info("🎯 Model error ≈ experimental error - excellent fit")
+                                    st.info("Model error ≈ experimental error - excellent fit")
                                 elif ratio < 2.0:
-                                    st.info("✅ Model error is reasonable")
+                                    st.info("Model error is reasonable")
                                 else:
-                                    st.warning("⚠️ Model error exceeds experimental error despite non-significant test")
+                                    st.warning("Model error exceeds experimental error despite non-significant test")
                             else:
-                                st.error(f"❌ Significant Lack of Fit detected (p={p_lof:.4f})")
+                                st.error(f"Significant Lack of Fit detected (p={p_lof:.4f})")
                                 st.warning("""
-                                **Model inadequate!** Consider:
+                                Model does not adequately fit the data. Consider:
                                 - Adding missing interaction or quadratic terms
-                                - Checking for outliers or influential points
-                                - Data transformations (log, sqrt, etc.)
-                                - Verifying model assumptions
+                                - Checking for outliers
+                                - Data transformations
                                 """)
                     else:
                         st.warning("Insufficient data for Lack of Fit test")
-                else:
-                    st.info("No replicates detected - skipping replicate analysis")
-                # Central points validation section (if excluded from model)
+                        
+                # Central points validation section (if applicable)
                 if central_points and exclude_central_points:
                     st.markdown("---")
+                    st.markdown("### 🎯 Central Points (Excluded from Model)")
+
+
+                # Central points validation section
+                if central_points and exclude_central_points:
                     st.markdown("### 🎯 Central Points Validation")
                     
                     st.info(f"""
                     **{len(central_points)} central point(s)** excluded from model fitting - reserved for validation.
-                    These points assess model adequacy and curvature effects at the center of the experimental domain.
+                    These points assess model adequacy and lack of fit.
                     """)
                     
                     if 'mlr_central_points' in st.session_state:
                         central_X = st.session_state.mlr_central_points['X']
                         central_y = st.session_state.mlr_central_points['y']
-                        
-                        # Calculate central point statistics
-                        central_mean = central_y.mean()
-                        central_std = central_y.std(ddof=1) if len(central_y) > 1 else 0
-                        
-                        central_stats_col1, central_stats_col2, central_stats_col3 = st.columns(3)
-                        
-                        with central_stats_col1:
-                            st.metric("Central Points Count", len(central_y))
-                        with central_stats_col2:
-                            st.metric("Mean Response", f"{central_mean:.4f}")
-                        with central_stats_col3:
-                            if len(central_y) > 1:
-                                st.metric("Std Dev", f"{central_std:.4f}")
-                            else:
-                                st.metric("Std Dev", "N/A (single point)")
                         
                         with st.expander("📋 Central Points Details"):
                             central_display = pd.DataFrame({
@@ -1069,17 +978,13 @@ def show():
                                 central_display[col] = central_X[col].values
                             
                             st.dataframe(central_display, use_container_width=True)
-                            
-                        st.info("""
-                        **Central Point Validation**: Use these points for model validation in the Predictions tab.
-                        They help assess curvature and lack of fit at the experimental center.
-                        """)
-
-                # Check for experimental replicates (on the data used for modeling)
+                            st.info("Use these points for validation in the Predictions tab.")
+                
+                # Check for experimental replicates
                 replicate_info = detect_replicates(X_data, y_data)
-
+                
                 if replicate_info:
-                    st.markdown("### 🔬 Experimental Replicates in Model Data")
+                    st.markdown("### 🔬 Experimental Replicates Detected")
                     
                     rep_col1, rep_col2, rep_col3, rep_col4 = st.columns(4)
                     
@@ -1092,7 +997,7 @@ def show():
                     with rep_col4:
                         st.metric("Replicate DOF", replicate_info['pooled_dof'])
                     
-                    with st.expander("📋 Model Data Replicate Groups Details"):
+                    with st.expander("📋 Replicate Groups Details"):
                         rep_data = []
                         for i, group in enumerate(replicate_info['group_stats'], 1):
                             rep_data.append({
@@ -1108,79 +1013,11 @@ def show():
                         st.dataframe(rep_df, use_container_width=True)
                     
                     st.info(f"""
-                    **Model Data Experimental Error** = {replicate_info['pooled_std']:.4f} 
-                    (from {replicate_info['pooled_dof']} degrees of freedom)
+                    **Pooled Standard Deviation** = {replicate_info['pooled_std']:.4f} (from {replicate_info['pooled_dof']} degrees of freedom)
                     
-                    This represents the experimental error in the data actually used for modeling.
+                    This represents the experimental error estimated from replicate measurements.
                     """)
-                    
-                    # Compare model replicates vs full replicates
-                    if replicate_info['pooled_std'] != replicate_info_full['pooled_std']:
-                        st.warning(f"""
-                        **Note**: Model data experimental error ({replicate_info['pooled_std']:.4f}) differs from 
-                        full dataset experimental error ({replicate_info_full['pooled_std']:.4f}).
-                        This occurs when central point replicates are excluded from modeling.
-                        """)
-                else:
-                    st.info("No experimental replicates detected in the model data.")
-
-                # ========== SUMMARY SECTION (MOVED OUT AND FIXED) ==========
                 
-                st.markdown("---")
-                st.markdown("### 📋 Statistical Analysis Summary")
-                
-                # Initialize variables with defaults to avoid NameError
-                var_y_doe = model_results.get('var_y', 0)
-                dof_y_doe = len(all_y_data) - 1
-                p_global = 1.0
-                central_mean = 0
-                
-                # Recalculate DoE variance if central points were excluded
-                if central_points and exclude_central_points:
-                    var_y_doe = np.var(y_data, ddof=1)
-                    dof_y_doe = len(y_data) - 1
-                
-                # Recalculate p_global if replicates exist
-                if replicate_info_full:
-                    f_global = var_y_doe / replicate_info_full['pooled_variance']
-                    p_global = 1 - stats.f.cdf(f_global, dof_y_doe, replicate_info_full['pooled_dof'])
-                
-                # Calculate central point mean if they exist
-                if central_points and exclude_central_points and 'mlr_central_points' in st.session_state:
-                    central_mean = st.session_state.mlr_central_points['y'].mean()
-                
-                summary_text = f"""
-                **Experimental Design Quality:**
-                
-                📊 **Data Structure:**
-                - Total samples: {len(all_y_data)}
-                - Model samples: {len(y_data)}
-                - Replicate groups: {replicate_info_full['n_replicate_groups'] if replicate_info_full else 0}
-                - Central points: {len(central_points) if central_points else 0}
-                
-                🔬 **Experimental Error:**
-                - Pure error: σ_exp = {replicate_info_full['pooled_std']:.4f} (DOF = {replicate_info_full['pooled_dof']}) {'' if replicate_info_full else '(No replicates detected)'}
-                - Model error: RMSE = {model_results['rmse']:.4f} (DOF = {model_results['dof']})
-                - Error ratio: {model_results['rmse']/replicate_info_full['pooled_std']:.2f} {'' if replicate_info_full else '(Cannot calculate - no replicates)'}
-                
-                📈 **Factor Effects:**
-                - DoE variance: σ²_DoE = {var_y_doe:.6f} (DOF = {dof_y_doe})
-                - Effect significance: p = {p_global:.4f}
-                - Variance amplification: {var_y_doe/replicate_info_full['pooled_variance']:.1f}× {'' if replicate_info_full else '(Cannot calculate - no replicates)'}
-                """
-                
-                if central_points and exclude_central_points:
-                    summary_text += f"""
-                    
-                🎯 **Central Points:**
-                - Excluded from model: {len(central_points)} points
-                - Reserved for validation
-                - Mean response: {central_mean:.4f}
-                    """
-                
-                st.info(summary_text)
-
-
                 # Display results - EQUIVALENT TO R OUTPUT
                 st.markdown("### 📋 Model Summary")
                 
@@ -1235,7 +1072,34 @@ def show():
                 leverage_series = pd.Series(model_results['leverage'], index=range(1, len(model_results['leverage'])+1))
                 st.dataframe(leverage_series.to_frame('Leverage').T.round(4), use_container_width=True)
                 st.info(f"**Maximum Leverage:** {model_results['leverage'].max():.4f}")
-
+                
+                # Model quality metrics - REVISED
+                st.markdown("---")
+                
+                summary_col1, summary_col2, summary_col3, summary_col4 = st.columns(4)
+                
+                with summary_col1:
+                    st.metric("Samples", model_results['n_samples'])
+                    st.metric("Model Terms", model_results['n_features'])
+                
+                with summary_col2:
+                    st.metric("Degrees of Freedom", model_results['dof'])
+                    if 'var_y' in model_results:
+                        st.metric("Variance of Y", f"{model_results['var_y']:.4f}")
+                
+                with summary_col3:
+                    if 'rmse' in model_results:
+                        st.metric("Std Dev of Residuals (RMSE)", f"{model_results['rmse']:.4f}")
+                        var_explained_pct = model_results['r_squared'] * 100
+                        st.metric("% Explained Variance", f"{var_explained_pct:.2f}%")
+                
+                with summary_col4:
+                    if 'rmsecv' in model_results:
+                        st.metric("RMSECV", f"{model_results['rmsecv']:.4f}")
+                    
+                    if replicate_info:
+                        st.metric("Experimental Std Dev", f"{replicate_info['pooled_std']:.4f}")
+                
                 # Comparison between model error and experimental error
                 if replicate_info and 'rmse' in model_results:
                     st.markdown("#### 🎯 Model vs Experimental Error Comparison")
@@ -1258,7 +1122,7 @@ def show():
                         st.info("ℹ️ Model error is reasonable compared to experimental error")
                     else:
                         st.warning("⚠️ Model error significantly exceeds experimental error - consider additional terms or transformation")
-
+                
                 # Coefficients table
                 st.markdown("### 📊 Model Coefficients")
                 
@@ -1282,10 +1146,10 @@ def show():
                             return ''
                     
                     coef_df['Sig.'] = coef_df['p-value'].apply(add_stars)
-
+                
                 st.dataframe(coef_df.round(4), use_container_width=True)
                 st.info("Significance codes: *** p≤0.001, ** p≤0.01, * p≤0.05")
-
+                
                 # Coefficients bar plot
                 st.markdown("#### Coefficients Bar Plot")
                 
@@ -1376,12 +1240,12 @@ def show():
                     st.markdown("""
                     **Color legend:** 
                     - Red = Linear terms
-                    - Green = Two-term interactions
+                    - Green = Two-way interactions
                     - Cyan = Quadratic terms
                     """)
                     
                     st.info("Significance markers: *** p≤0.001, ** p≤0.01, * p≤0.05")
-
+                
                 # Cross-validation results
                 if 'q2' in model_results:
                     st.markdown("### 🔄 Cross-Validation Results")
@@ -1391,15 +1255,14 @@ def show():
                         st.metric("RMSECV", f"{model_results['rmsecv']:.4f}")
                     with cv_col2:
                         st.metric("Q² (LOO-CV)", f"{model_results['q2']:.4f}")
-
+                
             except Exception as e:
                 st.error(f"❌ Error fitting model: {str(e)}")
                 import traceback
                 if st.checkbox("Show debug info"):
-                    st.code(traceback.format_exc())
-
+                    st.code(traceback.format_exc()) 
     # ===== MODEL DIAGNOSTICS TAB =====
-    with tab2:
+    with tab3:
         st.markdown("## 📊 Model Diagnostics")
         st.markdown("*Equivalent to DOE diagnostic plots*")
         
@@ -1511,103 +1374,83 @@ def show():
                 
                 coefficients = model_results['coefficients']
                 
-                # Filter out intercept term
-                coef_no_intercept = coefficients[coefficients.index != 'Intercept']
-                coef_names = coef_no_intercept.index.tolist()
+                # Determine colors based on coefficient type
+                coef_names = coefficients.index.tolist()
+                colors = []
+                for name in coef_names:
+                    if name == 'Intercept':
+                        colors.append('white')
+                    elif '*' in name:
+                        colors.append('green')  # Interactions
+                    elif '^2' in name:
+                        colors.append('cyan')  # Quadratic
+                    else:
+                        colors.append('red')  # Linear
                 
-                if len(coef_names) == 0:
-                    st.warning("No coefficients to plot (model contains only intercept)")
-                else:
-                    # Determine colors based on coefficient type (excluding intercept)
-                    colors = []
-                    for name in coef_names:
-                        if '*' in name:
-                            colors.append('green')  # Interactions
-                        elif '^2' in name:
-                            colors.append('cyan')  # Quadratic
-                        else:
-                            colors.append('red')  # Linear
+                fig = go.Figure()
+                
+                fig.add_trace(go.Bar(
+                    x=coef_names,
+                    y=coefficients.values,
+                    marker_color=colors,
+                    name='Coefficients'
+                ))
+                
+                # Add error bars if available
+                if 'ci_lower' in model_results:
+                    ci_lower = model_results['ci_lower'].values
+                    ci_upper = model_results['ci_upper'].values
                     
-                    fig = go.Figure()
-                    
-                    fig.add_trace(go.Bar(
-                        x=coef_names,
-                        y=coef_no_intercept.values,
-                        marker_color=colors,
-                        name='Coefficients'
-                    ))
-                    
-                    # Add error bars if available (excluding intercept)
-                    if 'ci_lower' in model_results:
-                        ci_lower = model_results['ci_lower'][coef_no_intercept.index].values
-                        ci_upper = model_results['ci_upper'][coef_no_intercept.index].values
-                        
-                        for i, name in enumerate(coef_names):
-                            fig.add_trace(go.Scatter(
-                                x=[name, name],
-                                y=[ci_lower[i], ci_upper[i]],
-                                mode='lines',
-                                line=dict(color='black', width=2),
-                                showlegend=False
-                            ))
-                    
-                    # Add significance markers (excluding intercept)
-                    if 'p_values' in model_results:
-                        p_values = model_results['p_values'][coef_no_intercept.index].values
-                        for i, (name, coef, p) in enumerate(zip(coef_names, coef_no_intercept.values, p_values)):
-                            if p <= 0.001:
-                                fig.add_annotation(x=name, y=coef, text='***', showarrow=False, font=dict(size=16))
-                            elif p <= 0.01:
-                                fig.add_annotation(x=name, y=coef, text='**', showarrow=False, font=dict(size=16))
-                            elif p <= 0.05:
-                                fig.add_annotation(x=name, y=coef, text='*', showarrow=False, font=dict(size=16))
-                    
-                    fig.update_layout(
-                        title=f"Coefficients - {st.session_state.mlr_y_var} (excluding intercept)",
-                        xaxis_title="Term",
-                        yaxis_title="Coefficient Value",
-                        height=600,
-                        xaxis={'tickangle': 45}
-                    )
-                    
-                    st.plotly_chart(fig, use_container_width=True)
-                    
-                    st.info("Red=Linear, Green=Interactions, Cyan=Quadratic")
-                    st.info("Significance: *** p≤0.001, ** p≤0.01, * p≤0.05")
-
+                    for i, name in enumerate(coef_names):
+                        fig.add_trace(go.Scatter(
+                            x=[name, name],
+                            y=[ci_lower[i], ci_upper[i]],
+                            mode='lines',
+                            line=dict(color='black', width=2),
+                            showlegend=False
+                        ))
+                
+                # Add significance markers
+                if 'p_values' in model_results:
+                    p_values = model_results['p_values'].values
+                    for i, (name, coef, p) in enumerate(zip(coef_names, coefficients.values, p_values)):
+                        if p <= 0.001:
+                            fig.add_annotation(x=name, y=coef, text='***', showarrow=False, font=dict(size=16))
+                        elif p <= 0.01:
+                            fig.add_annotation(x=name, y=coef, text='**', showarrow=False, font=dict(size=16))
+                        elif p <= 0.05:
+                            fig.add_annotation(x=name, y=coef, text='*', showarrow=False, font=dict(size=16))
+                
+                fig.update_layout(
+                    title=f"Coefficients - {st.session_state.mlr_y_var}",
+                    xaxis_title="Term",
+                    yaxis_title="Coefficient Value",
+                    height=600,
+                    xaxis={'tickangle': 45}
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                st.info("White=Intercept, Red=Linear, Green=Interactions, Cyan=Quadratic")
+                st.info("Significance: *** p≤0.001, ** p≤0.01, * p≤0.05")
+    
     # ===== RESPONSE SURFACE TAB =====
-    with tab3:
+    with tab4:
         st.markdown("## 📈 Response Surface")
         st.markdown("*Equivalent to DOE_response_surface.r*")
         
         if 'mlr_model' not in st.session_state:
             st.warning("⚠️ No MLR model fitted.")
         else:
-            st.info("🚧 Advanced response surface analysis available in professional versions")
-            st.markdown("""
-            **Professional DoE features include:**
-            
-            📈 **Response Surface Methods:**
-            - Interactive 3D surface plots
-            - Contour optimization maps
-            - Multiple response optimization
-
-            
-            🎯 **Advanced Designs:**
-            - D-optimal designs
-            - Custom experimental strategies
-            
-            🔍 **Analysis Tools:**
-            - Monte Carlo simulations
-            - Robust parameter design
-            - Mixture designs
-            - Split-plot designs
-            
-            📞 **Contact for full DoE capabilities:** [chemometricsolutions.com](https://chemometricsolutions.com)
-            """)
-
+            st.info("🚧 Response surface visualization will be implemented with 3D wireframe and contour plots")
+            st.markdown("Features planned:")
+            st.markdown("- 3D surface plot (wireframe)")
+            st.markdown("- 2D contour plot")
+            st.markdown("- Variable selection for axes")
+            st.markdown("- Fixed values for other variables")
+    
     # ===== CONFIDENCE INTERVALS TAB =====
-    with tab4:
+    with tab5:
         st.markdown("## 🎨 Confidence Intervals")
         st.markdown("*Equivalent to DOE_CI_surface.r*")
         
@@ -1619,9 +1462,9 @@ def show():
             st.markdown("- Prediction confidence interval surface")
             st.markdown("- Experimental confidence interval surface")
             st.markdown("- Leverage surface")
-
+    
     # ===== PREDICTIONS TAB =====
-    with tab5:
+    with tab6:
         st.markdown("## 🔮 Predictions for New Points")
         st.markdown("*Equivalent to DOE_prediction.r*")
         
@@ -1634,74 +1477,7 @@ def show():
             st.markdown("- Batch prediction from file")
             st.markdown("- Confidence intervals for predictions")
             st.markdown("- Leverage analysis for new points")
-
-    # ===== GENERATE MATRIX TAB (NOW CORRECTLY IN TAB6) =====
-    with tab6:
-        st.markdown("## 🎯 Generate Candidate Points")
-        st.markdown("*Equivalent to DOE_candidate_points.r*")
-        
-        st.info("Create a full factorial design by specifying factor levels")
-        
-        n_variables = st.number_input("Number of variables:", min_value=2, max_value=10, value=3)
-        
-        variables_config = {}
-        
-        st.markdown("### Variable Configuration")
-        
-        for i in range(n_variables):
-            col1, col2, col3 = st.columns([1, 2, 1])
-            
-            with col1:
-                var_name = st.text_input(f"Variable {i+1} name:", value=f"X{i+1}", key=f"var_name_{i}")
-            
-            with col2:
-                var_type = st.selectbox(f"Type:", ["Numeric", "Categorical"], key=f"var_type_{i}")
-            
-            with col3:
-                if var_type == "Numeric":
-                    levels_input = st.text_input(f"Levels:", value="0,1,2", key=f"var_levels_{i}",
-                                                help="Comma-separated numeric values")
-                else:
-                    levels_input = st.text_input(f"Levels:", value="Low,Medium,High", key=f"var_levels_{i}",
-                                                help="Comma-separated text values")
-            
-            variables_config[var_name] = levels_input
-        
-        if st.button("🚀 Generate Candidate Points", type="primary"):
-            try:
-                candidate_points = generate_candidate_points(variables_config)
-                
-                st.success(f"✅ Generated {len(candidate_points)} candidate points")
-                
-                # Store in session state
-                st.session_state.candidate_points = candidate_points
-                
-                # Display
-                st.markdown("### Generated Design Matrix")
-                st.dataframe(candidate_points, use_container_width=True)
-                
-                # Statistics
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Total Points", len(candidate_points))
-                with col2:
-                    st.metric("Variables", len(variables_config))
-                with col3:
-                    memory_kb = candidate_points.memory_usage(deep=True).sum() / 1024
-                    st.metric("Size (KB)", f"{memory_kb:.1f}")
-                
-                # Export option
-                csv_data = candidate_points.to_csv(index=False)
-                st.download_button(
-                    "💾 Download Candidate Points CSV",
-                    csv_data,
-                    "candidate_points.csv",
-                    "text/csv"
-                )
-                
-            except Exception as e:
-                st.error(f"❌ Error generating candidate points: {str(e)}")
-
+    
     # ===== EXTRACT & EXPORT TAB =====
     with tab7:
         st.markdown("## 💾 Extract & Export")

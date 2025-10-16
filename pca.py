@@ -235,10 +235,20 @@ def varimax_rotation(loadings, gamma=1.0, max_iter=100, tol=1e-6):
         iteration += 1
     
     return rotated_loadings, iteration
-def add_convex_hulls(fig, scores, pc_x, pc_y, color_data, color_discrete_map=None, hull_opacity=0.7):
+
+def add_convex_hulls(fig, scores, pc_x, pc_y, color_data, color_discrete_map=None, hull_opacity=0.7, dark_mode=True):
     """
     Aggiunge convex hull per ogni gruppo categorico nel plot PCA
-    Bordi sottili e continui - LIGHT THEME ONLY
+    Bordi sottili e continui - VERSIONE UNIFICATA
+    
+    Args:
+        fig: plotly figure
+        scores: DataFrame con i punteggi PCA
+        pc_x, pc_y: nomi delle colonne per gli assi
+        color_data: dati categorici per i colori
+        color_discrete_map: mappa colori personalizzata (opzionale)
+        hull_opacity: opacità delle linee hull
+        dark_mode: se True usa colori per tema scuro
     """
     try:
         from scipy.spatial import ConvexHull
@@ -261,7 +271,7 @@ def add_convex_hulls(fig, scores, pc_x, pc_y, color_data, color_discrete_map=Non
         
         # USA SISTEMA DI COLORI UNIFICATO se non fornita mappa personalizzata
         if color_discrete_map is None:
-            color_discrete_map = create_categorical_color_map(unique_groups)
+            color_discrete_map = create_categorical_color_map(unique_groups, dark_mode)
         
         hulls_added = 0
         
@@ -321,11 +331,12 @@ def add_convex_hulls(fig, scores, pc_x, pc_y, color_data, color_discrete_map=Non
     except Exception as e:
         print(f"Error in add_convex_hulls: {e}")
         return fig
-      
+    
 def show():
     """Display the PCA Analysis page"""
     
     st.markdown("# 🎯 Principal Component Analysis (PCA)")
+    st.markdown("*Complete PCA analysis suite equivalent to PCA_* R scripts*")
     
     if 'current_data' not in st.session_state:
         st.warning("⚠️ No data loaded. Please go to Data Handling to load your dataset first.")
@@ -338,332 +349,173 @@ def show():
         "🔧 Model Computation",
         "📊 Variance Plots", 
         "📈 Loadings Plots",
-        "🎯 Score Plots",
+        "🎯 Scores Plots",
         "🔍 Diagnostics",
         "👤 Extract & Export",
         "🔬 Advanced Diagnostics"
     ])
-
     # ===== MODEL COMPUTATION TAB =====
     with tab1:
         st.markdown("## 🔧 PCA Model Computation")
         st.markdown("*Equivalent to PCA_model_PCA.r and PCA_model_varimax.r*")
         
-        # === DATA OVERVIEW SECTION ===
-        st.markdown("### 📊 Dataset Overview")
+        # Data selection
+        col1, col2 = st.columns(2)
         
-        # Dataset info banner
-        total_cols = len(data.columns)
-        numeric_columns = data.select_dtypes(include=[np.number]).columns.tolist()
-        non_numeric_columns = data.select_dtypes(exclude=[np.number]).columns.tolist()
-        
-        # Create info banner similar to transformation module
-        col_info1, col_info2 = st.columns(2)
-        
-        with col_info1:
-            st.info(f"📋 **Dataset**: {len(data)} samples, {total_cols} total columns")
-        
-        with col_info2:
-            st.info(f"🔢 **Numeric**: {len(numeric_columns)} variables, **Non-numeric**: {len(non_numeric_columns)} variables")
-        
-        if len(numeric_columns) > 100:
-            st.success(f"🔬 **Spectral data detected**: {len(numeric_columns)} variables")
-        
-        # === DATA PREVIEW SECTION ===
-        st.markdown("### 👁️ Data Preview")
-        
-        # Preview options
-        col_prev1, col_prev2, col_prev3 = st.columns(3)
-        
-        with col_prev1:
-            preview_mode = st.selectbox(
-                "Preview mode:",
-                ["First 10 rows", "Random 10 rows", "Statistical summary"]
-            )
-        
-        with col_prev2:
-            show_all_columns = st.checkbox("Show all columns", value=False)
-        
-        with col_prev3:
-            if not show_all_columns:
-                max_cols_preview = st.number_input("Max columns to display:", 5, 50, 20)
-        
-        # Generate preview
-        if preview_mode == "Statistical summary":
-            if show_all_columns:
-                preview_data = data.describe()
-            else:
-                preview_cols = data.columns[:max_cols_preview] if not show_all_columns else data.columns
-                preview_data = data[preview_cols].describe()
-        else:
-            if preview_mode == "Random 10 rows":
-                sample_data = data.sample(min(10, len(data))) if len(data) > 10 else data
-            else:  # First 10 rows
-                sample_data = data.head(10)
+        with col1:
+            st.markdown("### 📊 Data Selection")
             
-            if show_all_columns:
-                preview_data = sample_data
-            else:
-                preview_cols = data.columns[:max_cols_preview] if not show_all_columns else data.columns
-                preview_data = sample_data[preview_cols]
-        
-        # Display preview
-        st.dataframe(preview_data, use_container_width=True, height=300)
-        
-        if not show_all_columns and len(data.columns) > max_cols_preview:
-            st.caption(f"Showing {max_cols_preview} of {len(data.columns)} columns. Enable 'Show all columns' to see everything.")
-        
-        # === VARIABLE SELECTION SECTION ===
-        st.markdown("### 🎯 Variable Selection for PCA")
-        
-        if not numeric_columns:
-            st.error("❌ No numeric columns found in the dataset!")
-            return
-        
-        # Column classification
-        col_class1, col_class2 = st.columns(2)
-        
-        with col_class1:
-            st.markdown("#### 📋 Column Classification")
+            # Variable selection
+            numeric_columns = data.select_dtypes(include=[np.number]).columns.tolist()
+            if not numeric_columns:
+                st.error("❌ No numeric columns found in the dataset!")
+                return
             
-            # Auto-detect metadata columns
-            metadata_candidates = []
-            for col in data.columns:
-                col_str = str(col).lower()
-                # Existing keywords
-                basic_keywords = ['id', 'name', 'label', 'class', 'group', 'sample', 'date', 'time']
-                # Additional patterns for analytical chemistry
-                analytical_patterns = [
-                    '%', 'percent', 'concentration', 'content', 'purity', 'composition',
-                    'w/w', 'v/v', 'ppm', 'mg/kg', 'mg/l', 'g/kg', 'wt%'
-                ]
+            # GESTIONE SPECIALE PER DATI SPETTRALI (molte variabili)
+            if len(numeric_columns) > 100:
+                st.info(f"🔬 **Spectral data detected**: {len(numeric_columns)} variables")
+                st.markdown("#### Variable Range Selection")
                 
-                if (any(keyword in col_str for keyword in basic_keywords) or 
-                    any(pattern in col_str for pattern in analytical_patterns)):
-                    metadata_candidates.append(col)
-            
-            if metadata_candidates:
-                st.info(f"🏷️ **Potential metadata columns detected**: {', '.join(metadata_candidates[:5])}")
-                if len(metadata_candidates) > 5:
-                    st.caption(f"... and {len(metadata_candidates) - 5} more")
-            
-            # Display column types
-            if non_numeric_columns:
-                st.markdown("**Non-numeric columns:**")
-                for col in non_numeric_columns[:10]:  # Show first 10
-                    st.write(f"• {col}")
-                if len(non_numeric_columns) > 10:
-                    st.caption(f"... and {len(non_numeric_columns) - 10} more")
-        
-        with col_class2:
-            st.markdown("#### 🔢 Numeric Variables Available")
-            st.write(f"**Total numeric variables**: {len(numeric_columns)}")
-            
-            # Show sample of numeric columns
-            if len(numeric_columns) <= 20:
-                st.write("**All numeric columns:**")
-                for i, col in enumerate(numeric_columns):
-                    st.write(f"{i+1}. {col}")
-            else:
-                st.write("**Sample of numeric columns:**")
-                for i, col in enumerate(numeric_columns[:10]):
-                    st.write(f"{i+1}. {col}")
-                st.caption(f"... and {len(numeric_columns) - 10} more")
-        
-        # === VARIABLE SELECTION INTERFACE ===
-        st.markdown("#### 🎛️ Select Variables for PCA Analysis")
-        
-        # Selection method for large datasets
-        if len(numeric_columns) > 50:
-            st.markdown("##### Variable Selection Method")
-            selection_method = st.selectbox(
-                "Choose selection method:",
-                ["Select All Numeric", "Range Selection", "Manual Selection", "Exclude Metadata Only"]
-            )
-            
-            if selection_method == "Select All Numeric":
-                selected_vars = numeric_columns
-                st.success(f"✅ Selected all {len(selected_vars)} numeric variables")
-                
-            elif selection_method == "Range Selection":
-                st.markdown("**Range-based selection:**")
-                col_range1, col_range2 = st.columns(2)
-                
-                with col_range1:
-                    start_idx = st.number_input("Start variable index (1-based):", 1, len(numeric_columns), 1)
-                with col_range2:
-                    end_idx = st.number_input("End variable index (1-based):", start_idx, len(numeric_columns), min(50, len(numeric_columns)))
-                
-                selected_vars = numeric_columns[start_idx-1:end_idx]
-                st.info(f"📊 Selected variables {start_idx} to {end_idx}: **{len(selected_vars)}** variables")
-                
-                # Show selected range
-                if len(selected_vars) <= 10:
-                    st.write("**Selected variables:**", ", ".join(selected_vars))
-                else:
-                    st.write("**Selected variables:**", ", ".join(selected_vars[:5]) + f" ... (+{len(selected_vars)-5} more)")
-                
-            elif selection_method == "Exclude Metadata Only":
-                excluded_cols = st.multiselect(
-                    "Select columns to EXCLUDE from PCA:",
-                    data.columns.tolist(),
-                    default=metadata_candidates + non_numeric_columns,
-                    help="Metadata and non-numeric columns are pre-selected for exclusion"
+                # Opzioni per dati spettrali
+                selection_method = st.selectbox(
+                    "Variable selection method:",
+                    ["All variables", "Range selection", "Every N variables", "Manual list"]
                 )
                 
-                selected_vars = [col for col in numeric_columns if col not in excluded_cols]
-                st.success(f"✅ Selected {len(selected_vars)} variables (excluded {len(excluded_cols)} columns)")
+                if selection_method == "All variables":
+                    selected_vars = numeric_columns
+                    
+                elif selection_method == "Range selection":
+                    col_range1, col_range2 = st.columns(2)
+                    with col_range1:
+                        start_idx = st.number_input("Start variable index:", 0, len(numeric_columns)-1, 0)
+                    with col_range2:
+                        end_idx = st.number_input("End variable index:", start_idx+1, len(numeric_columns), len(numeric_columns))
+                    
+                    selected_vars = numeric_columns[start_idx:end_idx]
+                    st.info(f"Selected {len(selected_vars)} variables (index {start_idx} to {end_idx-1})")
+                    
+                elif selection_method == "Every N variables":
+                    step_size = st.number_input("Select every N variables:", 1, 50, 5)
+                    selected_vars = numeric_columns[::step_size]
+                    st.info(f"Selected {len(selected_vars)} variables (every {step_size} variables)")
+                    
+                else:  # Manual list
+                    var_indices = st.text_input(
+                        "Variable indices (comma-separated, e.g., 1,5,10-20,25):",
+                        value="1,10,50,100"
+                    )
+                    
+                    # Parse manual selection
+                    try:
+                        selected_indices = []
+                        for part in var_indices.split(','):
+                            part = part.strip()
+                            if '-' in part:
+                                start, end = map(int, part.split('-'))
+                                selected_indices.extend(range(start-1, end))  # Convert to 0-based
+                            else:
+                                selected_indices.append(int(part)-1)  # Convert to 0-based
+                        
+                        # Remove duplicates and sort
+                        selected_indices = sorted(list(set(selected_indices)))
+                        # Filter valid indices
+                        selected_indices = [i for i in selected_indices if 0 <= i < len(numeric_columns)]
+                        selected_vars = [numeric_columns[i] for i in selected_indices]
+                        
+                        st.info(f"Selected {len(selected_vars)} variables from manual indices")
+                        
+                    except Exception as e:
+                        st.error(f"Invalid format: {e}")
+                        selected_vars = numeric_columns[:10]
                 
-            else:  # Manual Selection
-                st.markdown("**Manual variable selection:**")
-                selected_vars = st.multiselect(
-                    "Choose specific variables for PCA:",
-                    numeric_columns,
-                    default=numeric_columns[:min(10, len(numeric_columns))],
-                    help="Select the variables you want to include in the PCA analysis"
-                )
-        
-        else:
-            # Simple selection for smaller datasets
-            st.markdown("##### Choose Variables")
-            
-            col_sel1, col_sel2 = st.columns(2)
-            
-            with col_sel1:
-                select_all_numeric = st.checkbox("Select all numeric variables", value=True)
-            
-            with col_sel2:
-                if not select_all_numeric:
-                    exclude_metadata = st.checkbox("Auto-exclude metadata columns", value=True)
-            
-            if select_all_numeric:
-                selected_vars = numeric_columns
             else:
-                # Manual selection
-                if exclude_metadata and metadata_candidates:
-                    default_vars = [col for col in numeric_columns if col not in metadata_candidates]
+                # GESTIONE NORMALE per pochi variabili
+                select_all_vars = st.checkbox("Select all variables", value=True)
+
+                if select_all_vars:
+                    default_vars = numeric_columns
                 else:
                     default_vars = numeric_columns[:min(10, len(numeric_columns))]
-                
+
                 selected_vars = st.multiselect(
                     "Select variables for PCA:",
                     numeric_columns,
                     default=default_vars,
-                    key="pca_variable_selection_manual"
+                    key="pca_variable_selection"
                 )
-        
-        # Validation
-        if not selected_vars:
-            st.warning("⚠️ Please select at least 2 variables for PCA analysis")
-            return
-        
-        # Show final selection summary
-        st.markdown("#### 📋 Final Selection Summary")
-        col_summary1, col_summary2, col_summary3 = st.columns(3)
-        
-        with col_summary1:
-            st.metric("Selected Variables", len(selected_vars))
-        with col_summary2:
-            st.metric("Total Samples", len(data))
-        with col_summary3:
-            if len(selected_vars) > 0:
-                missing_pct = (data[selected_vars].isnull().sum().sum() / (len(data) * len(selected_vars))) * 100
-                st.metric("Missing Data %", f"{missing_pct:.1f}%")
-        
-        # === OBJECT SELECTION ===
-        st.markdown("### 🎯 Object (Sample) Selection")
-        
-        col_obj1, col_obj2 = st.columns(2)
-        
-        with col_obj1:
-            use_all_objects = st.checkbox("Use all objects", value=True)
             
-        with col_obj2:
+            if not selected_vars:
+                st.warning("⚠️ Please select at least 2 variables for PCA")
+                return
+                
+            # Object selection
+            use_all_objects = st.checkbox("Use all objects", value=True)
             if not use_all_objects:
                 n_objects = st.slider("Number of objects:", 5, len(data), len(data))
                 selected_data = data[selected_vars].iloc[:n_objects]
-                st.info(f"Using first {n_objects} samples")
             else:
-                selected_data = data[selected_vars]
-        
-        # === PCA PARAMETERS ===
-        st.markdown("### ⚙️ PCA Parameters")
-        
-        col_param1, col_param2 = st.columns(2)
-        
-        with col_param1:
-            st.markdown("**Preprocessing Options**")
-            center_data = st.checkbox("Center data", value=True, help="Remove column means")
-            scale_data = st.checkbox("Scale data (unit variance)", value=True, help="Standardize to unit variance")
+                selected_data = data[selected_vars]  
+                
+        with col2:
+            st.markdown("### ⚙️ PCA Parameters")
             
-            st.markdown("**Analysis Method**")
+            # Preprocessing options
+            center_data = st.checkbox("Center data", value=True)
+            scale_data = st.checkbox("Scale data (unit variance)", value=True)
+            
+            # PCA Method selection (KEY ADDITION)
             pca_method = st.selectbox("PCA Method:", ["Standard PCA", "Varimax Rotation"])
             
-        with col_param2:
-            st.markdown("**Model Parameters**")
+            # Number of components
             max_components = min(selected_data.shape) - 1
             n_components = st.slider("Number of components:", 2, max_components, 
                                    min(5, max_components))
             
-            # Missing values handling
-            missing_values = st.selectbox("Missing values:", ["Remove", "Impute mean"])
+            # Varimax specific options
+            if pca_method == "Varimax Rotation":
+                st.info("🔄 Varimax rotation will maximize factor interpretability")
+                st.markdown("*Equivalent to PCA_model_varimax.r*")
             
             # Advanced options
             with st.expander("🔧 Advanced Options"):
+                missing_values = st.selectbox("Missing values:",["Remove", "Impute mean"])
+                
                 if pca_method == "Varimax Rotation":
                     max_iter_varimax = st.number_input("Max Varimax iterations:", 50, 500, 100)
                     tolerance_varimax = st.number_input("Convergence tolerance:", 1e-8, 1e-3, 1e-6, format="%.0e")
                 
+                # Validation options
                 perform_validation = st.checkbox("Perform cross-validation", value=False)
                 if perform_validation:
                     cv_folds = st.slider("CV folds:", 3, 10, 5)
         
-        # === FINAL SUMMARY BEFORE COMPUTATION ===
-        if selected_vars:
-            st.markdown("### 📊 Pre-Analysis Summary")
+        # Pre-processing per dati spettrali
+        if len(selected_vars) > 50:  # Assumiamo dati spettrali/profili
+            st.markdown("### 🔬 Spectral Data Pre-processing")
             
-            # Create summary info
-            summary_col1, summary_col2, summary_col3, summary_col4 = st.columns(4)
-            
-            with summary_col1:
-                st.metric("Variables", len(selected_vars))
-            with summary_col2:
-                st.metric("Samples", len(selected_data))
-            with summary_col3:
-                st.metric("Components", n_components)
-            with summary_col4:
-                preprocessing = []
-                if center_data: preprocessing.append("Center")
-                if scale_data: preprocessing.append("Scale")
-                st.write(f"**Preprocessing**: {', '.join(preprocessing) if preprocessing else 'None'}")
-            
-            # Show selected variables preview
-            with st.expander("🔍 Preview Selected Variables"):
-                if len(selected_vars) <= 20:
-                    st.write("**Selected variables:**")
-                    cols_per_row = 4
-                    for i in range(0, len(selected_vars), cols_per_row):
-                        row_cols = st.columns(cols_per_row)
-                        for j, col in enumerate(selected_vars[i:i+cols_per_row]):
-                            with row_cols[j]:
-                                st.write(f"• {col}")
-                else:
-                    st.write(f"**Selected variables** ({len(selected_vars)} total):")
-                    st.write(", ".join(map(str, selected_vars[:10])) + f" ... (+{len(selected_vars)-10} more)")
+            with st.expander("⚙️ Data Transformation (WIP - Future Feature)"):
+                st.info("🚧 **Coming Soon**: Advanced spectral pre-processing")
+                st.markdown("""
+                **Planned transformations:**
+                - SNV (Standard Normal Variate)
+                - MSC (Multiplicative Scatter Correction)
+                - Detrending
+                - Derivatives (1st, 2nd)
+                - Baseline correction
+                - Smoothing filters
+                """)
                 
-                # Show data preview of selected variables
-                st.markdown("**Data preview (selected variables):**")
-                preview_selected = selected_data.head(5)
-                st.dataframe(preview_selected, use_container_width=True)
+                # Placeholder per futuro collegamento
+                if st.button("🔄 Go to Pre-processing Page (WIP)", disabled=True):
+                    st.info("This will redirect to a dedicated pre-processing page")
+                
+                st.warning("⚠️ For now, use raw data or pre-process externally")
 
-        # === COMPUTE BUTTON ===
-        st.markdown("---")
-        
+        # Compute PCA/Varimax
         button_text = "🚀 Compute Varimax Model" if pca_method == "Varimax Rotation" else "🚀 Compute PCA Model"
-        button_type = "primary"
         
-        if st.button(button_text, type=button_type, use_container_width=True):
-            # [Rest of the existing computation logic stays the same...]
+        if st.button(button_text, type="primary"):
             try:
                 # Data preprocessing
                 X = selected_data.copy()
@@ -914,7 +766,7 @@ def show():
                     height=500
                 )
                 
-                st.plotly_chart(fig, width='stretch')
+                st.plotly_chart(fig, use_container_width=True)
             
             elif plot_type == "📊 Cumulative Variance":
                 title_suffix = " (Varimax)" if is_varimax else ""
@@ -948,7 +800,7 @@ def show():
                     height=500
                 )
                 
-                st.plotly_chart(fig, width='stretch')
+                st.plotly_chart(fig, use_container_width=True)
             
             elif plot_type == "🎯 Individual Variable Contribution":
                 comp_label = "Factor" if is_varimax else "PC"
@@ -1009,7 +861,7 @@ def show():
                     xaxis={'tickangle': 45}
                 )
                 
-                st.plotly_chart(fig, width='stretch')
+                st.plotly_chart(fig, use_container_width=True)
                 
                 # Step 3: Tabella dettagliata
                 st.markdown("#### Step 3: Detailed Contribution Table")
@@ -1145,7 +997,7 @@ def show():
                             height=600
                         )
                         
-                        st.plotly_chart(fig_random, width='stretch')
+                        st.plotly_chart(fig_random, use_container_width=True)
                         
                         # Summary
                         significant_components = sum(original_variance > random_ci_upper)
@@ -1157,7 +1009,7 @@ def show():
     # ===== LOADINGS PLOTS TAB =====
     with tab3:
         st.markdown("## 📈 Loadings Plots")
-
+        st.markdown("*Equivalent to PCA_loading_plot_* R scripts*")
         
         if 'pca_model' not in st.session_state:
             st.warning("⚠️ No PCA model computed. Please compute a model first.")
@@ -1244,7 +1096,7 @@ def show():
                         colorbar=dict(title="Loading Magnitude")
                     ))
                 
-                st.plotly_chart(fig, uwidth='stretch')
+                st.plotly_chart(fig, use_container_width=True)
                 
                 if is_varimax:
                     st.info("💡 In Varimax rotation, variables should load highly on few factors (simple structure)")
@@ -1291,11 +1143,11 @@ def show():
                         height=500
                     )
                     
-                    st.plotly_chart(fig, width='stretch')
+                    st.plotly_chart(fig, use_container_width=True)
 
-    # ===== SCORE PLOTS TAB =====
+    # ===== SCORES PLOTS TAB =====
     with tab4:
-        st.markdown("## 🎯 Score Plots")
+        st.markdown("## 🎯 Scores Plots")
         st.markdown("*Equivalent to PCA_score_plot.r and PCA_score3D.r*")
         
         if 'pca_model' not in st.session_state:
@@ -1309,11 +1161,11 @@ def show():
             
             score_plot_type = st.selectbox(
                 "Select score plot type:",
-                ["📊 2D Score Plot", "🎲 3D Score Plot", "📈 Line Profiles Plot"]
+                ["📊 2D Scores Plot", "🎲 3D Scores Plot", "📈 Line Profiles Plot"]
             )
 
-            if score_plot_type == "📊 2D Score Plot":
-                st.markdown(f"### 📊 2D Score Plot{title_suffix}")
+            if score_plot_type == "📊 2D Scores Plot":
+                st.markdown(f"### 📊 2D Scores Plot{title_suffix}")
                 
                 # PC/Factor selection
                 col1, col2 = st.columns(2)
@@ -1353,7 +1205,7 @@ def show():
                 
                 with col_vis1:
                     if color_by != "None":
-                        show_convex_hull = st.checkbox("Show convex hulls", value=False, key="show_convex_hull")  # CHANGED: value=False
+                        show_convex_hull = st.checkbox("Show convex hulls", value=True, key="show_convex_hull")
                     else:
                         show_convex_hull = False
                 
@@ -1362,6 +1214,12 @@ def show():
                         hull_opacity = st.slider("Hull line opacity", 0.1, 1.0, 0.7, key="hull_opacity")
                     else:
                         hull_opacity = 0.7
+                
+                with col_vis3:
+                    if color_by != "None" and not (color_by in custom_vars and ('Time' in color_by or 'time' in color_by)):
+                        use_dark_theme = st.checkbox("Dark mode colors", value=True, key="dark_mode_colors")
+                    else:
+                        use_dark_theme = True
 
                 # Group Management
                 st.markdown("### 🔧 Group Management")
@@ -1425,45 +1283,20 @@ def show():
                         labels={'x': f'{pc_x} ({var_x:.1f}%)', 'y': f'{pc_y} ({var_y:.1f}%)'}
                     )
                 else:
-                    # NUOVO: Implementazione della scala blu-rossa per variabili quantitative
                     if color_by in custom_vars and ('Time' in color_by or 'time' in color_by):
-                        # Time variables: usa scala blu-rossa
                         fig = px.scatter(
                             x=scores[pc_x], y=scores[pc_y], color=color_data, text=text_param,
                             title=f"Scores: {pc_x} vs {pc_y} (colored by {color_by}){title_suffix}<br>Total Explained Variance: {var_total:.1f}%",
                             labels={'x': f'{pc_x} ({var_x:.1f}%)', 'y': f'{pc_y} ({var_y:.1f}%)', 'color': color_by},
-                            color_continuous_scale=[(0, 'blue'), (1, 'red')]  # CHANGED: scala blu-rossa pura
+                            color_continuous_scale='RdBu_r'
                         )
-                    elif (color_by != "None" and color_by != "Row Index" and 
-                          hasattr(color_data, 'dtype') and pd.api.types.is_numeric_dtype(color_data)):
-                        # NUOVO: Controlla se è quantitativo usando le funzioni di utils
-                        from color_utils import is_quantitative_variable
-                        
-                        if is_quantitative_variable(color_data):
-                            # Variabile quantitativa: usa scala blu-rossa
-                            fig = px.scatter(
-                                x=scores[pc_x], y=scores[pc_y], color=color_data, text=text_param,
-                                title=f"Scores: {pc_x} vs {pc_y} (colored by {color_by}){title_suffix}<br>Total Explained Variance: {var_total:.1f}%",
-                                labels={'x': f'{pc_x} ({var_x:.1f}%)', 'y': f'{pc_y} ({var_y:.1f}%)', 'color': color_by},
-                                color_continuous_scale=[(0, 'blue'), (1, 'red')]  # CHANGED: scala blu-rossa pura
-                            )
-                        else:
-                            # Variabile categorica: usa sistema unificato
-                            color_data_series = pd.Series(color_data)
-                            unique_values = color_data_series.dropna().unique()
-                            color_discrete_map = create_categorical_color_map(unique_values)
-                            
-                            fig = px.scatter(
-                                x=scores[pc_x], y=scores[pc_y], color=color_data, text=text_param,
-                                title=f"Scores: {pc_x} vs {pc_y} (colored by {color_by}){title_suffix}<br>Total Explained Variance: {var_total:.1f}%",
-                                labels={'x': f'{pc_x} ({var_x:.1f}%)', 'y': f'{pc_y} ({var_y:.1f}%)', 'color': color_by},
-                                color_discrete_map=color_discrete_map
-                            )
                     else:
-                        # Variabile categorica (default per Row Index e altri casi)
+                        # USA SISTEMA DI COLORI UNIFICATO
                         color_data_series = pd.Series(color_data)
                         unique_values = color_data_series.dropna().unique()
-                        color_discrete_map = create_categorical_color_map(unique_values)
+                        
+                        # Crea mappa colori unificata
+                        color_discrete_map = create_categorical_color_map(unique_values, use_dark_theme)
                         
                         fig = px.scatter(
                             x=scores[pc_x], y=scores[pc_y], color=color_data, text=text_param,
@@ -1476,15 +1309,13 @@ def show():
                 fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.7)
                 fig.add_vline(x=0, line_dash="dash", line_color="gray", opacity=0.7)
 
-                # AGGIUNGI CONVEX HULL (solo per variabili categoriche)
+                # AGGIUNGI CONVEX HULL
                 if (color_by != "None" and 
                     show_convex_hull and
-                    not (color_by in custom_vars and ('Time' in color_by or 'time' in color_by)) and
-                    not (hasattr(color_data, 'dtype') and pd.api.types.is_numeric_dtype(color_data) and 
-                         is_quantitative_variable(color_data))):  # CHANGED: Non aggiungere hull per variabili quantitative
+                    not (color_by in custom_vars and ('Time' in color_by or 'time' in color_by))):
                     
                     try:
-                        fig = add_convex_hulls(fig, scores, pc_x, pc_y, color_data, color_discrete_map, hull_opacity)
+                        fig = add_convex_hulls(fig, scores, pc_x, pc_y, color_data, color_discrete_map, hull_opacity, use_dark_theme)
                     except Exception as e:
                         st.error(f"Error adding convex hulls: {e}")
 
@@ -1507,7 +1338,7 @@ def show():
                     )
                 )
                 
-                st.plotly_chart(fig, width='stretch', key="pca_scores_plot")
+                st.plotly_chart(fig, use_container_width=True, key="pca_scores_plot")
 
                 # === SELEZIONE PER COORDINATE ===
                 st.markdown("### 🎯 Coordinate Selection")
@@ -1668,7 +1499,7 @@ def show():
                 with col_result:
                     if len(coordinate_selection) > 0:
                         st.success(f"Coordinate box contains {len(coordinate_selection)} points")
-                        st.info(f"Selection axes: {pc_x} vs {pc_y}")
+                        st.info(f"Selection axes: {pc_x} vs {pc_y}")  # AGGIUNTO: mostra gli assi correnti
                         st.info(f"Selection covers {len(coordinate_selection)/len(scores)*100:.1f}% of samples")
                         
                         selected_names = [scores.index[i] for i in coordinate_selection]
@@ -1826,7 +1657,7 @@ def show():
                         yaxis=dict(range=axis_range, constrain="domain")
                     )
                     
-                    st.plotly_chart(fig_selected, width='stretch', key="selection_visualization")
+                    st.plotly_chart(fig_selected, use_container_width=True, key="selection_visualization")
                     
                     # Export and Actions
                     st.markdown("### 💾 Export & Actions")
@@ -1862,16 +1693,20 @@ def show():
                             )
                         
                         with col_exp3:
+                            # NUOVO: Bottone per salvare lo split nel workspace
                             if st.button("💾 Save Split to Workspace", key="save_split", type="primary"):
+                                # Inizializza il dizionario se non esiste
                                 if 'split_datasets' not in st.session_state:
                                     st.session_state.split_datasets = {}
                                 
+                                # Crea nomi unici per i dataset
                                 parent_name = st.session_state.get('current_dataset', 'Dataset')
                                 timestamp = pd.Timestamp.now().strftime('%H%M%S')
                                 
                                 selected_name = f"{parent_name}_Selected_{timestamp}"
                                 remaining_name = f"{parent_name}_Remaining_{timestamp}"
                                 
+                                # Salva i dataset splittati
                                 st.session_state.split_datasets[selected_name] = {
                                     'data': selected_data,
                                     'type': 'PCA_Selection',
@@ -1898,6 +1733,7 @@ def show():
                                 st.info("📂 Go to **Data Handling → Workspace** to load these datasets")
                         
                         with col_exp4:
+                            # Mantieni i bottoni esistenti ma in un expander per risparmiare spazio
                             with st.expander("🔧 More Actions"):
                                 if st.button("🔄 Invert Selection", key="invert_selection", use_container_width=True):
                                     all_indices = set(range(len(scores)))
@@ -1946,8 +1782,8 @@ def show():
                 with col3:
                     st.metric("Combined Variance", f"{var_total:.1f}%")
             
-            elif score_plot_type == "🎲 3D Score Plot":
-                st.markdown(f"### 🎲 3D Score Plot{title_suffix}")
+            elif score_plot_type == "🎲 3D Scores Plot":
+                st.markdown(f"### 🎲 3D Scores Plot{title_suffix}")
                 
                 if len(scores.columns) >= 3:
                     # Selezione assi
@@ -1963,6 +1799,7 @@ def show():
                     col4, col5 = st.columns(2)
                     
                     with col4:
+                        # Get custom variables
                         custom_vars = []
                         if 'custom_variables' in st.session_state:
                             custom_vars = list(st.session_state.custom_variables.keys())
@@ -1983,6 +1820,12 @@ def show():
                     
                     with col_vis1:
                         point_size_3d = st.slider("Point size", 2, 15, 6, key="point_size_3d")
+                    
+                    with col_vis2:
+                        if color_by_3d != "None" and not (color_by_3d in custom_vars and ('Time' in color_by_3d or 'time' in color_by_3d)):
+                            use_dark_theme_3d = st.checkbox("Dark mode colors", value=True, key="dark_mode_3d")
+                        else:
+                            use_dark_theme_3d = True
                     
                     with col_vis3:
                         show_axes_3d = st.checkbox("Show axis planes", value=True, key="show_axes_3d")
@@ -2017,47 +1860,20 @@ def show():
                             labels={'x': f'{pc_x} ({var_x:.1f}%)', 'y': f'{pc_y} ({var_y:.1f}%)', 'z': f'{pc_z} ({var_z:.1f}%)'}
                         )
                     else:
-                        # NUOVO: Implementazione della scala blu-rossa per variabili quantitative in 3D
                         if color_by_3d in custom_vars and ('Time' in color_by_3d or 'time' in color_by_3d):
                             fig_3d = px.scatter_3d(
                                 x=scores[pc_x], y=scores[pc_y], z=scores[pc_z], 
                                 color=color_data_3d, text=text_param_3d,
                                 title=f"3D Scores: {pc_x}, {pc_y}, {pc_z} (colored by {color_by_3d}){title_suffix}<br>Total Explained Variance: {var_total_3d:.1f}%",
                                 labels={'x': f'{pc_x} ({var_x:.1f}%)', 'y': f'{pc_y} ({var_y:.1f}%)', 'z': f'{pc_z} ({var_z:.1f}%)', 'color': color_by_3d},
-                                color_continuous_scale=[(0, 'blue'), (1, 'red')]  # CHANGED: scala blu-rossa pura
+                                color_continuous_scale='RdBu_r'
                             )
-                        elif (color_by_3d != "None" and color_by_3d != "Row Index" and 
-                              hasattr(color_data_3d, 'dtype') and pd.api.types.is_numeric_dtype(color_data_3d)):
-                            # NUOVO: Controlla se è quantitativo usando le funzioni di utils
-                            from color_utils import is_quantitative_variable
-                            
-                            if is_quantitative_variable(color_data_3d):
-                                # Variabile quantitativa: usa scala blu-rossa
-                                fig_3d = px.scatter_3d(
-                                    x=scores[pc_x], y=scores[pc_y], z=scores[pc_z], 
-                                    color=color_data_3d, text=text_param_3d,
-                                    title=f"3D Scores: {pc_x}, {pc_y}, {pc_z} (colored by {color_by_3d}){title_suffix}<br>Total Explained Variance: {var_total_3d:.1f}%",
-                                    labels={'x': f'{pc_x} ({var_x:.1f}%)', 'y': f'{pc_y} ({var_y:.1f}%)', 'z': f'{pc_z} ({var_z:.1f}%)', 'color': color_by_3d},
-                                    color_continuous_scale=[(0, 'blue'), (1, 'red')]  # CHANGED: scala blu-rossa pura
-                                )
-                            else:
-                                # Variabile categorica: usa sistema unificato
-                                color_data_series_3d = pd.Series(color_data_3d)
-                                unique_values_3d = color_data_series_3d.dropna().unique()
-                                color_discrete_map_3d = create_categorical_color_map(unique_values_3d)
-                                    
-                                fig_3d = px.scatter_3d(
-                                    x=scores[pc_x], y=scores[pc_y], z=scores[pc_z], 
-                                    color=color_data_3d, text=text_param_3d,
-                                    title=f"3D Scores: {pc_x}, {pc_y}, {pc_z} (colored by {color_by_3d}){title_suffix}<br>Total Explained Variance: {var_total_3d:.1f}%",
-                                    labels={'x': f'{pc_x} ({var_x:.1f}%)', 'y': f'{pc_y} ({var_y:.1f}%)', 'z': f'{pc_z} ({var_z:.1f}%)', 'color': color_by_3d},
-                                    color_discrete_map=color_discrete_map_3d
-                                )
                         else:
-                            # Variabile categorica (default per Row Index e altri casi)
+                            # USA SISTEMA DI COLORI UNIFICATO PER 3D
                             color_data_series_3d = pd.Series(color_data_3d)
                             unique_values_3d = color_data_series_3d.dropna().unique()
-                            color_discrete_map_3d = create_categorical_color_map(unique_values_3d)
+                            
+                            color_discrete_map_3d = create_categorical_color_map(unique_values_3d, use_dark_theme_3d)
                                 
                             fig_3d = px.scatter_3d(
                                 x=scores[pc_x], y=scores[pc_y], z=scores[pc_z], 
@@ -2112,7 +1928,7 @@ def show():
                         scene=scene_dict
                     )
                     
-                    st.plotly_chart(fig_3d, width='stretch')
+                    st.plotly_chart(fig_3d, use_container_width=True)
                     
                     # Metriche varianza per 3D
                     col1, col2, col3, col4 = st.columns(4)
@@ -2127,8 +1943,7 @@ def show():
                     
                 else:
                     st.warning("⚠️ Need at least 3 components for 3D plot")
-
-
+            
             elif score_plot_type == "📈 Line Profiles Plot":
                 st.markdown(f"### 📈 Line Profiles Plot{title_suffix}")
                 
@@ -2194,7 +2009,7 @@ def show():
                 )
                 
                 fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.7)
-                st.plotly_chart(fig, width='stretch')
+                st.plotly_chart(fig, use_container_width=True)
                 
                 # Statistics
                 st.markdown("#### 📊 Profile Statistics")
@@ -2208,370 +2023,29 @@ def show():
                     st.metric("Min", f"{scores[selected_comp].min():.3f}")
                 with col_stats4:
                     st.metric("Max", f"{scores[selected_comp].max():.3f}")
-
     # ===== DIAGNOSTICS TAB =====
     with tab5:
         st.markdown("## 🔍 PCA Diagnostics")
-
+        st.markdown("*Equivalent to PCA_diagnostic_* R scripts*")
+        
         if 'pca_model' not in st.session_state:
             st.warning("⚠️ No PCA model computed. Please compute a model first.")
         else:
             pca_results = st.session_state.pca_model
             is_varimax = pca_results.get('method') == 'Varimax Rotation'
             
-            # Extended diagnostic options
-            diagnostic_options = [
-                "📊 Model Quality Metrics", 
-                "🧠 Integrated PCA Interpretation",  # Rinominato per chiarezza
-                "🎯 Factor Interpretation" if is_varimax else "📈 Component Analysis"
-            ]
+            # Check for missing data
+            if pca_results['original_data'].isnull().any().any():
+                st.warning("⚠️ T² and Q diagnostics require complete data (no missing values)")
+                st.info("Missing values detected. Advanced diagnostics may not be accurate.")
             
             diagnostic_type = st.selectbox(
                 "Select diagnostic type:",
-                diagnostic_options
+                ["📊 Model Quality Metrics", "🎯 Factor Interpretation"] if is_varimax 
+                else ["📊 Model Quality Metrics", "⚠️ T² vs Q Plot (Advanced)"]
             )
             
-            # =================================================================
-            # INTEGRATED PCA INTERPRETATION (NO AI)
-            # =================================================================
-            if diagnostic_type == "🧠 Integrated PCA Interpretation":
-                st.markdown("### 🧠 Integrated PCA Interpretation")
-                st.markdown("*Geometric interpretation based on PCA theory*")
-                
-                # PCA Theory
-                with st.expander("📚 PCA Interpretation Theory", expanded=False):
-                    st.markdown("""
-                    **Geometric PCA Interpretation:**
-
-                    PCA finds directions (PCs) that explain the maximum variance in the data.
-
-                    **Loadings (coefficients):**
-                    - **Distance from origin** = variable importance for that PC
-                    - **Variables close together** = positively correlated
-                    - **Variables in opposite directions** = negatively correlated (anticorrelated)
-                    - **Orthogonal variables** = uncorrelated
-
-                    **Scores (sample coordinates):**
-                    - **Samples close together** = similar characteristics
-                    - **Samples far apart** = different characteristics
-                    - **Outliers** = samples with atypical characteristics
-                    - **Clusters** = natural groups with common properties
-
-                    The integrated interpretation connects loadings and scores to understand
-                    WHY samples distribute as observed.
-                    """)
-                
-                try:
-                    # Import the new interpretation module
-                    from pca_ai_utils import (
-                        interpret_pca_geometry,
-                        analyze_pca_complete,
-                        quick_pca_interpretation
-                    )
-                    
-                    # Get PCA data
-                    loadings = pca_results.get('loadings', pd.DataFrame())
-                    scores = pca_results.get('scores', pd.DataFrame())
-                    
-                    # Validation
-                    if loadings.empty or scores.empty:
-                        st.error("❌ Missing loadings or scores data")
-                    else:
-                        st.success("✅ PCA data ready for interpretation")
-
-                        # =================================================================
-                        # CONFIGURATION SECTION
-                        # =================================================================
-                        with st.expander("⚙️ Analysis Configuration", expanded=True):
-                            st.markdown("### Configure Analysis Parameters")
-
-                            col_config1, col_config2, col_config3 = st.columns(3)
-
-                            available_pcs = [int(col.replace('PC', '').replace('Factor', ''))
-                                            for col in loadings.columns
-                                            if col.startswith(('PC', 'Factor'))]
-
-                            with col_config1:
-                                pc_x = st.selectbox(
-                                    "X-axis Component:",
-                                    options=available_pcs,
-                                    index=0,
-                                    help="First component for biplot analysis"
-                                )
-
-                            with col_config2:
-                                pc_y = st.selectbox(
-                                    "Y-axis Component:",
-                                    options=available_pcs,
-                                    index=1 if len(available_pcs) > 1 else 0,
-                                    help="Second component for biplot analysis"
-                                )
-
-                            with col_config3:
-                                threshold = st.slider(
-                                    "Significance threshold:",
-                                    min_value=0.1, max_value=0.8,
-                                    value=0.3, step=0.05,
-                                    help="Minimum loading magnitude for significance"
-                                )
-
-                            # Data type
-                            data_type = st.selectbox(
-                                "Data type (for contextualization):",
-                                ["Generic", "Spectroscopy/NIR", "Chemical Parameters",
-                                "Process Data", "Quality Analysis", "Materials",
-                                "Pharmaceutical", "Food", "Environmental"],
-                                help="Helps provide domain-specific interpretation"
-                            )
-
-                        # =================================================================
-                        # METAVARIABLE SELECTION
-                        # =================================================================
-                        with st.expander("🏷️ Sample Grouping (Optional)", expanded=False):
-                            st.markdown("### Select Metavariable for Enhanced Interpretation")
-                            st.info("Choose a metavariable to analyze how sample groups distribute in the PCA space. This helps understand if samples with the same code cluster together.")
-
-                            # Collect available metavariables
-                            available_metavars = ["None"]
-
-                            # Get non-numeric columns from current_data (metadata)
-                            if 'current_data' in st.session_state:
-                                data = st.session_state.current_data
-                                non_numeric_cols = data.select_dtypes(exclude=['number']).columns.tolist()
-                                available_metavars.extend(non_numeric_cols)
-
-                            # Get custom variables
-                            if 'custom_variables' in st.session_state and st.session_state.custom_variables:
-                                custom_vars = list(st.session_state.custom_variables.keys())
-                                available_metavars.extend(custom_vars)
-
-                            # Metavariable selector
-                            selected_metavar = st.selectbox(
-                                "Select metavariable for sample grouping:",
-                                options=available_metavars,
-                                help="Choose a metavariable to help interpret sample groupings (e.g., batch, treatment, etc.)"
-                            )
-
-                            # Get metavariable data if selected
-                            metavar_data = None
-                            if selected_metavar != "None":
-                                if 'current_data' in st.session_state and selected_metavar in st.session_state.current_data.columns:
-                                    metavar_data = st.session_state.current_data[selected_metavar]
-                                elif 'custom_variables' in st.session_state and selected_metavar in st.session_state.custom_variables:
-                                    metavar_data = st.session_state.custom_variables[selected_metavar]
-
-                                if metavar_data is not None:
-                                    # Align metavar_data with scores index
-                                    metavar_data = metavar_data.reindex(scores.index)
-
-                                    # Show preview of groups
-                                    unique_groups = metavar_data.dropna().unique()
-                                    st.success(f"✅ Using '{selected_metavar}' with {len(unique_groups)} unique groups")
-
-                                    # Show group counts
-                                    group_counts = metavar_data.value_counts()
-                                    st.write("**Group distribution:**")
-                                    for group, count in group_counts.items():
-                                        st.write(f"  - {group}: {count} samples")
-
-                        # =================================================================
-                        # RUN INTERPRETATION
-                        # =================================================================
-                        st.markdown("---")
-                        st.markdown("### 🚀 Generate Interpretation")
-                        
-                        if st.button("📊 **Generate Full Interpretation**", type="primary"):
-
-                            with st.spinner(f"Analyzing PC{pc_x} vs PC{pc_y}..."):
-
-                                # Run geometric interpretation
-                                interpretation = analyze_pca_complete(
-                                    loadings=loadings,
-                                    scores=scores,
-                                    pc_x=pc_x,
-                                    pc_y=pc_y,
-                                    threshold=threshold,
-                                    data_type=data_type,
-                                    metavar_data=metavar_data,
-                                    metavar_name=selected_metavar if selected_metavar != "None" else None
-                                )
-                                
-                                st.success("✅ Interpretation completed!")
-                                
-                                # Display full interpretation
-                                st.markdown("---")
-                                st.markdown(interpretation)
-                                
-                                # Export option
-                                st.download_button(
-                                    "📥 Download Interpretation Report",
-                                    interpretation,
-                                    f"PCA_Interpretation_PC{pc_x}_vs_PC{pc_y}.md",
-                                    "text/markdown",
-                                    key="download_interpretation"
-                                )
-                        
-                        # =================================================================
-                        # QUICK ANALYSIS TOOLS
-                        # =================================================================
-                        st.markdown("---")
-
-                        # Quick Statistics Expander
-                        with st.expander("📈 Quick Statistics", expanded=False):
-                            st.markdown("### Quick Statistical Summary")
-
-                            if st.button("🔄 Calculate Statistics", key="calc_stats"):
-                                # Get quick stats using the geometric analysis
-                                result = interpret_pca_geometry(
-                                    loadings, scores, pc_x, pc_y, threshold
-                                )
-
-                                if result['success']:
-                                    loadings_interp = result['loadings_interpretation']
-                                    scores_interp = result['scores_interpretation']
-
-                                    col1, col2 = st.columns(2)
-
-                                    with col1:
-                                        st.markdown("**📊 Loadings Analysis:**")
-                                        st.metric("Significant Variables", loadings_interp['n_significant'])
-
-                                        # Top variables
-                                        top_vars = list(loadings_interp['importance_ranking'].keys())[:3]
-                                        st.write(f"**Top 3 Variables:**")
-                                        for i, var in enumerate(top_vars, 1):
-                                            st.write(f"{i}. {var}")
-
-                                        # Variable correlations
-                                        n_corr = len(loadings_interp['correlations']['strongly_correlated'])
-                                        n_anti = len(loadings_interp['correlations']['anticorrelated'])
-                                        st.metric("Strong Correlations", f"{n_corr} pairs")
-                                        st.metric("Anticorrelations", f"{n_anti} pairs")
-
-                                    with col2:
-                                        st.markdown("**📈 Scores Analysis:**")
-                                        st.metric("Total Samples", scores_interp['n_samples'])
-                                        st.metric("Outliers", scores_interp['n_outliers'])
-                                        st.metric("Natural Clusters", len(scores_interp['clusters']))
-
-                                        # Distribution
-                                        dist = scores_interp['distribution']
-                                        st.metric("X-axis Spread (std)", f"{dist['statistics']['x_spread']:.3f}")
-                                        st.metric("Y-axis Spread (std)", f"{dist['statistics']['y_spread']:.3f}")
-
-                        # Variable Importance Expander
-                        with st.expander("🎯 Variable Importance Ranking", expanded=False):
-                            st.markdown("### Variable Importance by Distance from Origin")
-
-                            if st.button("🔄 Calculate Importance", key="calc_importance"):
-                                result = interpret_pca_geometry(
-                                    loadings, scores, pc_x, pc_y, threshold
-                                )
-
-                                if result['success']:
-                                    importance = result['loadings_interpretation']['importance_ranking']
-
-                                    # Create bar chart of importance
-                                    top_n = min(15, len(importance))
-                                    vars_to_plot = list(importance.keys())[:top_n]
-                                    values_to_plot = [importance[v] for v in vars_to_plot]
-
-                                    fig = go.Figure(data=[
-                                        go.Bar(
-                                            x=values_to_plot,
-                                            y=vars_to_plot,
-                                            orientation='h',
-                                            marker_color='lightblue'
-                                        )
-                                    ])
-
-                                    fig.update_layout(
-                                        title=f"Top {top_n} Variables by Importance",
-                                        xaxis_title="Distance from Origin",
-                                        yaxis_title="Variable",
-                                        height=400
-                                    )
-
-                                    st.plotly_chart(fig, use_container_width=True)
-
-                                    # Show table with values
-                                    st.markdown("**Importance Values:**")
-                                    importance_df = pd.DataFrame({
-                                        'Variable': vars_to_plot,
-                                        'Importance': values_to_plot
-                                    })
-                                    st.dataframe(importance_df, use_container_width=True)
-                        
-                        # =================================================================
-                        # INTERPRETATION GUIDELINES
-                        # =================================================================
-                        with st.expander("💡 Interpretation Guidelines", expanded=False):
-                            st.markdown("### How to Interpret PCA Plots")
-
-                            col_guide1, col_guide2 = st.columns(2)
-
-                            with col_guide1:
-                                st.info("""
-                                **Loading Plot Interpretation:**
-                                - Variables far from origin are most important
-                                - Variables in same direction are correlated
-                                - Variables in opposite directions are anticorrelated
-                                - Angle between variables indicates correlation strength
-                                """)
-
-                            with col_guide2:
-                                st.info("""
-                                **Score Plot Interpretation:**
-                                - Sample position indicates its characteristics
-                                - Samples in direction of a variable have high values for it
-                                - Clusters indicate groups with similar properties
-                                - Outliers may indicate measurement errors or special conditions
-                                """)
-
-                            st.markdown("---")
-                            st.markdown("**Additional Tips:**")
-                            st.write("""
-                            - **Biplot**: Overlay loadings and scores to see relationships
-                            - **Variance Explained**: Check cumulative variance to determine if enough PCs are used
-                            - **Q² and R²**: Validate model quality with cross-validation metrics
-                            - **Metavariable Analysis**: Use sample grouping to understand if known factors explain PCA structure
-                            """)
-                    
-                except ImportError as e:
-                    st.error("❌ Interpretation module not properly configured")
-                    st.info("""
-                    **To enable integrated interpretation:**
-                    
-                    1. Ensure `pca_ai_utils.py` is in the same directory as `pca.py`
-                    2. The module provides pure geometric interpretation (no AI needed)
-                    3. Based on established PCA theory for reliable results
-                    """)
-                    
-                    # Fallback: show basic statistics
-                    st.markdown("#### 📊 Basic Statistics (Fallback)")
-                    
-                    loadings = pca_results.get('loadings', pd.DataFrame())
-                    scores = pca_results.get('scores', pd.DataFrame())
-                    
-                    if not loadings.empty and not scores.empty:
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            st.markdown("**Loadings Summary:**")
-                            st.write(f"- Shape: {loadings.shape}")
-                            st.write(f"- Variables: {len(loadings)}")
-                            st.write(f"- Components: {len(loadings.columns)}")
-                        
-                        with col2:
-                            st.markdown("**Scores Summary:**")
-                            st.write(f"- Shape: {scores.shape}")
-                            st.write(f"- Samples: {len(scores)}")
-                            st.write(f"- Components: {len(scores.columns)}")
-            
-            # =================================================================
-            # MODEL QUALITY METRICS (UNCHANGED)
-            # =================================================================
-            elif diagnostic_type == "📊 Model Quality Metrics":
+            if diagnostic_type == "📊 Model Quality Metrics":
                 st.markdown("### 📊 Model Quality Metrics")
                 
                 col1, col2 = st.columns(2)
@@ -2601,15 +2075,75 @@ def show():
                             f"{loadings.iloc[:, 0].max() - loadings.iloc[:, 0].min():.3f}")
                     
                     if is_varimax:
+                        # Calculate simple structure measure
                         loadings_squared = loadings.values ** 2
                         simple_structure = np.mean(np.var(loadings_squared, axis=1))
                         st.metric("Simple Structure Index", f"{simple_structure:.3f}")
             
-            # Other diagnostic options...
+            elif diagnostic_type == "🎯 Factor Interpretation" and is_varimax:
+                st.markdown("### 🎯 Varimax Factor Interpretation")
+                st.markdown("*Analysis of rotated factor structure*")
+                
+                loadings = pca_results['loadings']
+                
+                # Factor interpretation table
+                st.markdown("#### Factor Loading Matrix")
+                
+                # Highlight high loadings
+                def highlight_high_loadings(val):
+                    if abs(val) > 0.5:
+                        return 'background-color: yellow'
+                    elif abs(val) > 0.3:
+                        return 'background-color: lightblue'
+                    return ''
+                
+                styled_loadings = loadings.style.applymap(highlight_high_loadings)
+                st.dataframe(styled_loadings, use_container_width=True)
+                
+                st.info("🟡 High loadings (>0.5) | 🔵 Moderate loadings (0.3-0.5)")
+                
+                # Simple structure analysis
+                st.markdown("#### Simple Structure Analysis")
+                
+                loadings_abs = np.abs(loadings.values)
+                
+                for i, factor in enumerate(loadings.columns):
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        # High loading variables
+                        high_loading_vars = loadings.index[loadings_abs[:, i] > 0.5].tolist()
+                        st.markdown(f"**{factor} - High Loading Variables:**")
+                        if high_loading_vars:
+                            for var in high_loading_vars:
+                                loading_val = loadings.loc[var, factor]
+                                st.write(f"• {var}: {loading_val:.3f}")
+                        else:
+                            st.write("No variables with loadings > 0.5")
+                    
+                    with col2:
+                        # Factor interpretation
+                        st.markdown(f"**{factor} - Variance Explained:**")
+                        st.write(f"{pca_results['explained_variance_ratio'][i]*100:.2f}%")
+                        
+                        # Communality for this factor
+                        communality = np.sum(loadings.iloc[:, i]**2)
+                        st.write(f"Factor communality: {communality:.3f}")
+            
             else:
-                # Component/Factor analysis
-                st.markdown(f"### {'🎯 Factor' if is_varimax else '📈 Component'} Analysis")
-                st.info("Detailed component/factor interpretation coming soon")
+                st.info("🚧 Advanced T²/Q diagnostics will be implemented in future versions")
+                st.markdown("### Basic Model Information")
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("Total Samples", len(pca_results['scores']))
+                
+                with col2:
+                    st.metric("Total Variables", len(pca_results['loadings']))
+                
+                with col3:
+                    st.metric("Model Type", pca_results.get('method', 'Standard PCA'))
 
     # ===== EXTRACT & EXPORT TAB =====
     with tab6:
@@ -2715,23 +2249,11 @@ def show():
     # ===== ADVANCED DIAGNOSTICS TAB =====
     with tab7:
         st.markdown("## 🔬 Advanced PCA Diagnostics")
-
+        st.markdown("*T² and Q diagnostics equivalent to R scripts*")
         
         if not DIAGNOSTICS_AVAILABLE:
-            st.warning("⚠️ Advanced diagnostics module not available in this demo")
-            st.info("""
-            🔬 **Want full T² vs Q diagnostics, multivariate control charts, and process monitoring?**
-            
-            Professional versions include complete diagnostic suites:
-            
-            ✅ Real-time process monitoring  
-            ✅ Advanced outlier detection  
-            ✅ Multivariate control charts  
-            ✅ MSPC (Multivariate SPC)  
-            ✅ Custom alert systems  
-            
-            📞 **Contact:** [chemometricsolutions.com](https://chemometricsolutions.com)
-            """)
+            st.warning("⚠️ Advanced diagnostics module not available")
+            st.info("Please ensure pca_diagnostics_complete.py is in the same directory")
         elif 'pca_model' not in st.session_state:
             st.warning("⚠️ No PCA model computed. Please compute a model first.")
         else:
