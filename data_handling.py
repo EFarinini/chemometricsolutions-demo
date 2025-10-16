@@ -509,6 +509,100 @@ def _create_sam_export(data, include_header):
     
     return '\n'.join(sam_content)
 
+def _parse_clipboard_data(clipboard_text, separator, decimal, has_header, has_index, na_values):
+    """Parse clipboard data into pandas DataFrame"""
+    try:
+        # Split into lines
+        lines = clipboard_text.strip().split('\n')
+        
+        if not lines:
+            raise ValueError("No data found in clipboard")
+        
+        # Process NA values
+        na_list = [x.strip() for x in na_values.split(',') if x.strip()]
+        
+        # Detect separator if auto-detection is enabled
+        if separator == "Auto-detect":
+            # Test common separators on first line
+            first_line = lines[0]
+            separators = ['\t', ',', ';', ' ']
+            separator_counts = {sep: first_line.count(sep) for sep in separators}
+            separator = max(separator_counts, key=separator_counts.get)
+            
+            if separator_counts[separator] == 0:
+                # Fallback to comma if no separator found
+                separator = ','
+        
+        # Parse data manually
+        rows = []
+        for line in lines:
+            # Split by separator
+            if separator == ' ':
+                # Handle multiple spaces
+                row = [cell.strip() for cell in line.split() if cell.strip()]
+            else:
+                row = [cell.strip() for cell in line.split(separator)]
+            rows.append(row)
+        
+        # Find maximum row length for padding
+        max_cols = max(len(row) for row in rows) if rows else 0
+        
+        # Pad rows to same length
+        for row in rows:
+            while len(row) < max_cols:
+                row.append('')
+        
+        # Convert to DataFrame
+        if has_header and len(rows) > 0:
+            columns = rows[0]
+            data_rows = rows[1:]
+        else:
+            columns = [f"Col_{i+1}" for i in range(max_cols)]
+            data_rows = rows
+        
+        # Create DataFrame
+        if not data_rows:
+            # Empty data, create empty DataFrame with columns
+            data = pd.DataFrame(columns=columns)
+        else:
+            data = pd.DataFrame(data_rows, columns=columns)
+        
+        # Handle index column
+        if has_index and len(data.columns) > 0:
+            data = data.set_index(data.columns[0])
+        elif not has_index:
+            # Use 1-based index
+            data.index = range(1, len(data) + 1)
+            data.index.name = None
+        
+        # Convert numeric columns
+        for col in data.columns:
+            # Try to convert to numeric, replacing NA values
+            numeric_data = pd.to_numeric(data[col], errors='coerce')
+            
+            # If more than 50% of values are numeric, treat as numeric column
+            if numeric_data.notna().sum() / len(data) > 0.5:
+                data[col] = numeric_data
+            
+            # Replace NA values
+            for na_val in na_list:
+                data[col] = data[col].replace(na_val, np.nan)
+        
+        # Handle decimal separator conversion
+        if decimal == ',':
+            for col in data.select_dtypes(include=['object']).columns:
+                try:
+                    # Try to convert comma decimals to dot decimals
+                    data[col] = data[col].astype(str).str.replace(',', '.', regex=False)
+                    data[col] = pd.to_numeric(data[col], errors='ignore')
+                except:
+                    pass
+        
+        return data, separator
+        
+    except Exception as e:
+        raise ValueError(f"Error parsing clipboard data: {str(e)}")
+
 def show():
     """Display the Data Handling page"""
     
@@ -569,7 +663,7 @@ def show():
             
             st.success("**Perfect for converting instrumental files to Excel format!**")
             
-            # Professional Services Note - NUOVO
+            # Professional Services Note
             st.markdown("---")
             st.info("""
             💡 **Need support for additional formats or custom import/export workflows?**  
@@ -675,14 +769,14 @@ def show():
                         # Store data
                         st.session_state.current_data = data
                         st.session_state.current_dataset = uploaded_file.name
-                        # Salva l'originale nella transformation history
+                        # Save original to transformation history
                         _save_original_to_history(data, uploaded_file.name)
 
                         st.success(f"Data loaded successfully: {data.shape[0]} rows × {data.shape[1]} columns")
                         
                         # Preview
                         st.markdown("### Data Preview")
-                        st.dataframe(data.head(10), width='stretch')
+                        st.dataframe(data.head(10), use_container_width=True)
                         
                         # Stats
                         col1, col2, col3, col4 = st.columns(4)
@@ -698,6 +792,204 @@ def show():
                         
                     except Exception as e:
                         st.error(f"Error loading file: {str(e)}")
+        
+        elif load_method == "Copy/Paste":
+            st.markdown("### Copy/Paste Data")
+            st.markdown("*Copy data from Excel, web tables, or any text source and paste directly*")
+            
+            # Instructions
+            with st.expander("📋 **How to use Copy/Paste**"):
+                st.markdown("""
+                **Instructions:**
+                1. **Copy data** from Excel, Google Sheets, web tables, or any text source
+                2. **Paste below** using Ctrl+V (Windows) or Cmd+V (Mac) 
+                3. **Configure settings** if needed
+                4. **Load data** into CAT Python
+                
+                **Supported Sources:**
+                - Excel spreadsheets (copy selected cells)
+                - Google Sheets / LibreOffice Calc
+                - Web tables from research papers
+                - Text files with delimited data
+                - Scientific instrument output (copy from software)
+                - Spectral data from equipment software
+                
+                **Tips:**
+                - Data will be auto-formatted for chemometric analysis
+                - Column headers and row names are automatically detected
+                - Mixed data types (numbers + text) are handled correctly
+                - Missing values (empty cells) are converted to NaN
+                """)
+            
+            # Text area for pasting
+            clipboard_data = st.text_area(
+                "📋 **Paste your data here**:",
+                height=200,
+                placeholder="Paste your data here using Ctrl+V or Cmd+V...\n\nExample:\nSample_ID\tWave_1000\tWave_1100\tWave_1200\nSample1\t0.534\t0.623\t0.445\nSample2\t0.612\t0.534\t0.523\nSample3\t0.445\t0.678\t0.599",
+                key="clipboard_input"
+            )
+            
+            if clipboard_data.strip():
+                newline_char = '\n'
+                st.success(f"✅ **Data detected**: {len(clipboard_data.strip().split(newline_char))} lines")
+                
+                # Configuration options
+                st.markdown("#### ⚙️ Parse Settings")
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    separator_paste = st.selectbox(
+                        "Separator:", 
+                        ["Auto-detect", "\t (Tab)", ", (Comma)", "; (Semicolon)", "  (Space)"],
+                        key="sep_paste"
+                    )
+                    
+                    # Convert display names to actual separators
+                    sep_map = {
+                        "Auto-detect": "Auto-detect",
+                        "\t (Tab)": "\t",
+                        ", (Comma)": ",",
+                        "; (Semicolon)": ";",
+                        "  (Space)": " "
+                    }
+                    actual_separator = sep_map[separator_paste]
+                
+                with col2:
+                    has_header_paste = st.checkbox("First row = headers", value=True, key="header_paste")
+                    has_index_paste = st.checkbox("First column = row names", value=False, key="index_paste")
+                
+                with col3:
+                    decimal_paste = st.selectbox("Decimal separator:", [".", ","], key="dec_paste")
+                    na_values_paste = st.text_input("Missing value indicators:", value="NA,N/A,NULL,null,#N/A", key="na_paste")
+                
+                # Preview parsing
+                if st.checkbox("🔍 **Preview parsing**", key="preview_parsing"):
+                    try:
+                        preview_data, detected_sep = _parse_clipboard_data(
+                            clipboard_data, actual_separator, decimal_paste, 
+                            has_header_paste, has_index_paste, na_values_paste
+                        )
+                        
+                        st.markdown("#### 👀 Data Preview")
+                        col_prev1, col_prev2 = st.columns(2)
+                        
+                        with col_prev1:
+                            tab_char = '\t'
+                            sep_display = 'Tab' if detected_sep == tab_char else detected_sep
+                            st.info(f"**Detected separator**: `{detected_sep}` ({sep_display})")
+                            st.info(f"**Shape**: {preview_data.shape[0]} rows × {preview_data.shape[1]} columns")
+                        
+                        with col_prev2:
+                            numeric_cols = preview_data.select_dtypes(include=[np.number]).columns
+                            st.info(f"**Numeric variables**: {len(numeric_cols)}")
+                            st.info(f"**Missing values**: {preview_data.isnull().sum().sum()}")
+                        
+                        # Show preview table
+                        st.dataframe(preview_data.head(10), use_container_width=True)
+                        
+                        # Data quality indicators
+                        if preview_data.shape[1] > 50:
+                            st.success("🧬 **Spectral/High-dimensional data detected** - Perfect for PCA analysis!")
+                        elif preview_data.shape[1] > 10:
+                            st.success("📊 **Multi-variable dataset** - Great for chemometric analysis!")
+                        else:
+                            st.info("📋 **Standard dataset** - Ready for analysis!")
+                        
+                    except Exception as e:
+                        st.error(f"❌ **Parse error**: {str(e)}")
+                        st.info("💡 Try adjusting the separator or format settings above")
+                
+                # Load button
+                if st.button("🚀 **Load Data from Clipboard**", type="primary", key="load_clipboard"):
+                    try:
+                        data, detected_sep = _parse_clipboard_data(
+                            clipboard_data, actual_separator, decimal_paste, 
+                            has_header_paste, has_index_paste, na_values_paste
+                        )
+                        
+                        # Store data
+                        dataset_name = f"Clipboard_Data_{pd.Timestamp.now().strftime('%H%M%S')}"
+                        st.session_state.current_data = data
+                        st.session_state.current_dataset = dataset_name
+                        
+                        # Save original to transformation history
+                        _save_original_to_history(data, dataset_name)
+                        
+                        # Success message with details
+                        st.success(f"🎉 **Data loaded successfully!**")
+                        
+                        col_success1, col_success2, col_success3, col_success4 = st.columns(4)
+                        with col_success1:
+                            st.metric("Samples", data.shape[0])
+                        with col_success2:
+                            st.metric("Variables", data.shape[1])
+                        with col_success3:
+                            tab_char = '\t'
+                            sep_display = 'Tab' if detected_sep == tab_char else detected_sep
+                            st.metric("Separator Used", sep_display)
+                        with col_success4:
+                            numeric_cols = data.select_dtypes(include=[np.number]).columns
+                            st.metric("Numeric Vars", len(numeric_cols))
+                        
+                        # Data preview
+                        st.markdown("#### 📊 **Loaded Dataset Preview**")
+                        st.dataframe(data.head(10), use_container_width=True)
+                        
+                        # Auto-suggestions based on data
+                        st.markdown("#### 🎯 **Suggested Next Steps**")
+                        
+                        if data.shape[1] > 20:
+                            st.info("🧬 **High-dimensional data** → Try **PCA Analysis** for dimensionality reduction")
+                        
+                        if data.shape[0] > 100:
+                            st.info("📈 **Large dataset** → Consider **Data Transformations** before analysis")
+                        
+                        if data.isnull().sum().sum() > 0:
+                            st.warning(f"⚠️ **{data.isnull().sum().sum()} missing values** detected → Use **Transformations → Handle Missing Data**")
+                        
+                    except Exception as e:
+                        st.error(f"❌ **Loading failed**: {str(e)}")
+                        
+                        # Troubleshooting suggestions
+                        st.markdown("#### 🔧 **Troubleshooting**")
+                        st.info("Try these solutions:")
+                        st.info("• Change the **separator** setting")
+                        st.info("• Check **decimal separator** (. vs ,)")
+                        st.info("• Verify **header/index** settings")
+                        st.info("• Remove special characters from data")
+                        st.info("• Copy smaller data chunks")
+            
+            else:
+                # When no data is pasted, show example
+                st.info("👆 **Paste your data above to get started**")
+                
+                with st.expander("📝 **Example Data Formats**"):
+                    st.markdown("**Example 1: Excel/Spreadsheet Data**")
+                    st.code("""Sample_ID	Moisture	Protein	Fat	Ash
+Sample1	12.5	18.2	3.4	1.2
+Sample2	11.8	19.1	3.8	1.1
+Sample3	13.2	17.9	3.2	1.3""")
+                    
+                    st.markdown("**Example 2: Spectral Data (NIR/IR)**")
+                    st.code("""Sample_ID	1000nm	1100nm	1200nm	1300nm
+Wheat1	0.534	0.623	0.445	0.567
+Wheat2	0.612	0.534	0.523	0.589
+Wheat3	0.445	0.678	0.599	0.523""")
+                    
+                    st.markdown("**Example 3: Chemical Analysis Data**")
+                    st.code("""Compound,Concentration,pH,Temperature,Yield
+Aspirin,95.2,6.8,25.5,87.3
+Ibuprofen,98.1,7.2,26.1,91.5
+Paracetamol,96.8,6.9,25.8,89.2""")
+                
+                # Quick start tips
+                st.markdown("#### 🚀 **Quick Start Tips**")
+                st.info("✅ **Best practices for Copy/Paste:**")
+                st.info("• Include column headers for automatic variable naming")
+                st.info("• Use consistent missing value indicators (NA, N/A, etc.)")
+                st.info("• Check decimal separators match your data (, vs .)")
+                st.info("• For large datasets, start with a small sample to test settings")
         
         elif load_method == "Sample Data":
             st.markdown("### Sample Datasets")
@@ -732,8 +1024,8 @@ def show():
                 _save_original_to_history(data, selected_sample)
     
                 st.success(f"Sample data loaded: {data.shape[0]} rows × {data.shape[1]} columns")
-                st.dataframe(data.head(), width='stretch')
-    
+                st.dataframe(data.head(), use_container_width=True)
+
     # ===== EXPORT DATA TAB =====
     with tab2:
         st.markdown("## Export Data")
@@ -859,7 +1151,7 @@ def show():
             
             # Preview
             st.markdown("### Data Preview")
-            st.dataframe(data.head(10), width='stretch')
+            st.dataframe(data.head(10), use_container_width=True)
         else:
             st.info("Load a dataset to see workspace information")
 
@@ -902,18 +1194,18 @@ def show():
                             st.markdown("**Actions:**")
                             
                             # Load button
-                            if st.button(f"📂 Load Dataset", key=f"load_{name}", width='stretch'):
+                            if st.button(f"📂 Load Dataset", key=f"load_{name}"):
                                 st.session_state.current_data = info['data']
                                 st.session_state.current_dataset = name
                                 st.success(f"✅ Loaded: {name}")
                                 st.rerun()
                             
                             # Preview button
-                            if st.button(f"👁️ Preview Data", key=f"preview_{name}", width='stretch'):
-                                st.dataframe(info['data'].head(5), width='stretch')
+                            if st.button(f"👁️ Preview Data", key=f"preview_{name}"):
+                                st.dataframe(info['data'].head(5), use_container_width=True)
                             
                             # Delete button
-                            if st.button(f"🗑️ Delete", key=f"delete_{name}", width='stretch'):
+                            if st.button(f"🗑️ Delete", key=f"delete_{name}"):
                                 del st.session_state.split_datasets[name]
                                 st.success(f"Deleted: {name}")
                                 st.rerun()
@@ -979,15 +1271,15 @@ def show():
                             st.markdown("**Actions:**")
                             
                             # Load original
-                            if st.button(f"📂 Load Original", key=f"load_original_{orig_name}", width='stretch'):
+                            if st.button(f"📂 Load Original", key=f"load_original_{orig_name}"):
                                 st.session_state.current_data = orig_info['data']
                                 st.session_state.current_dataset = orig_name.replace('_ORIGINAL', '')
                                 st.success(f"✅ Loaded original dataset")
                                 st.rerun()
                             
                             # Preview original
-                            if st.button(f"👁️ Preview Original", key=f"preview_original_{orig_name}", width='stretch'):
-                                st.dataframe(orig_info['data'].head(5), width='stretch')
+                            if st.button(f"👁️ Preview Original", key=f"preview_original_{orig_name}"):
+                                st.dataframe(orig_info['data'].head(5), use_container_width=True)
                 
                 # Show transformations
                 if group['transformations']:
@@ -1012,18 +1304,18 @@ def show():
                                 st.markdown("**Actions:**")
                                 
                                 # Load transformation
-                                if st.button(f"📂 Load Dataset", key=f"load_transform_{name}", width='stretch'):
+                                if st.button(f"📂 Load Dataset", key=f"load_transform_{name}"):
                                     st.session_state.current_data = info['data']
                                     st.session_state.current_dataset = name
                                     st.success(f"✅ Loaded: {name.split('.')[-1]}")
                                     st.rerun()
                                 
                                 # Preview transformation
-                                if st.button(f"👁️ Preview", key=f"preview_transform_{name}", width='stretch'):
-                                    st.dataframe(info['data'].head(5), width='stretch')
+                                if st.button(f"👁️ Preview", key=f"preview_transform_{name}"):
+                                    st.dataframe(info['data'].head(5), use_container_width=True)
                                 
                                 # Delete transformation
-                                if st.button(f"🗑️ Delete", key=f"delete_transform_{name}", width='stretch'):
+                                if st.button(f"🗑️ Delete", key=f"delete_transform_{name}"):
                                     del st.session_state.transformation_history[name]
                                     st.success(f"Deleted: {name}")
                                     st.rerun()
@@ -1072,11 +1364,11 @@ def show():
                 
                 with col1:
                     st.markdown("**Current Data:**")
-                    st.dataframe(data.head(3), width='stretch')
+                    st.dataframe(data.head(3), use_container_width=True)
                 
                 with col2:
                     st.markdown("**Transposed Preview:**")
-                    st.dataframe(data.T.head(3), width='stretch')
+                    st.dataframe(data.T.head(3), use_container_width=True)
                 
                 if st.button("Transpose Data"):
                     transposed_data = data.T
@@ -1221,9 +1513,9 @@ def show():
                     if len(spectral_vars) > 20:
                         st.info("Showing first and last 10 variables (large spectral dataset)")
                         preview_cols = spectral_vars[:10] + spectral_vars[-10:]
-                        st.dataframe(data[preview_cols].head(10), width='stretch')
+                        st.dataframe(data[preview_cols].head(10), use_container_width=True)
                     else:
-                        st.dataframe(spectral_data.head(10), width='stretch')
+                        st.dataframe(spectral_data.head(10), use_container_width=True)
                     
                     # Statistics for spectral data
                     col_stat1, col_stat2, col_stat3 = st.columns(3)
@@ -1240,7 +1532,7 @@ def show():
                 if metadata_vars:
                     metadata_data = data[metadata_vars]
                     st.markdown(f"**Metadata Variables** ({len(metadata_vars)} variables)")
-                    st.dataframe(metadata_data.head(10), width='stretch')
+                    st.dataframe(metadata_data.head(10), use_container_width=True)
                     
                     # Metadata analysis
                     st.markdown("#### Metadata Analysis")

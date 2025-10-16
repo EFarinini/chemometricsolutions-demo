@@ -7,321 +7,37 @@ Enhanced with Varimax rotation and advanced diagnostics
 import streamlit as st
 import numpy as np
 import pandas as pd
-import plotly.express as px
-import plotly.graph_objects as go
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
-import plotly.figure_factory as ff
-from scipy.stats import f, t, chi2
-import json
-import os
 from pathlib import Path
-
-
-
-# Con questo:
 import sys
 import os
+from sklearn.preprocessing import StandardScaler
+import plotly.express as px
+import plotly.graph_objects as go
+
+# Import PCA utilities (modular package)
+from pca_utils.pca_calculations import compute_pca, varimax_rotation
+from pca_utils.pca_plots import (plot_scores, plot_loadings, plot_biplot, plot_scree,
+                                  plot_cumulative_variance, plot_loadings_line, add_convex_hulls)
+from pca_utils.pca_statistics import (calculate_hotelling_t2, calculate_q_residuals,
+                                       calculate_contributions, calculate_leverage,
+                                       cross_validate_pca)
+from pca_utils.pca_workspace import (save_workspace_to_file, load_workspace_from_file,
+                                      save_dataset_split, get_split_datasets_info,
+                                      delete_split_dataset, clear_all_split_datasets)
+
+# Try to import advanced diagnostics module
 try:
-    # Aggiungi il path della directory parent
     parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.append(parent_dir)
     from pca_diagnostics_complete import show_advanced_diagnostics_tab
     DIAGNOSTICS_AVAILABLE = True
 except ImportError as e:
     DIAGNOSTICS_AVAILABLE = False
-    print(f"Import error: {e}")
+    print(f"Advanced diagnostics not available: {e}")
 
-# Aggiungi questo import all'inizio del file
+# Import color utilities
 from color_utils import get_unified_color_schemes, create_categorical_color_map
 
-# Sostituisci la funzione get_custom_color_map esistente con:
-def get_custom_color_map(theme='auto'):
-    """
-    Mappa colori personalizzata per variabili categoriche - VERSIONE UNIFICATA
-    theme: 'light', 'dark', o 'auto'
-    """
-    if theme == 'light':
-        return get_unified_color_schemes(dark_mode=False)['color_map']
-    elif theme == 'dark':
-        return get_unified_color_schemes(dark_mode=True)['color_map']
-    else:
-        # Auto: usa tema scuro come default
-        return get_unified_color_schemes(dark_mode=True)['color_map']
-
-def save_workspace_to_file():
-    """Salva il workspace su file JSON"""
-    if 'split_datasets' in st.session_state:
-        workspace_data = {}
-        for name, info in st.session_state.split_datasets.items():
-            # Salva i metadati e il CSV data
-            workspace_data[name] = {
-                'type': info['type'],
-                'parent': info['parent'],
-                'n_samples': info['n_samples'],
-                'creation_time': info['creation_time'].isoformat(),
-                'csv_data': info['data'].to_csv(index=True)
-            }
-        
-        # Salva su file
-        workspace_file = Path("pca_workspace.json")
-        with open(workspace_file, 'w') as f:
-            json.dump(workspace_data, f, indent=2)
-        
-        return True
-    return False
-
-def load_workspace_from_file():
-    """Carica il workspace da file JSON"""
-    workspace_file = Path("pca_workspace.json")
-    if workspace_file.exists():
-        try:
-            with open(workspace_file, 'r') as f:
-                workspace_data = json.load(f)
-            
-            # Ricostruisci i dataset
-            st.session_state.split_datasets = {}
-            for name, info in workspace_data.items():
-                # Ricostruisci il DataFrame dal CSV
-                from io import StringIO
-                csv_data = StringIO(info['csv_data'])
-                df = pd.read_csv(csv_data, index_col=0)
-                
-                st.session_state.split_datasets[name] = {
-                    'data': df,
-                    'type': info['type'],
-                    'parent': info['parent'],
-                    'n_samples': info['n_samples'],
-                    'creation_time': pd.Timestamp.fromisoformat(info['creation_time'])
-                }
-            
-            return True
-        except Exception as e:
-            st.error(f"Error loading workspace: {str(e)}")
-            return False
-    return False
-
-def get_custom_color_map(theme='auto'):
-    """
-    Mappa colori personalizzata per variabili categoriche
-    theme: 'light', 'dark', o 'auto'
-    """
-    
-    # Colori per tema chiaro (sfondo bianco)
-    light_theme_colors = {
-        'A': 'black',
-        'B': 'red',
-        'C': 'green',
-        'D': 'blue',
-        'E': 'orange',
-        'F': 'purple',
-        'G': 'brown',
-        'H': 'hotpink',
-        'I': 'gray',
-        'J': 'olive',
-        'K': 'cyan',
-        'L': 'magenta',
-        'M': 'gold',
-        'N': 'navy',
-        'O': 'darkgreen',
-        'P': 'darkred',
-        'Q': 'indigo',
-        'R': 'coral',
-        'S': 'teal',
-        'T': 'chocolate',
-        'U': 'crimson',
-        'V': 'darkviolet',
-        'W': 'darkorange',
-        'X': 'darkslategray',
-        'Y': 'royalblue',
-        'Z': 'saddlebrown'
-    }
-    
-    # Colori per tema scuro (sfondo nero/grigio scuro)
-    dark_theme_colors = {
-        'A': 'white',
-        'B': 'lightcoral',
-        'C': 'lightgreen',
-        'D': 'lightblue',
-        'E': 'orange',
-        'F': 'violet',
-        'G': 'tan',
-        'H': 'hotpink',
-        'I': 'lightgray',
-        'J': 'yellowgreen',
-        'K': 'cyan',
-        'L': 'magenta',
-        'M': 'gold',
-        'N': 'cornflowerblue',
-        'O': 'lime',
-        'P': 'tomato',
-        'Q': 'mediumpurple',
-        'R': 'coral',
-        'S': 'turquoise',
-        'T': 'sandybrown',
-        'U': 'crimson',
-        'V': 'plum',
-        'W': 'darkorange',
-        'X': 'lightsteelblue',
-        'Y': 'royalblue',
-        'Z': 'wheat'
-    }
-    
-    if theme == 'light':
-        return light_theme_colors
-    elif theme == 'dark':
-        return dark_theme_colors
-    else:
-        # Auto: usa tema scuro come default (più comune)
-        return dark_theme_colors
-
-def varimax_rotation(loadings, gamma=1.0, max_iter=100, tol=1e-6):
-    """
-    Perform Varimax rotation on loading matrix
-    Equivalent to PCA_model_varimax.r algorithm
-    """
-    p, k = loadings.shape
-    rotated_loadings = loadings.copy()
-    
-    # Iterative rotation algorithm from R script
-    converged = False
-    iteration = 0
-    
-    while not converged and iteration < max_iter:
-        prev_loadings = rotated_loadings.copy()
-        
-        # Pairwise rotations (equivalent to nested loops in R script)
-        for i in range(k-1):
-            for j in range(i+1, k):
-                # Extract two columns for rotation
-                lo = rotated_loadings[:, [i, j]]
-                
-                # Find optimal rotation angle
-                best_angle = 0
-                best_criterion = np.sum(lo**4)
-                
-                # Search for best rotation angle (equivalent to R loop)
-                for angle_deg in np.arange(-90, 90.1, 0.1):
-                    angle_rad = angle_deg * np.pi / 180
-                    
-                    # Rotation matrix
-                    cos_a = np.cos(angle_rad)
-                    sin_a = np.sin(angle_rad)
-                    rotation_matrix = np.array([[cos_a, -sin_a], 
-                                              [sin_a, cos_a]])
-                    
-                    # Apply rotation
-                    rotated_pair = lo @ rotation_matrix
-                    criterion = np.sum(rotated_pair**4)
-                    
-                    if criterion > best_criterion:
-                        best_criterion = criterion
-                        best_angle = angle_deg
-                
-                # Apply best rotation if improvement found
-                if best_angle != 0:
-                    angle_rad = best_angle * np.pi / 180
-                    cos_a = np.cos(angle_rad)
-                    sin_a = np.sin(angle_rad)
-                    rotation_matrix = np.array([[cos_a, -sin_a], 
-                                              [sin_a, cos_a]])
-                    
-                    rotated_loadings[:, [i, j]] = lo @ rotation_matrix
-        
-        # Check convergence
-        if np.allclose(rotated_loadings, prev_loadings, atol=tol):
-            converged = True
-        
-        iteration += 1
-    
-    return rotated_loadings, iteration
-def add_convex_hulls(fig, scores, pc_x, pc_y, color_data, color_discrete_map=None, hull_opacity=0.7):
-    """
-    Aggiunge convex hull per ogni gruppo categorico nel plot PCA
-    Bordi sottili e continui - LIGHT THEME ONLY
-    """
-    try:
-        from scipy.spatial import ConvexHull
-        import numpy as np
-        
-        if color_data is None:
-            return fig
-        
-        # Converte color_data in Series
-        if hasattr(color_data, 'index'):
-            color_series = pd.Series(color_data, index=color_data.index)
-        else:
-            color_series = pd.Series(color_data, index=scores.index)
-        
-        color_series = color_series.reindex(scores.index)
-        unique_groups = color_series.dropna().unique()
-        
-        if len(unique_groups) == 0:
-            return fig
-        
-        # USA SISTEMA DI COLORI UNIFICATO se non fornita mappa personalizzata
-        if color_discrete_map is None:
-            color_discrete_map = create_categorical_color_map(unique_groups)
-        
-        hulls_added = 0
-        
-        # Calcola convex hull per ogni gruppo
-        for group in unique_groups:
-            group_mask = color_series == group
-            n_points = group_mask.sum()
-            
-            if n_points < 3:
-                continue
-            
-            # Estrai coordinate
-            group_scores_x = scores.loc[group_mask, pc_x].values
-            group_scores_y = scores.loc[group_mask, pc_y].values
-            group_points = np.column_stack([group_scores_x, group_scores_y])
-            
-            try:
-                # Calcola convex hull
-                hull = ConvexHull(group_points)
-                hull_vertices = hull.vertices
-                hull_points = group_points[hull_vertices]
-                
-                # Chiudi il poligono
-                hull_x = np.append(hull_points[:, 0], hull_points[0, 0])
-                hull_y = np.append(hull_points[:, 1], hull_points[0, 1])
-                
-                # Ottieni colore del gruppo dal sistema unificato
-                group_color = color_discrete_map.get(group, 'gray')
-                
-                # Bordi sottili e continui
-                fig.add_trace(go.Scatter(
-                    x=hull_x, 
-                    y=hull_y,
-                    mode='lines',
-                    line=dict(
-                        color=group_color, 
-                        width=1  # Sottile e continuo
-                    ),
-                    opacity=hull_opacity,
-                    fill=None,
-                    name=f'{group}_hull',
-                    showlegend=False,
-                    hoverinfo='skip'
-                ))
-                
-                hulls_added += 1
-                
-            except Exception as hull_error:
-                print(f"Hull error for {group}: {hull_error}")
-                continue
-        
-        return fig
-        
-    except ImportError:
-        print("scipy not available")
-        return fig
-    except Exception as e:
-        print(f"Error in add_convex_hulls: {e}")
-        return fig
-      
 def show():
     """Display the PCA Analysis page"""
     
@@ -703,29 +419,19 @@ def show():
                     st.info("ℹ️ No preprocessing applied")
                 
                 if pca_method == "Standard PCA":
-                    # Standard PCA
-                    pca = PCA(n_components=n_components)
-                    scores = pca.fit_transform(X_processed)
-                    
-                    # Store results
+                    # Use compute_pca function from pca_utils
+                    pca_dict = compute_pca(
+                        pd.DataFrame(X_processed, index=X.index, columns=X.columns),
+                        n_components=n_components,
+                        center=False,  # Already preprocessed
+                        scale=False
+                    )
+
+                    # Store results with additional metadata
                     pca_results = {
-                        'model': pca,
-                        'scores': pd.DataFrame(
-                            scores, 
-                            columns=[f'PC{i+1}' for i in range(n_components)], 
-                            index=X.index
-                        ),
-                        'loadings': pd.DataFrame(
-                            pca.components_.T, 
-                            columns=[f'PC{i+1}' for i in range(n_components)],
-                            index=X.columns
-                        ),
-                        'explained_variance': pca.explained_variance_,
-                        'explained_variance_ratio': pca.explained_variance_ratio_,
-                        'cumulative_variance': np.cumsum(pca.explained_variance_ratio_),
-                        'eigenvalues': pca.explained_variance_,
+                        **pca_dict,  # Include all results from compute_pca
                         'original_data': X,
-                        'processed_data': X_processed,
+                        'processed_data': pd.DataFrame(X_processed, index=X.index, columns=X.columns),
                         'scaler': scaler,
                         'method': 'Standard PCA',
                         'parameters': {
@@ -737,48 +443,51 @@ def show():
                             'n_selected_vars': len(selected_vars)
                         }
                     }
-                    
+
                     st.success("✅ Standard PCA model computed successfully!")
-                    
+
                 else:  # Varimax Rotation
-                    # First compute standard PCA
-                    pca_full = PCA(n_components=n_components)
-                    scores_initial = pca_full.fit_transform(X_processed)
-                    loadings_initial = pca_full.components_.T
-                    
+                    # First compute standard PCA using compute_pca
+                    pca_dict = compute_pca(
+                        pd.DataFrame(X_processed, index=X.index, columns=X.columns),
+                        n_components=n_components,
+                        center=False,  # Already preprocessed
+                        scale=False
+                    )
+
                     # Apply Varimax rotation
                     with st.spinner("🔄 Applying Varimax rotation..."):
                         rotated_loadings, iterations = varimax_rotation(
-                            loadings_initial, 
+                            pca_dict['loadings'],
                             max_iter=max_iter_varimax if 'max_iter_varimax' in locals() else 100,
                             tol=tolerance_varimax if 'tolerance_varimax' in locals() else 1e-6
                         )
-                    
+
                     # Calculate rotated scores
-                    rotated_scores = X_processed.values @ rotated_loadings
-                    
+                    rotated_scores = X_processed @ rotated_loadings.values
+
                     # Calculate variance explained by rotated factors
                     rotated_variance = np.var(rotated_scores, axis=0, ddof=1)
                     total_variance = np.sum(rotated_variance)
                     rotated_variance_ratio = rotated_variance / total_variance
-                    
+
                     # Sort by variance explained (descending)
                     sort_idx = np.argsort(rotated_variance_ratio)[::-1]
-                    rotated_loadings = rotated_loadings[:, sort_idx]
+                    rotated_loadings = rotated_loadings.iloc[:, sort_idx]
                     rotated_scores = rotated_scores[:, sort_idx]
                     rotated_variance_ratio = rotated_variance_ratio[sort_idx]
                     rotated_variance = rotated_variance[sort_idx]
-                    
+
                     # Store Varimax results
                     pca_results = {
-                        'model': pca_full,  # Keep original for reference
+                        'model': pca_dict['model'],  # Keep original for reference
                         'scores': pd.DataFrame(
-                            rotated_scores, 
+                            rotated_scores,
                             columns=[f'Factor{i+1}' for i in range(n_components)],
                             index=X.index
                         ),
                         'loadings': pd.DataFrame(
-                            rotated_loadings, 
+                            rotated_loadings.values,
                             columns=[f'Factor{i+1}' for i in range(n_components)],
                             index=X.columns
                         ),
@@ -787,7 +496,7 @@ def show():
                         'cumulative_variance': np.cumsum(rotated_variance_ratio),
                         'eigenvalues': rotated_variance,
                         'original_data': X,
-                        'processed_data': X_processed,
+                        'processed_data': pd.DataFrame(X_processed, index=X.index, columns=X.columns),
                         'scaler': scaler,
                         'method': 'Varimax Rotation',
                         'varimax_iterations': iterations,
@@ -801,7 +510,7 @@ def show():
                             'n_selected_vars': len(selected_vars)
                         }
                     }
-                    
+
                     st.success(f"✅ Varimax rotation completed in {iterations} iterations!")
                 
                 # Store results in session state
@@ -880,74 +589,30 @@ def show():
             if plot_type == "📈 Scree Plot":
                 title_suffix = " (Varimax Factors)" if is_varimax else " (Principal Components)"
                 st.markdown(f"### 📈 Scree Plot{title_suffix}")
-                
-                fig = go.Figure()
-                
-                x_labels = (pca_results['loadings'].columns.tolist() if is_varimax 
-                           else [f'PC{i+1}' for i in range(len(pca_results['explained_variance_ratio']))])
-                
-                # Add bars
-                fig.add_trace(go.Bar(
-                    x=x_labels,
-                    y=pca_results['explained_variance_ratio'] * 100,
-                    name='Variance Explained',
-                    marker_color='lightblue' if not is_varimax else 'lightgreen'
-                ))
-                
-                # Add line
-                fig.add_trace(go.Scatter(
-                    x=x_labels,
-                    y=pca_results['explained_variance_ratio'] * 100,
-                    mode='lines+markers',
-                    name='Variance Line',
-                    line=dict(color='red', width=2),
-                    marker=dict(size=8)
-                ))
-                
-                x_title = "Factor Number" if is_varimax else "Principal Component"
-                main_title = f"Scree Plot - Variance Explained{title_suffix}"
-                
-                fig.update_layout(
-                    title=main_title,
-                    xaxis_title=x_title,
-                    yaxis_title="Variance Explained (%)",
-                    height=500
+
+                # Use plot_scree from pca_utils.pca_plots
+                component_labels = pca_results['loadings'].columns.tolist()
+                fig = plot_scree(
+                    pca_results['explained_variance_ratio'],
+                    is_varimax=is_varimax,
+                    component_labels=component_labels
                 )
-                
+
                 st.plotly_chart(fig, width='stretch')
             
             elif plot_type == "📊 Cumulative Variance":
                 title_suffix = " (Varimax)" if is_varimax else ""
                 st.markdown(f"### 📊 Cumulative Variance Plot{title_suffix}")
-                
-                fig = go.Figure()
-                
-                x_labels = (pca_results['loadings'].columns.tolist() if is_varimax 
-                           else [f'PC{i+1}' for i in range(len(pca_results['cumulative_variance']))])
-                
-                fig.add_trace(go.Scatter(
-                    x=x_labels,
-                    y=pca_results['cumulative_variance'] * 100,
-                    mode='lines+markers',
-                    name='Cumulative Variance',
-                    line=dict(color='blue' if not is_varimax else 'green', width=3),
-                    marker=dict(size=10),
-                    fill='tonexty'
-                ))
-                
-                # Add reference lines
-                fig.add_hline(y=80, line_dash="dash", line_color="red", annotation_text="80%")
-                fig.add_hline(y=95, line_dash="dash", line_color="orange", annotation_text="95%")
-                
-                x_title = "Factor Number" if is_varimax else "Principal Component"
-                
-                fig.update_layout(
-                    title=f"Cumulative Variance Explained{title_suffix}",
-                    xaxis_title=x_title,
-                    yaxis_title="Cumulative Variance (%)",
-                    height=500
+
+                # Use plot_cumulative_variance from pca_utils.pca_plots
+                component_labels = pca_results['loadings'].columns.tolist()
+                fig = plot_cumulative_variance(
+                    pca_results['cumulative_variance'],
+                    is_varimax=is_varimax,
+                    component_labels=component_labels,
+                    reference_lines=[80, 95]
                 )
-                
+
                 st.plotly_chart(fig, width='stretch')
             
             elif plot_type == "🎯 Individual Variable Contribution":
@@ -970,28 +635,27 @@ def show():
                 
                 # Step 2: Calcolo contributi pesati
                 st.markdown(f"#### Step 2: Variable Contributions (first {n_significant} {comp_label.lower()}s)")
-                
-                # Calcola i contributi pesati per i componenti significativi
-                loadings = pca_results['loadings'].iloc[:, :n_significant]
-                explained_variance = pca_results['explained_variance_ratio'][:n_significant]
-                
-                # Formula: Contributo = Σ(loading²_i × varianza_spiegata_i) per i componenti significativi
-                contributions = np.zeros(len(loadings.index))
-                
-                for i in range(n_significant):
-                    contributions += (loadings.iloc[:, i] ** 2) * explained_variance[i]
-                
-                # Converti in percentuale
-                contributions_pct = (contributions / np.sum(contributions)) * 100
-                
-                # Crea il plot
-                fig = go.Figure()
-                
-                # Ordina le variabili per contributo decrescente
+
+                # Use calculate_contributions from pca_utils.pca_statistics
+                contrib_df = calculate_contributions(
+                    pca_results['loadings'],
+                    pca_results['explained_variance_ratio'],
+                    n_components=n_significant,
+                    normalize=True
+                )
+
+                # Extract data for plotting
+                contributions_pct = contrib_df['Contribution_%'].values
+                var_names = contrib_df['Variable'].values
+
+                # Sort for plot
                 sorted_idx = np.argsort(contributions_pct)[::-1]
-                sorted_vars = loadings.index[sorted_idx]
+                sorted_vars = var_names[sorted_idx]
                 sorted_contributions = contributions_pct[sorted_idx]
-                
+
+                # Create plot
+                fig = go.Figure()
+
                 fig.add_trace(go.Bar(
                     x=sorted_vars,
                     y=sorted_contributions,
@@ -1000,54 +664,46 @@ def show():
                     text=[f'{val:.1f}%' for val in sorted_contributions],
                     textposition='outside'
                 ))
-                
+
+                total_var_explained = pca_results['explained_variance_ratio'][:n_significant].sum() * 100
+
                 fig.update_layout(
-                    title=f"Variable Contributions to Total Explained Variance<br>({n_significant} significant {comp_label.lower()}s: {explained_variance.sum()*100:.1f}% total variance)",
+                    title=f"Variable Contributions to Total Explained Variance<br>({n_significant} significant {comp_label.lower()}s: {total_var_explained:.1f}% total variance)",
                     xaxis_title="Variables",
                     yaxis_title="Contribution (%)",
                     height=600,
                     xaxis={'tickangle': 45}
                 )
-                
-                st.plotly_chart(fig, width='stretch')
-                
+
+                st.plotly_chart(fig, use_container_width=True)
+
                 # Step 3: Tabella dettagliata
                 st.markdown("#### Step 3: Detailed Contribution Table")
-                
-                # Crea tabella con dettagli
-                contrib_df = pd.DataFrame({
-                    'Variable': loadings.index,
-                    'Total_Contribution_%': contributions_pct,
-                    'Cumulative_%': np.cumsum(sorted_contributions)[np.argsort(sorted_idx)]
-                })
-                
-                # Aggiungi contributi per singolo componente
-                for i in range(n_significant):
-                    pc_name = loadings.columns[i]
-                    contrib_df[f'{pc_name}_Loading²×Var_%'] = (loadings.iloc[:, i] ** 2) * explained_variance[i] * 100
-                
-                # Ordina per contributo totale
-                contrib_df_sorted = contrib_df.sort_values('Total_Contribution_%', ascending=False)
+
+                # Sort contributions for display
+                contrib_df_sorted = contrib_df.sort_values('Contribution_%', ascending=False)
                 
                 st.dataframe(contrib_df_sorted.round(2), use_container_width=True)
                 
                 # Interpretazione
                 st.markdown("#### 📋 Interpretation")
                 top_vars = contrib_df_sorted.head(3)['Variable'].tolist()
-                total_explained = explained_variance.sum() * 100
-                
+                total_explained = pca_results['explained_variance_ratio'][:n_significant].sum() * 100
+
                 st.success(f"""
                 **Key Findings:**
                 - **{n_significant} significant components** explain **{total_explained:.1f}%** of total variance
                 - **Top 3 contributing variables**: {', '.join(top_vars)}
-                - **Top variable ({top_vars[0]})** contributes **{contrib_df_sorted.iloc[0]['Total_Contribution_%']:.1f}%** to the explained variance
+                - **Top variable ({top_vars[0]})** contributes **{contrib_df_sorted.iloc[0]['Contribution_%']:.1f}%** to the explained variance
                 """)
-                
+
                 if n_significant >= 2:
+                    pc_names = pca_results['loadings'].columns[:n_significant].tolist()
+                    var_ratios = pca_results['explained_variance_ratio'][:n_significant]
                     st.info(f"""
                     **Contribution Breakdown:**
-                    - {loadings.columns[0]} explains {explained_variance[0]*100:.1f}% of total variance
-                    - {loadings.columns[1]} explains {explained_variance[1]*100:.1f}% of total variance
+                    - {pc_names[0]} explains {var_ratios[0]*100:.1f}% of total variance
+                    - {pc_names[1]} explains {var_ratios[1]*100:.1f}% of total variance
                     """)
             
             elif plot_type == "🎲 Random Comparison":
@@ -1182,74 +838,29 @@ def show():
             
             if loading_plot_type == "📊 Loading Scatter Plot":
                 st.markdown(f"### 📊 Loading Scatter Plot{title_suffix}")
-                
-                # Ottieni gli indici dei componenti selezionati
+
+                # Use plot_loadings from pca_utils.pca_plots
+                fig = plot_loadings(
+                    loadings,
+                    pc_x,
+                    pc_y,
+                    pca_results['explained_variance_ratio'],
+                    is_varimax=is_varimax,
+                    color_by_magnitude=is_varimax
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+
+                if is_varimax:
+                    st.info("💡 In Varimax rotation, variables should load highly on few factors (simple structure)")
+
+                # Display variance metrics
                 pc_x_idx = list(loadings.columns).index(pc_x)
                 pc_y_idx = list(loadings.columns).index(pc_y)
-                
-                # Ottieni la varianza spiegata per i componenti selezionati
                 var_x = pca_results['explained_variance_ratio'][pc_x_idx] * 100
                 var_y = pca_results['explained_variance_ratio'][pc_y_idx] * 100
                 var_total = var_x + var_y
-                
-                fig = px.scatter(
-                    x=loadings[pc_x],
-                    y=loadings[pc_y],
-                    text=loadings.index,
-                    title=f"Loadings Plot: {pc_x} vs {pc_y}{title_suffix}<br>Total Explained Variance: {var_total:.1f}%",
-                    labels={
-                        'x': f'{pc_x} Loadings ({var_x:.1f}%)', 
-                        'y': f'{pc_y} Loadings ({var_y:.1f}%)'
-                    }
-                )
-                
-                # Calcola il range massimo per rendere le scale identiche
-                x_range = [loadings[pc_x].min(), loadings[pc_x].max()]
-                y_range = [loadings[pc_y].min(), loadings[pc_y].max()]
-                
-                # Trova il range massimo assoluto
-                max_abs_range = max(abs(min(x_range + y_range)), abs(max(x_range + y_range)))
-                
-                # Imposta range simmetrico e identico per entrambi gli assi
-                axis_range = [-max_abs_range * 1.1, max_abs_range * 1.1]
-                
-                # Add zero lines
-                fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.7)
-                fig.add_vline(x=0, line_dash="dash", line_color="gray", opacity=0.7)
-                
-                fig.update_traces(textposition="top center")
-                
-                # CHIAVE: Imposta scale identiche e aspect ratio 1:1
-                fig.update_layout(
-                    height=600,
-                    width=600,  # Forza aspect ratio quadrato
-                    xaxis=dict(
-                        range=axis_range,
-                        scaleanchor="y",  # Ancora la scala X alla Y
-                        scaleratio=1,     # Ratio 1:1
-                        constrain="domain"
-                    ),
-                    yaxis=dict(
-                        range=axis_range,
-                        constrain="domain"
-                    )
-                )
-                
-                # Color by loading magnitude if Varimax
-                if is_varimax:
-                    fig.update_traces(marker=dict(
-                        color=np.sqrt(loadings[pc_x]**2 + loadings[pc_y]**2),
-                        colorscale='viridis',
-                        showscale=True,
-                        colorbar=dict(title="Loading Magnitude")
-                    ))
-                
-                st.plotly_chart(fig, uwidth='stretch')
-                
-                if is_varimax:
-                    st.info("💡 In Varimax rotation, variables should load highly on few factors (simple structure)")
-                
-                # Aggiungi informazioni sulla varianza
+
                 col1, col2, col3 = st.columns(3)
                 with col1:
                     st.metric(f"{pc_x} Variance", f"{var_x:.1f}%")
@@ -1257,41 +868,26 @@ def show():
                     st.metric(f"{pc_y} Variance", f"{var_y:.1f}%")
                 with col3:
                     st.metric("Combined Variance", f"{var_total:.1f}%")
-                
-                if is_varimax:
-                    st.info("💡 In Varimax rotation, variables should load highly on few factors (simple structure)")
             
             elif loading_plot_type == "📈 Loading Line Plot":
                 st.markdown(f"### 📈 Loading Line Plot{title_suffix}")
-                
+
                 selected_comps = st.multiselect(
                     f"Select {'factors' if is_varimax else 'components'} to display:",
                     loadings.columns.tolist(),
                     default=loadings.columns[:3].tolist(),
-                    key="loading_line_components"  # Fixed: Added unique key
+                    key="loading_line_components"
                 )
-                
+
                 if selected_comps:
-                    fig = go.Figure()
-                    
-                    for comp in selected_comps:
-                        fig.add_trace(go.Scatter(
-                            x=list(range(len(loadings.index))),
-                            y=loadings[comp],
-                            mode='lines+markers',
-                            name=comp,
-                            text=loadings.index,
-                            hovertemplate='Variable: %{text}<br>Loading: %{y:.3f}<extra></extra>'
-                        ))
-                    
-                    fig.update_layout(
-                        title=f"Loading Line Plot{title_suffix}",
-                        xaxis_title="Variable Index",
-                        yaxis_title="Loading Value",
-                        height=500
+                    # Use plot_loadings_line from pca_utils.pca_plots
+                    fig = plot_loadings_line(
+                        loadings,
+                        selected_comps,
+                        is_varimax=is_varimax
                     )
-                    
-                    st.plotly_chart(fig, width='stretch')
+
+                    st.plotly_chart(fig, use_container_width=True)
 
     # ===== SCORE PLOTS TAB =====
     with tab4:
@@ -1863,35 +1459,19 @@ def show():
                         
                         with col_exp3:
                             if st.button("💾 Save Split to Workspace", key="save_split", type="primary"):
-                                if 'split_datasets' not in st.session_state:
-                                    st.session_state.split_datasets = {}
-                                
-                                parent_name = st.session_state.get('current_dataset', 'Dataset')
-                                timestamp = pd.Timestamp.now().strftime('%H%M%S')
-                                
-                                selected_name = f"{parent_name}_Selected_{timestamp}"
-                                remaining_name = f"{parent_name}_Remaining_{timestamp}"
-                                
-                                st.session_state.split_datasets[selected_name] = {
-                                    'data': selected_data,
-                                    'type': 'PCA_Selection',
-                                    'parent': parent_name,
-                                    'n_samples': len(selected_data),
-                                    'creation_time': pd.Timestamp.now(),
-                                    'selection_method': 'Coordinate' if 'coord_x_min' in st.session_state else 'Manual',
-                                    'pc_axes': f"{pc_x} vs {pc_y}"
-                                }
-                                
-                                st.session_state.split_datasets[remaining_name] = {
-                                    'data': remaining_data,
-                                    'type': 'PCA_Remaining',
-                                    'parent': parent_name,
-                                    'n_samples': len(remaining_data),
-                                    'creation_time': pd.Timestamp.now(),
-                                    'selection_method': 'Coordinate' if 'coord_x_min' in st.session_state else 'Manual',
-                                    'pc_axes': f"{pc_x} vs {pc_y}"
-                                }
-                                
+                                # Determine selection method
+                                selection_method = 'Coordinate' if 'coord_x_min' in st.session_state else 'Manual'
+
+                                # Use workspace function to save split
+                                selected_name, remaining_name = save_dataset_split(
+                                    selected_data=selected_data,
+                                    remaining_data=remaining_data,
+                                    pc_x=pc_x,
+                                    pc_y=pc_y,
+                                    parent_name=st.session_state.get('current_dataset', 'Dataset'),
+                                    selection_method=selection_method
+                                )
+
                                 st.success(f"✅ Split saved to workspace!")
                                 st.info(f"**Selected**: {selected_name} ({len(selected_data)} samples)")
                                 st.info(f"**Remaining**: {remaining_name} ({len(remaining_data)} samples)")
@@ -2208,29 +1788,370 @@ def show():
                     st.metric("Min", f"{scores[selected_comp].min():.3f}")
                 with col_stats4:
                     st.metric("Max", f"{scores[selected_comp].max():.3f}")
+
     # ===== DIAGNOSTICS TAB =====
     with tab5:
         st.markdown("## 🔍 PCA Diagnostics")
 
-        
         if 'pca_model' not in st.session_state:
             st.warning("⚠️ No PCA model computed. Please compute a model first.")
         else:
             pca_results = st.session_state.pca_model
             is_varimax = pca_results.get('method') == 'Varimax Rotation'
             
-            # Check for missing data
-            if pca_results['original_data'].isnull().any().any():
-                st.warning("⚠️ T² and Q diagnostics require complete data (no missing values)")
-                st.info("Missing values detected. Advanced diagnostics may not be accurate.")
+            # Extended diagnostic options
+            diagnostic_options = [
+                "📊 Model Quality Metrics", 
+                "🧠 Integrated PCA Interpretation",  # Rinominato per chiarezza
+                "🎯 Factor Interpretation" if is_varimax else "📈 Component Analysis"
+            ]
             
             diagnostic_type = st.selectbox(
                 "Select diagnostic type:",
-                ["📊 Model Quality Metrics", "🎯 Factor Interpretation"] if is_varimax 
-                else ["📊 Model Quality Metrics", "⚠️ T² vs Q Plot (Advanced)"]
+                diagnostic_options
             )
             
-            if diagnostic_type == "📊 Model Quality Metrics":
+            # =================================================================
+            # INTEGRATED PCA INTERPRETATION (NO AI)
+            # =================================================================
+            if diagnostic_type == "🧠 Integrated PCA Interpretation":
+                st.markdown("### 🧠 Integrated PCA Interpretation")
+                st.markdown("*Geometric interpretation based on PCA theory*")
+                
+                # PCA Theory
+                with st.expander("📚 PCA Interpretation Theory", expanded=False):
+                    st.markdown("""
+                    **Geometric PCA Interpretation:**
+
+                    PCA finds directions (PCs) that explain the maximum variance in the data.
+
+                    **Loadings (coefficients):**
+                    - **Distance from origin** = variable importance for that PC
+                    - **Variables close together** = positively correlated
+                    - **Variables in opposite directions** = negatively correlated (anticorrelated)
+                    - **Orthogonal variables** = uncorrelated
+
+                    **Scores (sample coordinates):**
+                    - **Samples close together** = similar characteristics
+                    - **Samples far apart** = different characteristics
+                    - **Outliers** = samples with atypical characteristics
+                    - **Clusters** = natural groups with common properties
+
+                    The integrated interpretation connects loadings and scores to understand
+                    WHY samples distribute as observed.
+                    """)
+                
+                try:
+                    # Import the new interpretation module
+                    from pca_ai_utils import (
+                        interpret_pca_geometry,
+                        analyze_pca_complete,
+                        quick_pca_interpretation
+                    )
+                    
+                    # Get PCA data
+                    loadings = pca_results.get('loadings', pd.DataFrame())
+                    scores = pca_results.get('scores', pd.DataFrame())
+                    
+                    # Validation
+                    if loadings.empty or scores.empty:
+                        st.error("❌ Missing loadings or scores data")
+                    else:
+                        st.success("✅ PCA data ready for interpretation")
+
+                        # =================================================================
+                        # CONFIGURATION SECTION
+                        # =================================================================
+                        with st.expander("⚙️ Analysis Configuration", expanded=True):
+                            st.markdown("### Configure Analysis Parameters")
+
+                            col_config1, col_config2, col_config3 = st.columns(3)
+
+                            available_pcs = [int(col.replace('PC', '').replace('Factor', ''))
+                                            for col in loadings.columns
+                                            if col.startswith(('PC', 'Factor'))]
+
+                            with col_config1:
+                                pc_x = st.selectbox(
+                                    "X-axis Component:",
+                                    options=available_pcs,
+                                    index=0,
+                                    help="First component for biplot analysis"
+                                )
+
+                            with col_config2:
+                                pc_y = st.selectbox(
+                                    "Y-axis Component:",
+                                    options=available_pcs,
+                                    index=1 if len(available_pcs) > 1 else 0,
+                                    help="Second component for biplot analysis"
+                                )
+
+                            with col_config3:
+                                threshold = st.slider(
+                                    "Significance threshold:",
+                                    min_value=0.1, max_value=0.8,
+                                    value=0.3, step=0.05,
+                                    help="Minimum loading magnitude for significance"
+                                )
+
+                            # Data type
+                            data_type = st.selectbox(
+                                "Data type (for contextualization):",
+                                ["Generic", "Spectroscopy/NIR", "Chemical Parameters",
+                                "Process Data", "Quality Analysis", "Materials",
+                                "Pharmaceutical", "Food", "Environmental"],
+                                help="Helps provide domain-specific interpretation"
+                            )
+
+                        # =================================================================
+                        # METAVARIABLE SELECTION
+                        # =================================================================
+                        with st.expander("🏷️ Sample Grouping (Optional)", expanded=False):
+                            st.markdown("### Select Metavariable for Enhanced Interpretation")
+                            st.info("Choose a metavariable to analyze how sample groups distribute in the PCA space. This helps understand if samples with the same code cluster together.")
+
+                            # Collect available metavariables
+                            available_metavars = ["None"]
+
+                            # Get non-numeric columns from current_data (metadata)
+                            if 'current_data' in st.session_state:
+                                data = st.session_state.current_data
+                                non_numeric_cols = data.select_dtypes(exclude=['number']).columns.tolist()
+                                available_metavars.extend(non_numeric_cols)
+
+                            # Get custom variables
+                            if 'custom_variables' in st.session_state and st.session_state.custom_variables:
+                                custom_vars = list(st.session_state.custom_variables.keys())
+                                available_metavars.extend(custom_vars)
+
+                            # Metavariable selector
+                            selected_metavar = st.selectbox(
+                                "Select metavariable for sample grouping:",
+                                options=available_metavars,
+                                help="Choose a metavariable to help interpret sample groupings (e.g., batch, treatment, etc.)"
+                            )
+
+                            # Get metavariable data if selected
+                            metavar_data = None
+                            if selected_metavar != "None":
+                                if 'current_data' in st.session_state and selected_metavar in st.session_state.current_data.columns:
+                                    metavar_data = st.session_state.current_data[selected_metavar]
+                                elif 'custom_variables' in st.session_state and selected_metavar in st.session_state.custom_variables:
+                                    metavar_data = st.session_state.custom_variables[selected_metavar]
+
+                                if metavar_data is not None:
+                                    # Align metavar_data with scores index
+                                    metavar_data = metavar_data.reindex(scores.index)
+
+                                    # Show preview of groups
+                                    unique_groups = metavar_data.dropna().unique()
+                                    st.success(f"✅ Using '{selected_metavar}' with {len(unique_groups)} unique groups")
+
+                                    # Show group counts
+                                    group_counts = metavar_data.value_counts()
+                                    st.write("**Group distribution:**")
+                                    for group, count in group_counts.items():
+                                        st.write(f"  - {group}: {count} samples")
+
+                        # =================================================================
+                        # RUN INTERPRETATION
+                        # =================================================================
+                        st.markdown("---")
+                        st.markdown("### 🚀 Generate Interpretation")
+                        
+                        if st.button("📊 **Generate Full Interpretation**", type="primary"):
+
+                            with st.spinner(f"Analyzing PC{pc_x} vs PC{pc_y}..."):
+
+                                # Run geometric interpretation
+                                interpretation = analyze_pca_complete(
+                                    loadings=loadings,
+                                    scores=scores,
+                                    pc_x=pc_x,
+                                    pc_y=pc_y,
+                                    threshold=threshold,
+                                    data_type=data_type,
+                                    metavar_data=metavar_data,
+                                    metavar_name=selected_metavar if selected_metavar != "None" else None
+                                )
+                                
+                                st.success("✅ Interpretation completed!")
+                                
+                                # Display full interpretation
+                                st.markdown("---")
+                                st.markdown(interpretation)
+                                
+                                # Export option
+                                st.download_button(
+                                    "📥 Download Interpretation Report",
+                                    interpretation,
+                                    f"PCA_Interpretation_PC{pc_x}_vs_PC{pc_y}.md",
+                                    "text/markdown",
+                                    key="download_interpretation"
+                                )
+                        
+                        # =================================================================
+                        # QUICK ANALYSIS TOOLS
+                        # =================================================================
+                        st.markdown("---")
+
+                        # Quick Statistics Expander
+                        with st.expander("📈 Quick Statistics", expanded=False):
+                            st.markdown("### Quick Statistical Summary")
+
+                            if st.button("🔄 Calculate Statistics", key="calc_stats"):
+                                # Get quick stats using the geometric analysis
+                                result = interpret_pca_geometry(
+                                    loadings, scores, pc_x, pc_y, threshold
+                                )
+
+                                if result['success']:
+                                    loadings_interp = result['loadings_interpretation']
+                                    scores_interp = result['scores_interpretation']
+
+                                    col1, col2 = st.columns(2)
+
+                                    with col1:
+                                        st.markdown("**📊 Loadings Analysis:**")
+                                        st.metric("Significant Variables", loadings_interp['n_significant'])
+
+                                        # Top variables
+                                        top_vars = list(loadings_interp['importance_ranking'].keys())[:3]
+                                        st.write(f"**Top 3 Variables:**")
+                                        for i, var in enumerate(top_vars, 1):
+                                            st.write(f"{i}. {var}")
+
+                                        # Variable correlations
+                                        n_corr = len(loadings_interp['correlations']['strongly_correlated'])
+                                        n_anti = len(loadings_interp['correlations']['anticorrelated'])
+                                        st.metric("Strong Correlations", f"{n_corr} pairs")
+                                        st.metric("Anticorrelations", f"{n_anti} pairs")
+
+                                    with col2:
+                                        st.markdown("**📈 Scores Analysis:**")
+                                        st.metric("Total Samples", scores_interp['n_samples'])
+                                        st.metric("Outliers", scores_interp['n_outliers'])
+                                        st.metric("Natural Clusters", len(scores_interp['clusters']))
+
+                                        # Distribution
+                                        dist = scores_interp['distribution']
+                                        st.metric("X-axis Spread (std)", f"{dist['statistics']['x_spread']:.3f}")
+                                        st.metric("Y-axis Spread (std)", f"{dist['statistics']['y_spread']:.3f}")
+
+                        # Variable Importance Expander
+                        with st.expander("🎯 Variable Importance Ranking", expanded=False):
+                            st.markdown("### Variable Importance by Distance from Origin")
+
+                            if st.button("🔄 Calculate Importance", key="calc_importance"):
+                                result = interpret_pca_geometry(
+                                    loadings, scores, pc_x, pc_y, threshold
+                                )
+
+                                if result['success']:
+                                    importance = result['loadings_interpretation']['importance_ranking']
+
+                                    # Create bar chart of importance
+                                    top_n = min(15, len(importance))
+                                    vars_to_plot = list(importance.keys())[:top_n]
+                                    values_to_plot = [importance[v] for v in vars_to_plot]
+
+                                    fig = go.Figure(data=[
+                                        go.Bar(
+                                            x=values_to_plot,
+                                            y=vars_to_plot,
+                                            orientation='h',
+                                            marker_color='lightblue'
+                                        )
+                                    ])
+
+                                    fig.update_layout(
+                                        title=f"Top {top_n} Variables by Importance",
+                                        xaxis_title="Distance from Origin",
+                                        yaxis_title="Variable",
+                                        height=400
+                                    )
+
+                                    st.plotly_chart(fig, use_container_width=True)
+
+                                    # Show table with values
+                                    st.markdown("**Importance Values:**")
+                                    importance_df = pd.DataFrame({
+                                        'Variable': vars_to_plot,
+                                        'Importance': values_to_plot
+                                    })
+                                    st.dataframe(importance_df, use_container_width=True)
+                        
+                        # =================================================================
+                        # INTERPRETATION GUIDELINES
+                        # =================================================================
+                        with st.expander("💡 Interpretation Guidelines", expanded=False):
+                            st.markdown("### How to Interpret PCA Plots")
+
+                            col_guide1, col_guide2 = st.columns(2)
+
+                            with col_guide1:
+                                st.info("""
+                                **Loading Plot Interpretation:**
+                                - Variables far from origin are most important
+                                - Variables in same direction are correlated
+                                - Variables in opposite directions are anticorrelated
+                                - Angle between variables indicates correlation strength
+                                """)
+
+                            with col_guide2:
+                                st.info("""
+                                **Score Plot Interpretation:**
+                                - Sample position indicates its characteristics
+                                - Samples in direction of a variable have high values for it
+                                - Clusters indicate groups with similar properties
+                                - Outliers may indicate measurement errors or special conditions
+                                """)
+
+                            st.markdown("---")
+                            st.markdown("**Additional Tips:**")
+                            st.write("""
+                            - **Biplot**: Overlay loadings and scores to see relationships
+                            - **Variance Explained**: Check cumulative variance to determine if enough PCs are used
+                            - **Q² and R²**: Validate model quality with cross-validation metrics
+                            - **Metavariable Analysis**: Use sample grouping to understand if known factors explain PCA structure
+                            """)
+                    
+                except ImportError as e:
+                    st.error("❌ Interpretation module not properly configured")
+                    st.info("""
+                    **To enable integrated interpretation:**
+                    
+                    1. Ensure `pca_ai_utils.py` is in the same directory as `pca.py`
+                    2. The module provides pure geometric interpretation (no AI needed)
+                    3. Based on established PCA theory for reliable results
+                    """)
+                    
+                    # Fallback: show basic statistics
+                    st.markdown("#### 📊 Basic Statistics (Fallback)")
+                    
+                    loadings = pca_results.get('loadings', pd.DataFrame())
+                    scores = pca_results.get('scores', pd.DataFrame())
+                    
+                    if not loadings.empty and not scores.empty:
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.markdown("**Loadings Summary:**")
+                            st.write(f"- Shape: {loadings.shape}")
+                            st.write(f"- Variables: {len(loadings)}")
+                            st.write(f"- Components: {len(loadings.columns)}")
+                        
+                        with col2:
+                            st.markdown("**Scores Summary:**")
+                            st.write(f"- Shape: {scores.shape}")
+                            st.write(f"- Samples: {len(scores)}")
+                            st.write(f"- Components: {len(scores.columns)}")
+            
+            # =================================================================
+            # MODEL QUALITY METRICS (UNCHANGED)
+            # =================================================================
+            elif diagnostic_type == "📊 Model Quality Metrics":
                 st.markdown("### 📊 Model Quality Metrics")
                 
                 col1, col2 = st.columns(2)
@@ -2260,75 +2181,15 @@ def show():
                             f"{loadings.iloc[:, 0].max() - loadings.iloc[:, 0].min():.3f}")
                     
                     if is_varimax:
-                        # Calculate simple structure measure
                         loadings_squared = loadings.values ** 2
                         simple_structure = np.mean(np.var(loadings_squared, axis=1))
                         st.metric("Simple Structure Index", f"{simple_structure:.3f}")
             
-            elif diagnostic_type == "🎯 Factor Interpretation" and is_varimax:
-                st.markdown("### 🎯 Varimax Factor Interpretation")
-                st.markdown("*Analysis of rotated factor structure*")
-                
-                loadings = pca_results['loadings']
-                
-                # Factor interpretation table
-                st.markdown("#### Factor Loading Matrix")
-                
-                # Highlight high loadings
-                def highlight_high_loadings(val):
-                    if abs(val) > 0.5:
-                        return 'background-color: yellow'
-                    elif abs(val) > 0.3:
-                        return 'background-color: lightblue'
-                    return ''
-                
-                styled_loadings = loadings.style.applymap(highlight_high_loadings)
-                st.dataframe(styled_loadings, use_container_width=True)
-                
-                st.info("🟡 High loadings (>0.5) | 🔵 Moderate loadings (0.3-0.5)")
-                
-                # Simple structure analysis
-                st.markdown("#### Simple Structure Analysis")
-                
-                loadings_abs = np.abs(loadings.values)
-                
-                for i, factor in enumerate(loadings.columns):
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        # High loading variables
-                        high_loading_vars = loadings.index[loadings_abs[:, i] > 0.5].tolist()
-                        st.markdown(f"**{factor} - High Loading Variables:**")
-                        if high_loading_vars:
-                            for var in high_loading_vars:
-                                loading_val = loadings.loc[var, factor]
-                                st.write(f"• {var}: {loading_val:.3f}")
-                        else:
-                            st.write("No variables with loadings > 0.5")
-                    
-                    with col2:
-                        # Factor interpretation
-                        st.markdown(f"**{factor} - Variance Explained:**")
-                        st.write(f"{pca_results['explained_variance_ratio'][i]*100:.2f}%")
-                        
-                        # Communality for this factor
-                        communality = np.sum(loadings.iloc[:, i]**2)
-                        st.write(f"Factor communality: {communality:.3f}")
-            
+            # Other diagnostic options...
             else:
-                st.info("🚧 Advanced T²/Q diagnostics will be implemented in future versions")
-                st.markdown("### Basic Model Information")
-                
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    st.metric("Total Samples", len(pca_results['scores']))
-                
-                with col2:
-                    st.metric("Total Variables", len(pca_results['loadings']))
-                
-                with col3:
-                    st.metric("Model Type", pca_results.get('method', 'Standard PCA'))
+                # Component/Factor analysis
+                st.markdown(f"### {'🎯 Factor' if is_varimax else '📈 Component'} Analysis")
+                st.info("Detailed component/factor interpretation coming soon")
 
     # ===== EXTRACT & EXPORT TAB =====
     with tab6:
