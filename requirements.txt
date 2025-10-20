@@ -1,0 +1,41 @@
+
+# ChemometricSolutions Interactive Demos
+# Requirements file for Streamlit deployment
+
+# Core framework
+streamlit>=1.28.0
+
+# Data manipulation and analysis
+pandas>=1.5.0
+numpy>=1.21.0
+
+# Plotting and visualization
+plotly>=5.0.0
+matplotlib>=3.5.0
+seaborn>=0.11.0
+
+# Machine learning and statistics
+scikit-learn>=1.0.0
+scipy>=1.7.0
+
+# File handling
+openpyxl>=3.0.9          # Excel files
+xlrd>=2.0.1              # Excel files (legacy)
+
+# Optional but recommended for advanced features
+# Uncomment if you use these in your apps:
+statsmodels>=0.13.0    # Advanced statistics
+plotly-express>=0.4.1  # Plotly Express (usually included with plotly)
+
+# For potential future features
+pathlib2>=2.3.6         # Path handling (Python < 3.4 compatibility)
+
+# Development and debugging (optional)
+streamlit-aggrid>=0.3.0  # Advanced tables
+streamlit-plotly-events>=0.0.6  # Interactive plotly events
+
+# Existing dependencies...
+streamlit>=1.28.0
+pandas>=1.5.0
+numpy>=1.21.0
+

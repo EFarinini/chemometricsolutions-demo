@@ -1,0 +1,26 @@
+[theme]
+# Tema LIGHT con tocco azzurro
+primaryColor = "#1E90FF"           # Il tuo blu originale
+backgroundColor = "#FFFFFF"        # Sfondo bianco
+secondaryBackgroundColor = "#F0F8FF"  # Alice Blue (azzurro chiarissimo)
+textColor = "#1C1C1C"              # Testo quasi nero
+font = "sans serif"
+
+[server]
+headless = true
+port = 8501
+enableCORS = false
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false
+serverAddress = "0.0.0.0"
+serverPort = 8501
+
+[runner]
+magicEnabled = true
+fastReruns = true
+
+[client]
+showErrorDetails = true
+toolbarMode = "minimal"

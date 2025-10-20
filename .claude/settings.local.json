@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(python3:*)",
+      "Bash(for f in pca_utils/pca_*.py)",
+      "Bash(do echo \"$f:\")",
+      "Bash(done)",
+      "Bash(for f in pca_utils/__init__.py pca_utils/config.py)",
+      "Bash(cat:*)",
+      "Bash(wc:*)",
+      "Bash(echo:*)",
+      "Bash(for module in pca_calculations pca_plots pca_statistics pca_workspace)",
+      "Bash(head:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
