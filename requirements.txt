@@ -10,7 +10,7 @@ streamlit-plotly-events>=0.0.6 # Interactive Plotly charts
 # ===== DATA MANIPULATION & ANALYSIS =====
 pandas>=1.5.0                  # Data structures and manipulation
 numpy>=1.23.0                  # Numerical computing
-scipy==1.11.4                  # Scientific computing (PINNED for Streamlit Cloud - GPy compatibility)
+scipy==1.10.1                  # Scientific computing (PINNED - has pre-compiled wheels, compatible with GPy)
 
 # ===== VISUALIZATION =====
 plotly>=5.0.0                  # Interactive plots (main visualization library)
@@ -41,10 +41,14 @@ joblib>=1.2.0                  # Model serialization and parallel computing
 # flake8>=4.0.0                # Linting
 
 # ===== CRITICAL FIXES FOR STREAMLIT CLOUD =====
-# Line 13: scipy==1.11.4 - PINNED to avoid gfortran compilation error
-#          GPy 1.13.2 requires scipy<1.12 (conflict with scipy>=1.13.0)
-# Line 23: statsmodels==0.14.0 - PINNED to avoid Cython compilation errors
-#          Version 0.14.2+ tries to compile from source which fails on cloud
+# Line 13: scipy==1.10.1 - PINNED to version with pre-compiled wheels
+#          - scipy 1.11.4 and 1.12.0 fail to compile (no gfortran)
+#          - scipy 1.10.1 has pre-built wheels for all platforms
+#          - Still compatible with GPy 1.13.2 (requires scipy<1.12)
+# 
+# Line 23: statsmodels==0.14.0 - PINNED to avoid Cython compilation
+#          Version 0.14.2+ fails to compile from source on cloud
+#
 # Line 26-28: GPy and gpyopt PINNED for compatibility
 #
-# All other versions tested and compatible with Streamlit Cloud (Python 3.13)
+# All versions tested and compatible with Streamlit Cloud (Python 3.13)
