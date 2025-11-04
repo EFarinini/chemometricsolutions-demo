@@ -688,3 +688,260 @@ def add_convex_hulls(
         pass
 
     return fig
+
+
+def plot_varimax_component_selector(
+    explained_variance_ratio: np.ndarray,
+    cumulative_variance: np.ndarray
+) -> go.Figure:
+    """
+    Create interactive screeplot for Varimax component selection.
+
+    Shows both individual and cumulative variance to help user select optimal number of factors.
+
+    Parameters
+    ----------
+    explained_variance_ratio : np.ndarray
+        Array of variance explained ratios (0-1 scale).
+    cumulative_variance : np.ndarray
+        Array of cumulative variance (0-1 scale).
+
+    Returns
+    -------
+    go.Figure
+        Plotly Figure with interactive screeplot.
+    """
+    n_components = len(explained_variance_ratio)
+    component_labels = [f'PC{i+1}' for i in range(n_components)]
+
+    fig = go.Figure()
+
+    # Add individual variance bars
+    fig.add_trace(go.Bar(
+        x=component_labels,
+        y=explained_variance_ratio * 100,
+        name='Individual Variance',
+        marker_color='lightblue',
+        yaxis='y'
+    ))
+
+    # Add cumulative variance line
+    fig.add_trace(go.Scatter(
+        x=component_labels,
+        y=cumulative_variance * 100,
+        mode='lines+markers',
+        name='Cumulative Variance',
+        line=dict(color='red', width=3),
+        marker=dict(size=10),
+        yaxis='y2'
+    ))
+
+    # Add 80% and 95% reference lines
+    fig.add_hline(y=80, line_dash="dash", line_color="orange",
+                  annotation_text="80%", yaxis='y2')
+    fig.add_hline(y=95, line_dash="dash", line_color="green",
+                  annotation_text="95%", yaxis='y2')
+
+    fig.update_layout(
+        title="Component Selection for Varimax Rotation<br><sub>Use slider below to select number of factors</sub>",
+        xaxis_title="Principal Component",
+        yaxis=dict(title="Individual Variance (%)", side='left'),
+        yaxis2=dict(title="Cumulative Variance (%)", side='right', overlaying='y', range=[0, 105]),
+        height=500,
+        hovermode='x unified'
+    )
+
+    return fig
+
+
+def plot_line_scores(
+    scores: pd.DataFrame,
+    pc_names: List[str],
+    data: Optional[pd.DataFrame] = None,
+    color_by: str = "None",
+    encode_by: str = "None",
+    show_labels: str = "None",
+    label_source: Optional[pd.DataFrame] = None
+) -> go.Figure:
+    """
+    Line plot of PCA scores with categorical coloring and segment separators.
+
+    Draws line segments colored by category with gray dashed connectors between periods.
+    Similar to MATLAB scoresprofiliperiodi.m
+
+    Parameters
+    ----------
+    scores : pd.DataFrame
+        PCA scores with PC columns
+    pc_names : List[str]
+        List of PC names to plot (e.g., ['PC1', 'PC2'])
+    data : pd.DataFrame, optional
+        Original data for color_by and encode_by columns
+    color_by : str, optional
+        Column for coloring segments. Default 'None'
+    encode_by : str, optional
+        Column for segment grouping (usually same as color_by). Default 'None'
+    show_labels : str, optional
+        Column to show as labels on points. Default 'None'
+    label_source : pd.DataFrame, optional
+        DataFrame with label data. Default None
+
+    Returns
+    -------
+    go.Figure
+        Plotly line plot with colored segments and optional labels
+    """
+
+    fig = go.Figure()
+    sample_index = np.arange(1, len(scores) + 1)
+
+    # Get color mapping from color_utils
+    color_map = None
+    if encode_by != 'None' and data is not None and encode_by in data.columns:
+        unique_cats = data[encode_by].dropna().unique()
+        color_map = create_categorical_color_map(unique_cats)
+
+    # Plot each PC
+    for pc_name in pc_names:
+        pc_idx = int(pc_name.replace('PC', '')) - 1
+        pc_scores = scores.iloc[:, pc_idx].values
+
+        # If encode_by set: draw segments grouped by category
+        if encode_by != 'None' and data is not None and encode_by in data.columns:
+            encode_values = data[encode_by].values
+
+            # Find segment boundaries
+            segments = []
+            current_start = 0
+
+            for i in range(1, len(encode_values)):
+                if encode_values[i] != encode_values[i-1]:
+                    segments.append((current_start, i, encode_values[current_start]))
+                    current_start = i
+            segments.append((current_start, len(encode_values), encode_values[current_start]))
+
+            # Draw each segment
+            for start_idx, end_idx, segment_cat in segments:
+                x_seg = sample_index[start_idx:end_idx]
+                y_seg = pc_scores[start_idx:end_idx]
+
+                # Get color from map
+                seg_color = color_map.get(segment_cat, 'gray') if color_map else 'blue'
+
+                # Prepare labels if requested
+                text_labels = None
+                if show_labels != 'None' and label_source is not None and show_labels in label_source.columns:
+                    text_labels = label_source[show_labels].iloc[start_idx:end_idx].astype(str).values
+
+                # Draw segment with optional labels
+                fig.add_trace(go.Scatter(
+                    x=x_seg,
+                    y=y_seg,
+                    name=f"{pc_name}: {segment_cat}",
+                    mode='lines+markers+text' if text_labels is not None else 'lines+markers',
+                    line=dict(color=seg_color, width=2, dash='solid'),
+                    marker=dict(size=6),
+                    text=text_labels,
+                    textposition="top center",
+                    textfont=dict(size=8),
+                    hovertemplate=f'{pc_name}<br>Sample: %{{x}}<br>Score: %{{y:.3f}}<br>{encode_by}: {segment_cat}<extra></extra>'
+                ))
+
+                # Add connector line (gray dashed) between segments
+                if end_idx < len(sample_index):
+                    connector_x = [sample_index[end_idx-1], sample_index[end_idx]]
+                    connector_y = [pc_scores[end_idx-1], pc_scores[end_idx]]
+
+                    fig.add_trace(go.Scatter(
+                        x=connector_x,
+                        y=connector_y,
+                        mode='lines',
+                        line=dict(color='gray', dash='dot', width=1),
+                        showlegend=False,
+                        hoverinfo='skip'
+                    ))
+
+        else:
+            # No grouping: draw entire line
+            if color_by == 'None':
+                # Single color
+                fig.add_trace(go.Scatter(
+                    x=sample_index,
+                    y=pc_scores,
+                    name=pc_name,
+                    mode='lines+markers',
+                    line=dict(color='blue', width=2),
+                    marker=dict(size=5),
+                    hovertemplate=f'{pc_name}<br>Sample: %{{x}}<br>Score: %{{y:.3f}}<extra></extra>'
+                ))
+
+            elif color_by == 'Index':
+                # Gradient by index
+                fig.add_trace(go.Scatter(
+                    x=sample_index,
+                    y=pc_scores,
+                    name=pc_name,
+                    mode='lines+markers',
+                    line=dict(width=2),
+                    marker=dict(
+                        size=5,
+                        color=sample_index,
+                        colorscale='Blues',
+                        showscale=True,
+                        colorbar=dict(title="Index", x=1.02)
+                    ),
+                    hovertemplate=f'{pc_name}<br>Sample: %{{x}}<br>Score: %{{y:.3f}}<extra></extra>'
+                ))
+
+            elif color_by in data.columns:
+                # Color by column
+                if not is_quantitative_variable(data[color_by]):
+                    # Categorical: use color_utils map
+                    unique_cats = data[color_by].dropna().unique()
+                    color_map_by = create_categorical_color_map(unique_cats)
+                    color_vals = [color_map_by.get(cat, 'gray') for cat in data[color_by]]
+
+                    fig.add_trace(go.Scatter(
+                        x=sample_index,
+                        y=pc_scores,
+                        name=pc_name,
+                        mode='lines+markers',
+                        line=dict(width=2),
+                        marker=dict(size=5, color=color_vals),
+                        hovertemplate=f'{pc_name}<br>Sample: %{{x}}<br>Score: %{{y:.3f}}<extra></extra>'
+                    ))
+                else:
+                    # Quantitative: blue-to-red gradient
+                    fig.add_trace(go.Scatter(
+                        x=sample_index,
+                        y=pc_scores,
+                        name=pc_name,
+                        mode='lines+markers',
+                        line=dict(width=2),
+                        marker=dict(
+                            size=5,
+                            color=data[color_by].values,
+                            colorscale=[(0.0, 'rgb(0, 0, 255)'), (0.5, 'rgb(128, 0, 128)'), (1.0, 'rgb(255, 0, 0)')],
+                            showscale=True,
+                            colorbar=dict(title=color_by, x=1.02)
+                        ),
+                        hovertemplate=f'{pc_name}<br>Sample: %{{x}}<br>Score: %{{y:.3f}}<extra></extra>'
+                    ))
+
+    # Add zero line
+    fig.add_hline(y=0, line_dash="dot", line_color="gray", opacity=0.5)
+
+    title_text = "PCA Scores Over Sample Sequence"
+    if color_by != 'None' or encode_by != 'None':
+        title_text += f"<br><sub>Color: {color_by} | Segments: {encode_by}</sub>"
+
+    fig.update_layout(
+        title=title_text,
+        xaxis_title="Sample Index",
+        yaxis_title="Score Value",
+        hovermode='x unified',
+        height=500,
+        template='plotly_white'
+    )
+
+    return fig

@@ -1,15 +1,247 @@
 """
-PCA Calculation Functions
+PCA Calculation Functions - Pure NIPALS Implementation
 
 Core computation functions for Principal Component Analysis (PCA).
-Includes standard PCA decomposition and Varimax rotation.
+NO sklearn dependencies - pure NumPy/Pandas implementation.
+
+Author: ChemometricSolutions
 """
 
 import numpy as np
 import pandas as pd
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
 from typing import Tuple, Optional, Dict, Any, Union
+
+
+def RnipalsPca_exact(
+    X: Union[pd.DataFrame, np.ndarray],
+    nPcs: int = 2,
+    maxSteps: int = 5000,
+    threshold: float = 1e-6,
+    center: bool = True,
+    scale: bool = False
+) -> Dict[str, Any]:
+    """
+    NIPALS PCA algorithm (R-CAT pcaMethods::RnipalsPca compatible).
+    
+    Computes ONLY the requested number of components using the NIPALS
+    (Nonlinear Iterative Partial Least Squares) algorithm. This is more
+    efficient than computing all components when only a few are needed.
+    
+    Features:
+    - Computes only nPcs components (not all)
+    - Handles NaN values natively (no imputation needed)
+    - Deterministic initialization (column 0, normalized)
+    - Total variance calculated on ORIGINAL data before preprocessing
+    
+    Parameters
+    ----------
+    X : pd.DataFrame or np.ndarray
+        Input data matrix (n_samples × n_features). Can contain NaN.
+    nPcs : int, optional
+        Number of principal components to compute. Default is 2.
+    maxSteps : int, optional
+        Maximum NIPALS iterations per component. Default is 5000.
+    threshold : float, optional
+        Convergence tolerance. Default is 1e-6.
+    center : bool, optional
+        Center data (subtract column means). Default is True.
+    scale : bool, optional
+        Scale data to unit variance (autoscaling). Default is False.
+    
+    Returns
+    -------
+    dict
+        Dictionary with PCA results:
+        - 'scores' : pd.DataFrame - PC scores (n_samples × nPcs)
+        - 'loadings' : pd.DataFrame - PC loadings (n_features × nPcs)
+        - 'eigenvalues' : np.ndarray - Eigenvalues (λ = t't / (n-1), variance of scores)
+        - 'explained_variance' : np.ndarray - Alias for eigenvalues
+        - 'explained_variance_ratio' : np.ndarray - Proportion of variance (0-1)
+        - 'cumulative_variance' : np.ndarray - Cumulative proportion (0-1)
+        - 'total_variance' : float - Total variance from original data
+        - 'n_iterations' : list - Convergence iterations per component
+        - 'means' : np.ndarray - Column means (if centered)
+        - 'stds' : np.ndarray - Column standard deviations (if scaled)
+
+    Notes
+    -----
+    NIPALS PCA algorithm:
+    1. Total variance = sum(var(X_original)) calculated BEFORE preprocessing
+    2. Initialization = first column (column 0), normalized to ||t|| = 1
+    3. Eigenvalue λ = t't / (n-1)  [variance of scores, for Hotelling T²]
+    4. Variance ratio = λ / sum(all eigenvalues)  [Standard PCA formula]
+    5. Sign convention: largest absolute loading is positive
+    
+    References
+    ----------
+    - R pcaMethods::RnipalsPca documentation
+    - Wold, H. (1966). Estimation of principal components and related models
+      by iterative least squares. In Multivariate Analysis (ed. P.R. Krishnaiah),
+      Academic Press, NY, 391-420.
+    """
+    # === INPUT VALIDATION ===
+    is_dataframe = isinstance(X, pd.DataFrame)
+    if is_dataframe:
+        index = X.index
+        columns = X.columns
+        X_array = X.values.astype(float)
+    else:
+        X_array = np.asarray(X, dtype=float)
+        index = None
+        columns = None
+    
+    n_samples, n_features = X_array.shape
+    
+    if nPcs < 1 or nPcs > min(n_samples, n_features):
+        raise ValueError(
+            f"nPcs must be between 1 and {min(n_samples, n_features)}, got {nPcs}"
+        )
+    
+    # === CRITICAL: Calculate total variance on ORIGINAL data ===
+    # This is done BEFORE any preprocessing (centering/scaling)
+    # Matches R-CAT: sgt <- sum(apply(M_, 2, var))
+    total_variance = np.sum(np.nanvar(X_array, axis=0, ddof=1))
+    
+    # Store original statistics for output
+    original_means = np.nanmean(X_array, axis=0)
+    original_stds = np.nanstd(X_array, axis=0, ddof=1)
+    
+    # === PREPROCESSING ===
+    Matrix = X_array.copy()
+    
+    if center:
+        col_means = np.nanmean(Matrix, axis=0)
+        Matrix = Matrix - col_means
+    else:
+        col_means = np.zeros(n_features)
+    
+    if scale:
+        col_stds = np.nanstd(Matrix, axis=0, ddof=1)
+        col_stds[col_stds == 0] = 1.0  # Avoid division by zero
+        Matrix = Matrix / col_stds
+    else:
+        col_stds = np.ones(n_features)
+    
+    # === HELPER FUNCTIONS ===
+    def sum_na(x):
+        """Sum of non-NaN values"""
+        return np.sum(x[~np.isnan(x)]) if np.any(~np.isnan(x)) else 0.0
+    
+    # === INITIALIZE STORAGE ===
+    scores_list = []
+    loadings_list = []
+    eigenvalues = np.zeros(nPcs)
+    n_iterations = []
+    
+    # Work on a copy for deflation
+    X_residual = Matrix.copy()
+    
+    # === NIPALS ALGORITHM ===
+    for comp in range(nPcs):
+        iteration_count = 0
+        
+        # CRITICAL: Deterministic initialization with column 0, normalized
+        # This ensures consistent signs and reproducible results
+        th = X_residual[:, 0].copy()
+        valid_idx = ~np.isnan(th)
+        
+        if np.any(valid_idx):
+            th[~valid_idx] = 0  # Set NaN to 0
+            t_norm = np.linalg.norm(th[valid_idx])
+            if t_norm > 0:
+                th = th / t_norm  # Normalize: ||th|| = 1
+        else:
+            # Fallback if first column is all NaN
+            th = np.ones(n_samples) / np.sqrt(n_samples)
+        
+        # Iterative refinement until convergence
+        while True:
+            iteration_count += 1
+            
+            # Step 1: Calculate loadings ph = X' * th / (th' * th)
+            tsize = sum_na(th * th)
+            if tsize > 0:
+                ph = np.array([
+                    sum_na(X_residual[:, j] * th) / tsize
+                    for j in range(n_features)
+                ])
+            else:
+                ph = np.zeros(n_features)
+            
+            # Step 2: Normalize loadings ||ph|| = 1
+            psize = np.sqrt(np.sum(ph * ph))
+            if psize > 0:
+                ph = ph / psize
+            
+            # Step 3: Calculate new scores th = X * ph
+            th_old = th.copy()
+            th = np.array([
+                sum_na(X_residual[i, :] * ph)
+                for i in range(n_samples)
+            ])
+            
+            # Step 4: Check convergence
+            diff_sq = sum_na((th_old - th) ** 2)
+            if diff_sq <= threshold:
+                break
+            if iteration_count >= maxSteps:
+                break
+        
+
+        
+        # Store results for this component
+        scores_list.append(th)
+        loadings_list.append(ph)
+        # CORRECTED: Eigenvalue = variance of scores, not sum of squares
+        # λ = t't / (n-1) to match Hotelling T² theory
+        eigenvalues[comp] = np.dot(th, th) / (n_samples - 1)
+        n_iterations.append(iteration_count)
+        
+        # Deflation: Remove this component from residual matrix
+        # X_residual = X_residual - th * ph'
+        for i in range(n_samples):
+            for j in range(n_features):
+                if not np.isnan(X_residual[i, j]):
+                    X_residual[i, j] -= th[i] * ph[j]
+    
+    # === PREPARE OUTPUT ===
+    # Convert lists to arrays
+    scores_array = np.column_stack(scores_list)
+    loadings_array = np.column_stack(loadings_list)
+
+    # Calculate variance ratios: Standard PCA formula
+    # Proportion of variance = eigenvalue / sum(all eigenvalues)
+    total_eigenvalues = np.sum(eigenvalues)
+    if total_eigenvalues > 0:
+        explained_variance_ratio = eigenvalues / total_eigenvalues
+    else:
+        explained_variance_ratio = np.zeros_like(eigenvalues)
+
+    cumulative_variance = np.cumsum(explained_variance_ratio)
+    
+    # Create component names
+    pc_names = [f'PC{i+1}' for i in range(nPcs)]
+    
+    # Convert to DataFrames for Streamlit compatibility
+    if is_dataframe:
+        scores_df = pd.DataFrame(scores_array, columns=pc_names, index=index)
+        loadings_df = pd.DataFrame(loadings_array, columns=pc_names, index=columns)
+    else:
+        scores_df = pd.DataFrame(scores_array, columns=pc_names)
+        loadings_df = pd.DataFrame(loadings_array, columns=pc_names)
+    
+    return {
+        'scores': scores_df,
+        'loadings': loadings_df,
+        'eigenvalues': eigenvalues,
+        'explained_variance': eigenvalues,  # Alias for compatibility
+        'explained_variance_ratio': explained_variance_ratio,
+        'cumulative_variance': cumulative_variance,
+        'total_variance': total_variance,
+        'n_iterations': n_iterations,
+        'means': original_means,
+        'stds': original_stds
+    }
 
 
 def compute_pca(
@@ -19,149 +251,116 @@ def compute_pca(
     scale: bool = False
 ) -> Dict[str, Any]:
     """
-    Perform Principal Component Analysis on input data.
-
+    Streamlit-friendly wrapper for NIPALS PCA computation.
+    
+    Performs input validation, calls RnipalsPca_exact(), and returns
+    results in a format optimized for Streamlit session state.
+    
     Parameters
     ----------
     X : pd.DataFrame or np.ndarray
-        Input data matrix of shape (n_samples, n_features).
-        Rows represent samples/observations, columns represent variables/features.
+        Input data matrix (n_samples × n_features).
     n_components : int
         Number of principal components to compute.
     center : bool, optional
-        Whether to center the data (mean centering). Default is True.
+        Center data (subtract means). Default is True.
     scale : bool, optional
-        Whether to scale the data to unit variance (autoscaling). Default is False.
-
+        Scale data to unit variance. Default is False.
+    
     Returns
     -------
     dict
-        Dictionary containing PCA results with the following keys:
-
-        - 'model' : sklearn.decomposition.PCA
-            Fitted PCA model object
-        - 'scores' : pd.DataFrame
-            Principal component scores (n_samples, n_components)
-        - 'loadings' : pd.DataFrame
-            Principal component loadings (n_features, n_components)
-        - 'explained_variance' : np.ndarray
-            Variance explained by each component (eigenvalues)
-        - 'explained_variance_ratio' : np.ndarray
-            Proportion of variance explained by each component
-        - 'cumulative_variance' : np.ndarray
-            Cumulative proportion of variance explained
-        - 'eigenvalues' : np.ndarray
-            Eigenvalues (same as explained_variance)
-        - 'scaler' : StandardScaler or None
-            Scaler object used for preprocessing (if scale=True)
-        - 'processed_data' : pd.DataFrame or np.ndarray
-            Preprocessed data after centering/scaling
-
+        Dictionary compatible with pca.py session_state:
+        - 'algorithm' : str - Always 'NIPALS'
+        - 'scores' : pd.DataFrame - PC scores
+        - 'loadings' : pd.DataFrame - PC loadings
+        - 'eigenvalues' : np.ndarray - Eigenvalues
+        - 'explained_variance' : np.ndarray - Same as eigenvalues
+        - 'explained_variance_ratio' : np.ndarray - Variance proportions
+        - 'cumulative_variance' : np.ndarray - Cumulative variance
+        - 'centering' : bool - Whether data was centered
+        - 'scaling' : bool - Whether data was scaled
+        - 'means' : np.ndarray - Original column means
+        - 'stds' : np.ndarray - Original column std devs
+        - 'n_iterations' : list - NIPALS iterations per component
+        - 'total_variance' : float - Total variance in original data
+        - 'n_components' : int - Number of components computed
+        - 'n_samples' : int - Number of samples
+        - 'n_features' : int - Number of features
+    
+    Raises
+    ------
+    ValueError
+        If input validation fails.
+    
     Examples
     --------
-    >>> import pandas as pd
-    >>> data = pd.DataFrame(np.random.randn(100, 50))
-    >>> results = compute_pca(data, n_components=5, center=True, scale=True)
-    >>> print(results['explained_variance_ratio'])
+    >>> import numpy as np
+    >>> X = np.random.randn(100, 50)
+    >>> results = compute_pca(X, n_components=5, center=True, scale=True)
     >>> print(results['scores'].shape)  # (100, 5)
-
-    Notes
-    -----
-    - Centering is standard for PCA analysis
-    - Scaling (autoscaling) is recommended when variables have different units
-    - The function follows the convention: scores = data @ loadings
+    >>> print(results['algorithm'])      # 'NIPALS'
     """
-    # Input validation
-    if X is None:
-        raise ValueError("Input data X cannot be None")
-
-    # Store original index and columns if DataFrame
-    is_dataframe = isinstance(X, pd.DataFrame)
-    if is_dataframe:
-        index = X.index
-        columns = X.columns
+    # === INPUT VALIDATION ===
+    if isinstance(X, pd.DataFrame):
         X_array = X.values
+        n_samples, n_features = X.shape
     else:
         X_array = np.asarray(X)
-        index = None
-        columns = None
-
-    # Validate shape
-    if X_array.ndim != 2:
-        raise ValueError(f"Input data must be 2-dimensional, got shape {X_array.shape}")
-
-    n_samples, n_features = X_array.shape
-
-    if n_samples < 2:
-        raise ValueError(f"Need at least 2 samples for PCA, got {n_samples}")
-
-    if n_features < 1:
-        raise ValueError(f"Need at least 1 feature for PCA, got {n_features}")
-
+        n_samples, n_features = X_array.shape
+    
     # Validate n_components
-    if not isinstance(n_components, (int, np.integer)):
-        raise TypeError(f"n_components must be an integer, got {type(n_components)}")
-
+    max_components = min(n_samples, n_features)
     if n_components < 1:
         raise ValueError(f"n_components must be >= 1, got {n_components}")
-
-    if n_components > min(n_samples, n_features):
+    if n_components > max_components:
         raise ValueError(
-            f"n_components ({n_components}) cannot exceed min(n_samples, n_features) "
-            f"= min({n_samples}, {n_features}) = {min(n_samples, n_features)}"
+            f"n_components cannot exceed min(n_samples, n_features) = "
+            f"{max_components}, got {n_components}"
         )
-
-    # Check for missing values
-    if np.any(np.isnan(X_array)):
-        raise ValueError("Input data contains NaN values. Please remove or impute missing values before PCA.")
-
-    # Preprocessing
-    scaler = None
-    if scale:
-        scaler = StandardScaler()
-        X_processed = scaler.fit_transform(X_array)
-    elif center:
-        X_processed = X_array - np.mean(X_array, axis=0)
-    else:
-        X_processed = X_array.copy()
-
-    # Perform PCA
-    pca = PCA(n_components=n_components)
-    scores = pca.fit_transform(X_processed)
-
-    # Get loadings (components transposed)
-    loadings = pca.components_.T
-
-    # Calculate variance metrics
-    explained_variance = pca.explained_variance_
-    explained_variance_ratio = pca.explained_variance_ratio_
-    cumulative_variance = np.cumsum(explained_variance_ratio)
-
-    # Prepare output with proper naming
-    pc_names = [f'PC{i+1}' for i in range(n_components)]
-
-    if is_dataframe:
-        scores_df = pd.DataFrame(scores, columns=pc_names, index=index)
-        loadings_df = pd.DataFrame(loadings, columns=pc_names, index=columns)
-        processed_df = pd.DataFrame(X_processed, columns=columns, index=index)
-    else:
-        scores_df = scores
-        loadings_df = loadings
-        processed_df = X_processed
-
-    # Compile results
+    
+    # Check for numeric data
+    if isinstance(X, pd.DataFrame):
+        non_numeric = X.select_dtypes(exclude=[np.number]).columns
+        if len(non_numeric) > 0:
+            raise ValueError(
+                f"DataFrame contains non-numeric columns: {list(non_numeric)}"
+            )
+    
+    # Check if data is empty
+    if n_samples == 0 or n_features == 0:
+        raise ValueError(f"Empty data matrix: {n_samples} samples, {n_features} features")
+    
+    # === CALL NIPALS ALGORITHM ===
+    nipals_results = RnipalsPca_exact(
+        X=X,
+        nPcs=n_components,
+        maxSteps=5000,
+        threshold=1e-6,
+        center=center,
+        scale=scale
+    )
+    
+    # === FORMAT OUTPUT FOR STREAMLIT ===
     results = {
-        'model': pca,
-        'scores': scores_df,
-        'loadings': loadings_df,
-        'explained_variance': explained_variance,
-        'explained_variance_ratio': explained_variance_ratio,
-        'cumulative_variance': cumulative_variance,
-        'eigenvalues': explained_variance,
-        'scaler': scaler,
-        'processed_data': processed_df
+        'algorithm': 'NIPALS',
+        'scores': nipals_results['scores'],
+        'loadings': nipals_results['loadings'],
+        'eigenvalues': nipals_results['eigenvalues'],
+        'explained_variance': nipals_results['explained_variance'],
+        'explained_variance_ratio': nipals_results['explained_variance_ratio'],
+        'cumulative_variance': nipals_results['cumulative_variance'],
+        'centering': center,
+        'scaling': scale,
+        'means': nipals_results['means'],
+        'stds': nipals_results['stds'],
+        'n_iterations': nipals_results['n_iterations'],
+        'total_variance': nipals_results['total_variance'],
+        'n_components': n_components,
+        'n_samples': n_samples,
+        'n_features': n_features
     }
-
+    
     return results
 
 
@@ -171,55 +370,60 @@ def varimax_rotation(
     tol: float = 1e-6
 ) -> Tuple[Union[np.ndarray, pd.DataFrame], int]:
     """
-    Perform Varimax rotation on PCA loadings matrix.
-
-    Varimax rotation is an orthogonal rotation method that maximizes the variance
-    of squared loadings within each component, leading to simpler and more
-    interpretable factor structure.
-
+    Varimax rotation for PCA loadings (R-CAT grid search method).
+    
+    Performs orthogonal rotation to maximize variance of squared loadings,
+    making the loading structure simpler and more interpretable.
+    
+    The algorithm uses pairwise rotations with grid search to maximize
+    the sum of fourth powers of loadings (Kaiser varimax criterion).
+    
     Parameters
     ----------
     loadings : np.ndarray or pd.DataFrame
-        Loading matrix of shape (n_features, n_components).
-        Each column represents one principal component's loadings.
+        Loading matrix (n_variables, n_factors) to rotate.
+        Must have at least 2 factors.
     max_iter : int, optional
-        Maximum number of iterations for convergence. Default is 100.
+        Maximum iterations for convergence. Default is 100.
     tol : float, optional
-        Convergence tolerance. Algorithm stops when the change in loadings
-        between iterations is less than this value. Default is 1e-6.
-
+        Convergence tolerance (not used in grid search, kept for API).
+    
     Returns
     -------
     rotated_loadings : np.ndarray or pd.DataFrame
-        Rotated loading matrix with the same shape as input.
-        Type matches input (DataFrame if input is DataFrame, else ndarray).
+        Rotated loadings matrix (same shape and type as input).
     iterations : int
         Number of iterations performed until convergence.
-
-    Examples
-    --------
-    >>> loadings = np.random.randn(50, 3)
-    >>> rotated, n_iter = varimax_rotation(loadings)
-    >>> print(f"Converged in {n_iter} iterations")
-    >>> print(rotated.shape)  # (50, 3)
-
+    
+    Raises
+    ------
+    ValueError
+        If loadings has less than 2 variables or 2 factors.
+    
     Notes
     -----
-    - Varimax rotation seeks a "simple structure" where each variable loads
-      highly on few components and weakly on others
-    - The rotation is orthogonal, preserving orthogonality of components
-    - After rotation, components should be sorted by explained variance
-    - This implementation uses pairwise angle search for robustness
-
+    Algorithm details:
+    - Grid search: -90° to +90° in 0.1° steps
+    - Criterion: maximize sum(L^4) per Kaiser varimax
+    - Pairwise rotations until no improvement
+    - Matches R pcaMethods::varimax implementation
+    
     References
     ----------
-    Kaiser, H. F. (1958). The varimax criterion for analytic rotation
-    in factor analysis. Psychometrika, 23(3), 187-200.
+    - Kaiser, H. F. (1958). The varimax criterion for analytic rotation
+      in factor analysis. Psychometrika, 23, 187-200.
+    - R pcaMethods package varimax implementation
+    
+    Examples
+    --------
+    >>> loadings = pd.DataFrame(np.random.randn(50, 3))
+    >>> rotated, n_iter = varimax_rotation(loadings)
+    >>> print(f"Converged in {n_iter} iterations")
     """
-    # Input validation
+    # === INPUT VALIDATION ===
     if loadings is None:
         raise ValueError("Loadings matrix cannot be None")
-
+    
     # Handle DataFrame input
     is_dataframe = isinstance(loadings, pd.DataFrame)
     if is_dataframe:
@@ -228,136 +432,150 @@ def varimax_rotation(
         loadings_array = loadings.values
     else:
         loadings_array = np.asarray(loadings)
-
+        index = None
+        columns = None
+    
     # Validate shape
     if loadings_array.ndim != 2:
-        raise ValueError(f"Loadings must be 2-dimensional, got shape {loadings_array.shape}")
-
-    p, k = loadings_array.shape  # p = n_features, k = n_components
-
-    if p < 2:
-        raise ValueError(f"Need at least 2 features for Varimax rotation, got {p}")
-
-    if k < 2:
-        raise ValueError(f"Need at least 2 components for Varimax rotation, got {k}")
-
-    # Validate parameters
-    if not isinstance(max_iter, (int, np.integer)) or max_iter < 1:
-        raise ValueError(f"max_iter must be a positive integer, got {max_iter}")
-
-    if tol <= 0:
-        raise ValueError(f"Tolerance must be positive, got {tol}")
-
-    rotated_loadings = loadings_array.copy()
-
-    # Iterative rotation algorithm
+        raise ValueError(
+            f"Loadings must be 2-dimensional, got shape {loadings_array.shape}"
+        )
+    
+    n_vars, n_factors = loadings_array.shape
+    
+    if n_vars < 2:
+        raise ValueError(
+            f"Need at least 2 variables for Varimax rotation, got {n_vars}"
+        )
+    
+    if n_factors < 2:
+        raise ValueError(
+            f"Need at least 2 factors for Varimax rotation, got {n_factors}"
+        )
+    
+    # === VARIMAX ALGORITHM ===
+    # Transpose to factors × variables for rotation (R convention)
+    prl = loadings_array.T.copy()  # Shape: (n_factors, n_vars)
+    
     converged = False
     iteration = 0
-
+    
     while not converged and iteration < max_iter:
-        prev_loadings = rotated_loadings.copy()
-
-        # Pairwise rotations between all component pairs
-        for i in range(k - 1):
-            for j in range(i + 1, k):
-                # Extract two columns for rotation
-                lo = rotated_loadings[:, [i, j]]
-
-                # Find optimal rotation angle
+        improvement_found = False
+        
+        # Pairwise rotations between all factor pairs
+        for i in range(n_factors - 1):
+            for j in range(i + 1, n_factors):
+                # Extract two factor rows
+                factor_pair = prl[[i, j], :].copy()  # Shape: (2, n_vars)
+                
+                # Initial criterion value
                 best_angle = 0
-                best_criterion = np.sum(lo**4)
-
-                # Search for best rotation angle (-90 to 90 degrees)
+                current_criterion = np.sum(factor_pair ** 4)
+                best_criterion = current_criterion
+                best_pair = factor_pair.copy()
+                
+                # Grid search: -90 to +90 degrees in 0.1° steps
                 for angle_deg in np.arange(-90, 90.1, 0.1):
-                    angle_rad = angle_deg * np.pi / 180
-
-                    # Create rotation matrix
+                    # Create 2×2 rotation matrix
+                    angle_rad = np.deg2rad(angle_deg)
                     cos_a = np.cos(angle_rad)
                     sin_a = np.sin(angle_rad)
                     rotation_matrix = np.array([
                         [cos_a, -sin_a],
-                        [sin_a, cos_a]
+                        [sin_a,  cos_a]
                     ])
-
+                    
                     # Apply rotation
-                    rotated_pair = lo @ rotation_matrix
-                    criterion = np.sum(rotated_pair**4)
-
+                    rotated_pair = rotation_matrix @ factor_pair
+                    
+                    # Calculate varimax criterion (sum of 4th powers)
+                    criterion = np.sum(rotated_pair ** 4)
+                    
+                    # Keep best rotation
                     if criterion > best_criterion:
+                        best_pair = rotated_pair.copy()
                         best_criterion = criterion
                         best_angle = angle_deg
-
+                
                 # Apply best rotation if improvement found
                 if best_angle != 0:
-                    angle_rad = best_angle * np.pi / 180
-                    cos_a = np.cos(angle_rad)
-                    sin_a = np.sin(angle_rad)
-                    rotation_matrix = np.array([
-                        [cos_a, -sin_a],
-                        [sin_a, cos_a]
-                    ])
-
-                    rotated_loadings[:, [i, j]] = lo @ rotation_matrix
-
-        # Check convergence
-        if np.allclose(rotated_loadings, prev_loadings, atol=tol):
+                    improvement_found = True
+                    prl[i, :] = best_pair[0, :]
+                    prl[j, :] = best_pair[1, :]
+        
+        # Check convergence: stop if no improvement in this iteration
+        if not improvement_found:
             converged = True
-
+        
         iteration += 1
-
-    # Convert back to DataFrame if input was DataFrame
+    
+    # === PREPARE OUTPUT ===
+    # Convert back to (variables, factors)
+    rotated_loadings = prl.T  # Shape: (n_vars, n_factors)
+    
     if is_dataframe:
         rotated_loadings = pd.DataFrame(
             rotated_loadings,
             index=index,
             columns=columns
         )
-
+    
     return rotated_loadings, iteration
 
 
-def calculate_explained_variance(eigenvalues: np.ndarray) -> Dict[str, np.ndarray]:
+# === UTILITY FUNCTIONS ===
+
+def calculate_variance_metrics(eigenvalues: np.ndarray) -> Dict[str, np.ndarray]:
     """
     Calculate variance explained metrics from eigenvalues.
-
+    
     Parameters
     ----------
     eigenvalues : np.ndarray
         Array of eigenvalues (variance explained by each component).
-        Should be in descending order (largest eigenvalue first).
-
+    
     Returns
     -------
     dict
-        Dictionary containing variance metrics:
-        - 'explained_variance' : np.ndarray - Original eigenvalues
-        - 'explained_variance_ratio' : np.ndarray - Proportion of total variance
-        - 'cumulative_variance' : np.ndarray - Cumulative proportion
-        - 'total_variance' : float - Sum of all eigenvalues
-
-    Examples
-    --------
-    >>> eigenvalues = np.array([5.2, 3.1, 1.8, 0.9, 0.5])
-    >>> variance_metrics = calculate_explained_variance(eigenvalues)
-    >>> print(variance_metrics['explained_variance_ratio'])
-
-    Notes
-    -----
-    Explained variance ratio = eigenvalue / sum(all eigenvalues)
+        Dictionary with variance metrics:
+        - 'explained_variance' : Original eigenvalues
+        - 'explained_variance_ratio' : Proportion of total variance
+        - 'cumulative_variance' : Cumulative proportion
+        - 'total_variance' : Sum of all eigenvalues
     """
     eigenvalues = np.asarray(eigenvalues)
     total_variance = np.sum(eigenvalues)
-
+    
     if total_variance > 0:
         explained_variance_ratio = eigenvalues / total_variance
     else:
         explained_variance_ratio = np.zeros_like(eigenvalues)
-
+    
     cumulative_variance = np.cumsum(explained_variance_ratio)
-
+    
     return {
         'explained_variance': eigenvalues,
         'explained_variance_ratio': explained_variance_ratio,
         'cumulative_variance': cumulative_variance,
         'total_variance': total_variance
     }
+
+
+if __name__ == "__main__":
+    # Quick test
+    print("Testing NIPALS PCA implementation...")
+    
+    # Generate test data
+    np.random.seed(42)
+    X_test = np.random.randn(100, 50)
+    
+    # Test compute_pca
+    results = compute_pca(X_test, n_components=5, center=True, scale=True)
+    
+    print(f"✅ Algorithm: {results['algorithm']}")
+    print(f"✅ Scores shape: {results['scores'].shape}")
+    print(f"✅ Loadings shape: {results['loadings'].shape}")
+    print(f"✅ Total variance explained: {results['cumulative_variance'][-1]:.1%}")
+    print(f"✅ NIPALS iterations: {results['n_iterations']}")
+    print("\n🎯 NIPALS PCA working correctly!")

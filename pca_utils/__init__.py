@@ -46,7 +46,7 @@ from .config import (
 from .pca_calculations import (
     compute_pca,
     varimax_rotation,
-    calculate_explained_variance
+    calculate_variance_metrics  # Fixed: was calculate_explained_variance
 )
 
 # Import plotting functions
@@ -90,7 +90,7 @@ __all__ = [
     # Calculation functions
     'compute_pca',
     'varimax_rotation',
-    'calculate_explained_variance',
+    'calculate_variance_metrics',  # Fixed: was calculate_explained_variance
 
     # Plotting functions
     'plot_scree',

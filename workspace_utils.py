@@ -194,3 +194,71 @@ def get_dataset_metadata(dataset_name: str) -> Optional[Dict]:
                 return st.session_state.split_datasets[split_name]
 
     return None
+
+
+def save_to_workspace(
+    dataset: pd.DataFrame,
+    dataset_name: str,
+    design_type: str = "DoE Design",
+    metadata: Optional[Dict] = None
+) -> Tuple[bool, str]:
+    """
+    Save a dataset (e.g., DoE design) to the workspace.
+
+    This function stores the dataset in st.session_state.transformation_history
+    making it available across all modules without requiring file I/O.
+
+    Parameters
+    ----------
+    dataset : pd.DataFrame
+        The dataset to save
+    dataset_name : str
+        Name for the dataset (will be used as key in workspace)
+    design_type : str
+        Type of design (e.g., "Plackett-Burman", "Full Factorial")
+    metadata : dict, optional
+        Additional metadata to store with the dataset
+
+    Returns
+    -------
+    tuple
+        (success: bool, message: str)
+    """
+    import datetime
+
+    try:
+        # Initialize transformation_history if it doesn't exist
+        if 'transformation_history' not in st.session_state:
+            st.session_state.transformation_history = {}
+
+        # Prepare metadata
+        if metadata is None:
+            metadata = {}
+
+        # Create workspace entry with all required keys for data_handling.py
+        workspace_entry = {
+            'data': dataset.copy(),
+            'transform': f'Design of Experiments: {design_type}',
+            'transform_type': 'doe_design',  # Critical: enables workspace selector filtering
+            'params': metadata,
+            'timestamp': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'original_dataset': 'DoE Generator',
+            'n_samples': len(dataset),
+            'n_variables': len(dataset.columns),
+            'col_range': list(range(len(dataset.columns)))  # Required by workspace selector UI
+        }
+
+        # Store in transformation history (acts as workspace)
+        st.session_state.transformation_history[dataset_name] = workspace_entry
+
+        # Also store as current_data and design_matrix for immediate access
+        st.session_state.current_data = dataset.copy()
+        st.session_state.current_dataset = dataset_name
+        st.session_state['design_matrix'] = dataset.copy()
+
+        message = f"✅ **{dataset_name}** saved to workspace successfully!"
+        return True, message
+
+    except Exception as e:
+        error_message = f"❌ Failed to save to workspace: {str(e)}"
+        return False, error_message

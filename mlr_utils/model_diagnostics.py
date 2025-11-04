@@ -1,7 +1,11 @@
 """
-MLR Model Diagnostics UI
+MLR Model Diagnostics - Core Functions and UI
 Equivalent to DOE diagnostic plots (DOE_experimental_fitted.r, DOE_residuals_fitting.r, etc.)
 Interactive diagnostic plots for model evaluation
+
+This module contains:
+1. Core diagnostic functions (calculate_vif, check_model_saturated)
+2. UI display functions (show_model_diagnostics_ui)
 """
 
 import streamlit as st
@@ -9,76 +13,239 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
+# Import core computation functions
+try:
+    from mlr_utils.model_computation import statistical_summary, fit_mlr_model
+except ImportError:
+    # Fallback if module structure differs
+    try:
+        from model_computation import statistical_summary, fit_mlr_model
+    except ImportError:
+        st.warning("⚠️ Could not import core computation functions")
 
-def show_model_diagnostics_ui():
+
+# ============================================================================
+# CORE DIAGNOSTIC FUNCTIONS
+# ============================================================================
+
+def calculate_vif(X):
+    """
+    Calculate VIF (Variance Inflation Factors) - ALWAYS works, independent of DoF
+
+    VIF measures multicollinearity among predictors.
+    - VIF = 1: No correlation
+    - VIF < 2: OK
+    - VIF < 4: Good
+    - VIF < 8: Acceptable
+    - VIF > 8: High multicollinearity (problematic)
+
+    FORMULA (from R implementation):
+    VIF_j = sum(X_centered_j^2) * diag((X'X)^-1)_j
+
+    Args:
+        X: DataFrame with model matrix (includes intercept, interactions, quadratics)
+
+    Returns:
+        pd.Series with VIF values (NaN for intercept)
+    """
+    print(f"\n[DEBUG calculate_vif]")
+    print(f"  Input X shape: {X.shape}")
+
+    # Input validation
+    if not isinstance(X, pd.DataFrame):
+        raise ValueError("X must be a pandas DataFrame")
+
+    if X.empty:
+        raise ValueError("X DataFrame is empty")
+
+    X_mat = X.values
+    n_samples, n_features = X_mat.shape
+
+    print(f"  n_samples: {n_samples}, n_features: {n_features}")
+
+    if n_features < 2:
+        print(f"  Single feature - VIF not applicable")
+        return pd.Series([np.nan], index=X.columns)
+
+    try:
+        # Compute (X'X)^-1
+        XtX = X_mat.T @ X_mat
+        XtX_inv = np.linalg.inv(XtX)
+
+        # Center the X matrix (subtract column means)
+        X_centered = X_mat - X_mat.mean(axis=0)
+
+        vif = []
+        for i in range(n_features):
+            if X.columns[i] == 'Intercept' or 'intercept' in X.columns[i].lower():
+                vif.append(np.nan)
+            else:
+                # Formula: sum(X_centered_i^2) * diag(XtX_inv)_i
+                ss_centered = np.sum(X_centered[:, i]**2)
+                vif_value = ss_centered * XtX_inv[i, i]
+                vif.append(vif_value)
+
+        vif_series = pd.Series(vif, index=X.columns)
+        print(f"  VIF computed successfully")
+        print(f"  Max VIF (excluding intercept): {vif_series.dropna().max():.2f}")
+
+        return vif_series
+
+    except np.linalg.LinAlgError as e:
+        print(f"  ERROR: Cannot compute VIF - matrix is singular: {e}")
+        return pd.Series([np.nan] * n_features, index=X.columns)
+    except Exception as e:
+        print(f"  ERROR: VIF calculation failed: {e}")
+        return pd.Series([np.nan] * n_features, index=X.columns)
+
+
+def check_model_saturated(model_results):
+    """
+    Check if model is saturated (DoF <= 0)
+
+    SATURATED MODEL:
+    - Number of samples = Number of parameters
+    - Perfect fit to training data (no residual variance)
+    - Cannot estimate statistical tests (p-values, t-stats)
+    - Cannot compute R², RMSE
+    - CAN still compute: VIF, Leverage, Coefficients
+
+    Args:
+        model_results: dict from fit_mlr_model()
+
+    Returns:
+        bool: True if saturated (DoF <= 0), False otherwise
+    """
+    print(f"\n[DEBUG check_model_saturated]")
+
+    # Check if DoF key exists
+    if 'dof' not in model_results:
+        print(f"  WARNING: 'dof' key not found in model_results")
+        return True  # Assume saturated if DoF not available
+
+    dof = model_results['dof']
+    print(f"  DoF = {dof}")
+
+    is_saturated = dof <= 0
+
+    if is_saturated:
+        print(f"  MODEL IS SATURATED (DoF <= 0)")
+        print(f"    - Cannot compute: R², RMSE, residual plots, p-values")
+        print(f"    - Can compute: VIF, Leverage, Coefficients")
+    else:
+        print(f"  Model has adequate DoF (DoF > 0)")
+
+    return is_saturated
+
+
+# ============================================================================
+# UI DISPLAY FUNCTIONS
+# ============================================================================
+
+
+def show_model_diagnostics_ui(model_results=None, X=None, y=None):
     """
     Display the MLR Model Diagnostics UI with various diagnostic plots
-
-    Requires model results to be stored in st.session_state.mlr_model
 
     GENERIC IMPLEMENTATION:
     - ALWAYS shows: VIF, Leverage, Correlation matrix (independent of DoF)
     - CONDITIONAL: R², RMSE, residual plots (require DoF > 0)
     - Works with any design: screening, factorial, custom, saturated, etc.
+
+    LOGIC:
+    - IF saturated (DoF <= 0): show warning, display only VIF/Leverage/Correlation
+    - ELSE: show R², RMSE, residual plots, Q², RMSECV
+
+    Args:
+        model_results: dict from fit_mlr_model() (optional, uses session_state if None)
+        X: original predictor DataFrame (optional)
+        y: original response Series (optional)
     """
     st.markdown("## 📊 Model Diagnostics")
     st.markdown("*Equivalent to DOE diagnostic plots*")
 
-    if 'mlr_model' not in st.session_state:
-        st.warning("⚠️ No MLR model fitted. Please fit a model first.")
-        return
+    # Get model results from session state if not provided
+    if model_results is None:
+        if 'mlr_model' not in st.session_state:
+            st.warning("⚠️ No MLR model fitted. Please fit a model first.")
+            return
+        model_results = st.session_state.mlr_model
 
-    model_results = st.session_state.mlr_model
+    # ===== CHECK IF MODEL IS SATURATED =====
+    is_saturated = check_model_saturated(model_results)
 
-    # ===== CHECK DEGREES OF FREEDOM =====
-    has_residual_diagnostics = 'dof' in model_results and model_results['dof'] > 0
-
-    if not has_residual_diagnostics:
-        st.warning("⚠️ **Saturated model** (samples = parameters). Limited diagnostics available.")
-        st.info("""
+    if is_saturated:
+        st.error("⚠️ **SATURATED MODEL** (DoF ≤ 0)")
+        st.warning("""
         **Your model has:**
         - Samples: {n_samples}
         - Parameters: {n_features}
         - Degrees of freedom: {dof}
 
-        **Available diagnostics** (independent of DoF):
-        - VIF (multicollinearity)
-        - Leverage (influential points)
-        - Coefficients display
+        A saturated model has **no residual variance** because the number of parameters equals (or exceeds) the number of samples.
+        This means the model fits the training data perfectly, but statistical inference is not possible.
 
-        **Unavailable** (require DoF > 0):
-        - R², RMSE (no residual variance)
-        - Residual plots
-        - Statistical tests (p-values, t-stats)
+        **✅ Available diagnostics** (independent of DoF):
+        - ✅ VIF (Variance Inflation Factors) - multicollinearity check
+        - ✅ Leverage (Hat values) - influential points
+        - ✅ Correlation Matrix - predictor correlations
+        - ✅ Coefficients display
+
+        **❌ Unavailable** (require DoF > 0):
+        - ❌ R², RMSE (no residual variance to estimate)
+        - ❌ Residual plots (residuals are zero by definition)
+        - ❌ Statistical tests (p-values, confidence intervals)
+        - ❌ Cross-validation
+
+        **Recommendation**: Collect more samples or reduce model complexity (remove terms).
         """.format(
             n_samples=model_results.get('n_samples', 'N/A'),
             n_features=model_results.get('n_features', 'N/A'),
             dof=model_results.get('dof', 'N/A')
         ))
+    else:
+        # Model has adequate DoF
+        st.success(f"✅ Model has adequate degrees of freedom (DoF = {model_results.get('dof', 'N/A')})")
 
-    # Build diagnostic options based on available data
+        # Display summary stats if available
+        if 'r_squared' in model_results and 'rmse' in model_results:
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("R²", f"{model_results['r_squared']:.4f}")
+            with col2:
+                st.metric("RMSE", f"{model_results['rmse']:.4f}")
+            with col3:
+                if 'q2' in model_results:
+                    st.metric("Q² (CV)", f"{model_results['q2']:.4f}")
+                else:
+                    st.metric("DoF", model_results['dof'])
+
+    st.markdown("---")
+
+    # Build diagnostic options based on available data and saturation status
     diagnostic_options = []
 
     # ALWAYS available (independent of DoF)
     diagnostic_options.extend([
+        "🔢 VIF & Multicollinearity",
         "🎯 Leverage Plot",
-        "📐 Coefficients Bar Plot",
-        "🔢 VIF & Multicollinearity"
+        "📐 Coefficients Bar Plot"
     ])
 
-    # CONDITIONAL: Only if DoF > 0
-    if has_residual_diagnostics:
-        diagnostic_options.extend([
-            "📈 Experimental vs Fitted",
-            "📉 Residuals vs Fitted"
-        ])
+    # CONDITIONAL: Only if NOT saturated (DoF > 0)
+    if not is_saturated:
+        if 'r_squared' in model_results and 'rmse' in model_results:
+            diagnostic_options.extend([
+                "📈 Experimental vs Fitted",
+                "📉 Residuals vs Fitted"
+            ])
 
-    # CONDITIONAL: Only if CV available
-    if 'cv_predictions' in model_results:
-        diagnostic_options.extend([
-            "🔄 Experimental vs CV Predicted",
-            "📊 CV Residuals"
-        ])
+        # CONDITIONAL: Only if CV available
+        if 'cv_predictions' in model_results:
+            diagnostic_options.extend([
+                "🔄 Experimental vs CV Predicted",
+                "📊 CV Residuals"
+            ])
 
     # Diagnostic plot selector
     diagnostic_type = st.selectbox(
@@ -113,8 +280,17 @@ def _plot_experimental_vs_fitted(model_results):
     """
     Plot experimental vs fitted values
     Equivalent to DOE_experimental_fitted.r
+
+    REQUIRES:
+    - y, y_pred (predictions)
+    - r_squared, rmse (optional for display)
     """
     st.markdown("### 📈 Experimental vs Fitted Values")
+
+    # Defensive checks
+    if 'y' not in model_results or 'y_pred' not in model_results:
+        st.error("❌ Missing required data: 'y' or 'y_pred' not in model results")
+        return
 
     y_exp = model_results['y'].values
     y_pred = model_results['y_pred']
@@ -160,12 +336,18 @@ def _plot_experimental_vs_fitted(model_results):
 
     st.plotly_chart(fig, use_container_width=True)
 
-    # Statistics
+    # Statistics (defensive - only show if available)
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("R²", f"{model_results['r_squared']:.4f}")
+        if 'r_squared' in model_results:
+            st.metric("R²", f"{model_results['r_squared']:.4f}")
+        else:
+            st.metric("R²", "N/A")
     with col2:
-        st.metric("RMSE", f"{model_results['rmse']:.4f}")
+        if 'rmse' in model_results:
+            st.metric("RMSE", f"{model_results['rmse']:.4f}")
+        else:
+            st.metric("RMSE", "N/A")
     with col3:
         correlation = np.corrcoef(y_exp, y_pred)[0, 1]
         st.metric("Correlation", f"{correlation:.4f}")
@@ -175,8 +357,17 @@ def _plot_residuals_vs_fitted(model_results):
     """
     Plot residuals vs fitted values
     Equivalent to DOE_residuals_fitting.r
+
+    REQUIRES:
+    - y_pred (predictions)
+    - residuals
     """
     st.markdown("### 📉 Residuals vs Fitted Values")
+
+    # Defensive checks
+    if 'y_pred' not in model_results or 'residuals' not in model_results:
+        st.error("❌ Missing required data: 'y_pred' or 'residuals' not in model results")
+        return
 
     y_pred = model_results['y_pred']
     residuals = model_results['residuals']
@@ -322,8 +513,22 @@ def _plot_cv_residuals(model_results):
 
 
 def _plot_leverage(model_results):
-    """Plot leverage (hat values) for each sample"""
+    """
+    Plot leverage (hat values) for each sample
+
+    ALWAYS AVAILABLE - independent of DoF
+    Leverage shows influential points in the design space
+
+    REQUIRES:
+    - leverage (hat values)
+    - n_samples, n_features
+    """
     st.markdown("### 🎯 Leverage Plot")
+
+    # Defensive checks
+    if 'leverage' not in model_results or model_results['leverage'] is None:
+        st.error("❌ Leverage values not available in model results")
+        return
 
     leverage = model_results['leverage']
     sample_numbers = list(range(1, len(leverage) + 1))
@@ -386,8 +591,21 @@ def _plot_leverage(model_results):
 
 
 def _plot_coefficients_bar(model_results):
-    """Plot model coefficients as bar chart"""
+    """
+    Plot model coefficients as bar chart
+
+    ALWAYS AVAILABLE - independent of DoF
+    Shows coefficient values (with confidence intervals if DoF > 0)
+
+    REQUIRES:
+    - coefficients
+    """
     st.markdown("### 📐 Model Coefficients")
+
+    # Defensive checks
+    if 'coefficients' not in model_results or model_results['coefficients'] is None:
+        st.error("❌ Coefficients not available in model results")
+        return
 
     coefficients = model_results['coefficients']
 

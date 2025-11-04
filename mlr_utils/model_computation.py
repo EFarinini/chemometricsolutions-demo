@@ -1,7 +1,11 @@
 """
-MLR Model Computation UI
+MLR Model Computation - Core Functions and UI
 Equivalent to DOE_model_computation.r
 Complete model fitting workflow with term selection, diagnostics, and statistical tests
+
+This module contains:
+1. Core computation functions (create_model_matrix, fit_mlr_model, statistical_summary)
+2. UI display functions (show_model_computation_ui)
 """
 
 import streamlit as st
@@ -9,6 +13,628 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from scipy import stats
+
+
+# ============================================================================
+# CORE COMPUTATION FUNCTIONS
+# ============================================================================
+
+def create_model_matrix(X, terms_dict=None, include_intercept=True,
+                       include_interactions=True, include_quadratic=True,
+                       interaction_matrix=None):
+    """
+    Build design matrix (X) from selected terms with defensive checks
+
+    GENERIC IMPLEMENTATION:
+    - Works with any number of variables
+    - Handles both full models and custom term selection
+    - Defensive checks for matrix validity
+
+    Args:
+        X: DataFrame with predictor variables (n_samples × n_vars)
+        terms_dict: dict with 'linear', 'interactions', 'quadratic' lists (optional)
+        include_intercept: bool, include intercept term
+        include_interactions: bool, include two-way interactions
+        include_quadratic: bool, include quadratic terms
+        interaction_matrix: DataFrame specifying which interactions to include (optional)
+
+    Returns:
+        tuple: (X_model DataFrame, term_names list)
+
+    Raises:
+        ValueError: if input validation fails
+    """
+    # Input validation
+    if not isinstance(X, pd.DataFrame):
+        raise ValueError("X must be a pandas DataFrame")
+
+    if X.empty:
+        raise ValueError("X DataFrame is empty")
+
+    if X.isna().any().any():
+        raise ValueError("X contains missing values - please remove or impute first")
+
+    print(f"\n[DEBUG create_model_matrix]")
+    print(f"  Input X shape: {X.shape}")
+    print(f"  Variables: {X.columns.tolist()}")
+    print(f"  include_intercept: {include_intercept}")
+    print(f"  include_interactions: {include_interactions}")
+    print(f"  include_quadratic: {include_quadratic}")
+
+    n_vars = X.shape[1]
+    var_names = X.columns.tolist()
+
+    # Start with linear terms
+    model_matrix = X.copy()
+    term_names = var_names.copy()
+
+    # Track what we're adding
+    added_interactions = []
+    added_quadratics = []
+
+    # Add interactions
+    if include_interactions:
+        for i in range(n_vars):
+            for j in range(i+1, n_vars):
+                # Check if this interaction should be included
+                include_this = True
+
+                if interaction_matrix is not None:
+                    try:
+                        include_this = bool(interaction_matrix.iloc[i, j])
+                    except (IndexError, KeyError):
+                        print(f"  WARNING: interaction_matrix index error at [{i},{j}], including by default")
+
+                if include_this:
+                    interaction = X.iloc[:, i] * X.iloc[:, j]
+                    interaction_name = f"{var_names[i]}*{var_names[j]}"
+                    model_matrix[interaction_name] = interaction
+                    term_names.append(interaction_name)
+                    added_interactions.append(interaction_name)
+
+    # Add quadratic terms
+    if include_quadratic:
+        for i in range(n_vars):
+            # Check if quadratic should be included
+            include_this = True
+
+            if interaction_matrix is not None:
+                try:
+                    include_this = bool(interaction_matrix.iloc[i, i])
+                except (IndexError, KeyError):
+                    print(f"  WARNING: interaction_matrix index error at [{i},{i}], including by default")
+
+            if include_this:
+                quadratic = X.iloc[:, i] ** 2
+                quadratic_name = f"{var_names[i]}^2"
+                model_matrix[quadratic_name] = quadratic
+                term_names.append(quadratic_name)
+                added_quadratics.append(quadratic_name)
+
+    # Add intercept
+    if include_intercept:
+        model_matrix.insert(0, 'Intercept', 1.0)
+        term_names.insert(0, 'Intercept')
+
+    print(f"  Output model_matrix shape: {model_matrix.shape}")
+    print(f"  Linear terms: {var_names}")
+    print(f"  Interaction terms added: {len(added_interactions)}")
+    print(f"  Quadratic terms added: {len(added_quadratics)}")
+    print(f"  Total terms: {len(term_names)}")
+    print(f"  Term names: {term_names}")
+
+    # Final validation
+    if model_matrix.isna().any().any():
+        raise ValueError("Model matrix contains NaN values after construction")
+
+    # Check for constant columns (except intercept)
+    for col in model_matrix.columns:
+        if col != 'Intercept':
+            if model_matrix[col].std() == 0:
+                raise ValueError(f"Column '{col}' has zero variance - remove or check data")
+
+    return model_matrix, term_names
+
+
+def fit_mlr_model(X, y, terms=None, exclude_central=False, return_diagnostics=True):
+    """
+    Fit MLR model with defensive checks - GENERIC for any design
+
+    HANDLES BOTH:
+    - Designs WITH replicates (calculates pure error, lack of fit)
+    - Designs WITHOUT replicates (only R², RMSE, VIF, Leverage)
+
+    ALWAYS CALCULATES (independent of replicates):
+    - VIF (multicollinearity)
+    - Leverage (influential points)
+    - Coefficients and predictions
+
+    CONDITIONAL CALCULATIONS:
+    - R², RMSE: only if DOF > 0
+    - Statistical tests: only if DOF > 0
+    - Pure error: only if replicates detected
+
+    Args:
+        X: model matrix DataFrame (n_samples × n_features)
+        y: response variable Series (n_samples)
+        terms: optional dict of selected terms
+        exclude_central: bool, exclude central points (handled externally)
+        return_diagnostics: bool, compute cross-validation
+
+    Returns:
+        dict with all available metrics (adapts to data structure)
+    """
+    print(f"\n[DEBUG fit_mlr_model]")
+    print(f"  Input X shape: {X.shape}")
+    print(f"  Input y shape: {y.shape}")
+    print(f"  return_diagnostics: {return_diagnostics}")
+
+    # Input validation
+    if not isinstance(X, pd.DataFrame):
+        raise ValueError("X must be a pandas DataFrame")
+
+    if not isinstance(y, (pd.Series, pd.DataFrame)):
+        raise ValueError("y must be a pandas Series or DataFrame")
+
+    if X.shape[0] != len(y):
+        raise ValueError(f"X and y length mismatch: X has {X.shape[0]} rows, y has {len(y)} values")
+
+    # Convert to numpy arrays
+    X_mat = X.values
+    y_vec = y.values if isinstance(y, pd.Series) else y.values.ravel()
+
+    n_samples, n_features = X_mat.shape
+
+    print(f"  n_samples: {n_samples}, n_features: {n_features}")
+
+    # Check rank
+    rank = np.linalg.matrix_rank(X_mat)
+    if rank < n_features:
+        st.error(f"⚠️ Model matrix is rank deficient! Rank={rank}, Features={n_features}")
+        print(f"  ERROR: Rank deficient matrix")
+        return None
+
+    # Degrees of freedom
+    dof = n_samples - n_features
+    print(f"  Degrees of freedom: {dof}")
+
+    # Initialize results dictionary
+    results = {
+        'n_samples': n_samples,
+        'n_features': n_features,
+        'dof': dof,
+        'X': X,
+        'y': y,
+        'coefficients': None,
+        'y_pred': None,
+        'residuals': None
+    }
+
+    try:
+        # ===== ALWAYS: Compute coefficients and predictions =====
+        XtX = X_mat.T @ X_mat
+        XtX_inv = np.linalg.inv(XtX)
+        Xty = X_mat.T @ y_vec
+        coefficients = XtX_inv @ Xty
+
+        # Predictions
+        y_pred = X_mat @ coefficients
+
+        # Residuals
+        residuals = y_vec - y_pred
+
+        results.update({
+            'coefficients': pd.Series(coefficients, index=X.columns),
+            'y_pred': y_pred,
+            'residuals': residuals,
+            'XtX_inv': XtX_inv
+        })
+
+        print(f"  Coefficients computed successfully")
+
+        # ===== CONDITIONAL: R², RMSE (only if DOF > 0) =====
+        if dof > 0:
+            # Variance of residuals
+            rss = np.sum(residuals**2)
+            var_res = rss / dof
+            rmse = np.sqrt(var_res)
+
+            # Variance of Y
+            var_y = np.var(y_vec, ddof=1)
+
+            # Adjusted R-squared: R²_adj = 1 - [RSS/(n-p)] / [TSS/(n-1)]
+            # where p=n_features (number of parameters)
+            tss = np.sum((y_vec - np.mean(y_vec))**2)
+            r_squared = 1 - (rss / dof) / (tss / (n_samples - 1))
+
+            results.update({
+                'rmse': rmse,
+                'var_res': var_res,
+                'var_y': var_y,
+                'r_squared': r_squared
+            })
+
+            print(f"  R²_adj: {r_squared:.4f}, RMSE: {rmse:.4f}")
+
+            # ===== CONDITIONAL: Statistical tests (only if DOF > 0) =====
+            # Standard errors of coefficients
+            var_coef = var_res * np.diag(XtX_inv)
+            se_coef = np.sqrt(var_coef)
+
+            # t-statistics
+            t_stats = coefficients / se_coef
+
+            # p-values
+            p_values = 2 * (1 - stats.t.cdf(np.abs(t_stats), dof))
+
+            # Confidence intervals
+            t_critical = stats.t.ppf(0.975, dof)
+            ci_lower = coefficients - t_critical * se_coef
+            ci_upper = coefficients + t_critical * se_coef
+
+            results.update({
+                'se_coef': pd.Series(se_coef, index=X.columns),
+                't_stats': pd.Series(t_stats, index=X.columns),
+                'p_values': pd.Series(p_values, index=X.columns),
+                'ci_lower': pd.Series(ci_lower, index=X.columns),
+                'ci_upper': pd.Series(ci_upper, index=X.columns)
+            })
+
+            print(f"  Statistical tests computed (DOF={dof})")
+        else:
+            print(f"  WARNING: DOF={dof}, skipping R²/RMSE/statistical tests")
+            st.warning(f"⚠️ Saturated model (DOF={dof}): Cannot compute R², RMSE, or statistical tests")
+
+        # ===== CONDITIONAL: Cross-validation (only if DOF > 0 and n ≤ 100) =====
+        if return_diagnostics and dof > 0 and n_samples <= 100:
+            try:
+                cv_predictions = np.zeros(n_samples)
+
+                for i in range(n_samples):
+                    # Remove sample i
+                    X_cv = np.delete(X_mat, i, axis=0)
+                    y_cv = np.delete(y_vec, i)
+
+                    # Fit model without sample i
+                    XtX_cv = X_cv.T @ X_cv
+                    XtX_cv_inv = np.linalg.inv(XtX_cv)
+                    coef_cv = XtX_cv_inv @ (X_cv.T @ y_cv)
+
+                    # Predict sample i
+                    cv_predictions[i] = X_mat[i, :] @ coef_cv
+
+                cv_residuals = y_vec - cv_predictions
+                rss_cv = np.sum(cv_residuals**2)
+                rmsecv = np.sqrt(rss_cv / n_samples)
+                q2 = 1 - (rss_cv / (results.get('var_y', 1) * n_samples))
+
+                results.update({
+                    'cv_predictions': cv_predictions,
+                    'cv_residuals': cv_residuals,
+                    'rmsecv': rmsecv,
+                    'q2': q2
+                })
+
+                print(f"  Cross-validation: Q²={q2:.4f}, RMSECV={rmsecv:.4f}")
+            except Exception as e:
+                print(f"  WARNING: Cross-validation failed: {e}")
+
+        # ===== ALWAYS: Leverage (independent of DOF) =====
+        try:
+            leverage = np.diag(X_mat @ XtX_inv @ X_mat.T)
+            results['leverage'] = leverage
+            print(f"  Leverage computed: max={leverage.max():.4f}")
+        except Exception as e:
+            print(f"  WARNING: Leverage calculation failed: {e}")
+            results['leverage'] = None
+
+        # ===== ALWAYS: VIF (independent of DOF) =====
+        if n_features > 1:
+            try:
+                vif = []
+
+                # Center the X matrix (subtract column means)
+                X_centered = X_mat - X_mat.mean(axis=0)
+
+                for i in range(n_features):
+                    if X.columns[i] == 'Intercept':
+                        vif.append(np.nan)
+                    else:
+                        # Formula: sum(X_centered_i^2) * diag(XtX_inv)_i
+                        ss_centered = np.sum(X_centered[:, i]**2)
+                        vif_value = ss_centered * XtX_inv[i, i]
+                        vif.append(vif_value)
+
+                results['vif'] = pd.Series(vif, index=X.columns)
+                print(f"  VIF computed successfully")
+            except Exception as e:
+                print(f"  WARNING: VIF calculation failed: {e}")
+                results['vif'] = None
+        else:
+            results['vif'] = None
+            print(f"  VIF not calculated (single feature)")
+
+    except np.linalg.LinAlgError as e:
+        st.error(f"❌ Linear algebra error: {e}")
+        print(f"  ERROR: {e}")
+        return None
+    except Exception as e:
+        st.error(f"❌ Unexpected error in model fitting: {e}")
+        print(f"  ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+    print(f"  Model fitting completed successfully")
+    return results
+
+
+def statistical_summary(model_results, X, y):
+    """
+    Generate statistical summary for ANY design (generic)
+
+    ADAPTS TO AVAILABLE DATA:
+    - Always shows: basic metrics, coefficients, VIF, leverage
+    - Conditionally shows: R²/RMSE (if DOF>0), pure error (if replicates exist)
+
+    Args:
+        model_results: dict from fit_mlr_model()
+        X: original predictor DataFrame
+        y: original response Series
+
+    Returns:
+        dict with summary statistics (all available metrics)
+    """
+    print(f"\n[DEBUG statistical_summary]")
+    print(f"  Input X shape: {X.shape}, y shape: {y.shape}")
+
+    summary = {
+        'n_samples': model_results['n_samples'],
+        'n_features': model_results['n_features'],
+        'dof': model_results['dof']
+    }
+
+    # Add available metrics
+    if 'r_squared' in model_results:
+        summary['r_squared'] = model_results['r_squared']
+        print(f"  R² = {model_results['r_squared']:.4f}")
+
+    if 'rmse' in model_results:
+        summary['rmse'] = model_results['rmse']
+        print(f"  RMSE = {model_results['rmse']:.4f}")
+
+    if 'var_res' in model_results:
+        summary['var_res'] = model_results['var_res']
+
+    if 'var_y' in model_results:
+        summary['var_y'] = model_results['var_y']
+
+    # VIF summary
+    if 'vif' in model_results and model_results['vif'] is not None:
+        vif_clean = model_results['vif'].dropna()
+        if not vif_clean.empty:
+            summary['max_vif'] = vif_clean.max()
+            summary['mean_vif'] = vif_clean.mean()
+            print(f"  VIF: max={vif_clean.max():.2f}, mean={vif_clean.mean():.2f}")
+
+    # Leverage summary
+    if 'leverage' in model_results and model_results['leverage'] is not None:
+        summary['max_leverage'] = model_results['leverage'].max()
+        summary['mean_leverage'] = model_results['leverage'].mean()
+        print(f"  Leverage: max={model_results['leverage'].max():.4f}")
+
+    # Cross-validation summary
+    if 'q2' in model_results:
+        summary['q2'] = model_results['q2']
+        summary['rmsecv'] = model_results['rmsecv']
+        print(f"  Q² = {model_results['q2']:.4f}, RMSECV = {model_results['rmsecv']:.4f}")
+
+    print(f"  Summary generated with {len(summary)} metrics")
+    return summary
+
+
+# ============================================================================
+# HELPER FUNCTIONS FOR UI
+# ============================================================================
+
+
+def create_term_selection_matrix(x_vars):
+    """
+    Create an interaction matrix for term selection
+
+    Args:
+        x_vars: list of X variable names
+
+    Returns:
+        DataFrame with shape (n_vars, n_vars) initialized to 1
+    """
+    n_vars = len(x_vars)
+    matrix = pd.DataFrame(1, index=x_vars, columns=x_vars)
+    return matrix
+
+
+def display_term_selection_ui(x_vars, key_prefix=""):
+    """
+    Display interactive term selection UI
+
+    Args:
+        x_vars: list of X variable names
+        key_prefix: prefix for streamlit keys to avoid conflicts
+
+    Returns:
+        tuple: (term_matrix DataFrame, selected_terms dict)
+    """
+    st.markdown("#### 📊 Select Model Terms")
+    st.info("Use the matrix below to select interactions and quadratic terms")
+
+    # Create initial term matrix
+    term_matrix = create_term_selection_matrix(x_vars)
+
+    # Create selection interface
+    n_vars = len(x_vars)
+
+    # Diagonal: quadratic terms
+    st.markdown("**Quadratic Terms:**")
+    quad_cols = st.columns(min(n_vars, 4))
+    for i, var in enumerate(x_vars):
+        with quad_cols[i % len(quad_cols)]:
+            term_matrix.iloc[i, i] = 1 if st.checkbox(
+                f"{var}²",
+                value=True,
+                key=f"{key_prefix}_quad_{i}"
+            ) else 0
+
+    # Off-diagonal: interaction terms
+    if n_vars > 1:
+        st.markdown("**Interaction Terms:**")
+        interactions = []
+        for i in range(n_vars):
+            for j in range(i+1, n_vars):
+                interactions.append((i, j, f"{x_vars[i]}*{x_vars[j]}"))
+
+        int_cols = st.columns(min(len(interactions), 3))
+        for idx, (i, j, name) in enumerate(interactions):
+            with int_cols[idx % len(int_cols)]:
+                selected = st.checkbox(
+                    name,
+                    value=True,
+                    key=f"{key_prefix}_int_{i}_{j}"
+                )
+                term_matrix.iloc[i, j] = 1 if selected else 0
+                term_matrix.iloc[j, i] = 1 if selected else 0
+
+    # Build selected_terms dict
+    selected_terms = {
+        'linear': x_vars.copy(),
+        'interactions': [],
+        'quadratic': []
+    }
+
+    # Extract selected interactions
+    for i in range(n_vars):
+        for j in range(i+1, n_vars):
+            if term_matrix.iloc[i, j] == 1:
+                selected_terms['interactions'].append(f"{x_vars[i]}*{x_vars[j]}")
+
+    # Extract selected quadratic
+    for i in range(n_vars):
+        if term_matrix.iloc[i, i] == 1:
+            selected_terms['quadratic'].append(f"{x_vars[i]}^2")
+
+    return term_matrix, selected_terms
+
+
+def build_model_formula(y_var, selected_terms, include_intercept=True):
+    """
+    Build a readable model formula string
+
+    Args:
+        y_var: response variable name
+        selected_terms: dict with 'linear', 'interactions', 'quadratic' lists
+        include_intercept: bool, include intercept term
+
+    Returns:
+        str: model formula
+    """
+    terms = []
+
+    if include_intercept:
+        terms.append("β₀")
+
+    # Linear terms
+    for i, var in enumerate(selected_terms['linear'], 1):
+        terms.append(f"β{i}·{var}")
+
+    # Interaction terms
+    offset = len(selected_terms['linear'])
+    for i, term in enumerate(selected_terms['interactions'], offset + 1):
+        terms.append(f"β{i}·{term}")
+
+    # Quadratic terms
+    offset += len(selected_terms['interactions'])
+    for i, term in enumerate(selected_terms['quadratic'], offset + 1):
+        terms.append(f"β{i}·{term}")
+
+    formula = f"{y_var} = {' + '.join(terms)}"
+    return formula
+
+
+def design_analysis(X_model, X_data, replicate_info):
+    """
+    Analyze design matrix without Y variable
+
+    Args:
+        X_model: model matrix DataFrame (with intercept and interactions)
+        X_data: original X data
+        replicate_info: dict from detect_replicates() or None
+
+    Returns:
+        dict with design analysis results
+    """
+    print(f"\n[DEBUG design_analysis]")
+    print(f"  Input X_model shape: {X_model.shape}")
+
+    X_mat = X_model.values
+    n_samples, n_features = X_mat.shape
+
+    # Check rank
+    rank = np.linalg.matrix_rank(X_mat)
+    if rank < n_features:
+        st.error(f"⚠️ Design matrix is rank deficient! Rank={rank}, Features={n_features}")
+        return None
+
+    # Degrees of freedom
+    dof = n_samples - n_features
+
+    # Compute dispersion matrix
+    XtX = X_mat.T @ X_mat
+    XtX_inv = np.linalg.inv(XtX)
+
+    # Leverage
+    leverage = np.diag(X_mat @ XtX_inv @ X_mat.T)
+
+    # VIF
+    vif = []
+    X_centered = X_mat - X_mat.mean(axis=0)
+
+    for i in range(n_features):
+        if X_model.columns[i] == 'Intercept':
+            vif.append(np.nan)
+        else:
+            ss_centered = np.sum(X_centered[:, i]**2)
+            vif_value = ss_centered * XtX_inv[i, i]
+            vif.append(vif_value)
+
+    results = {
+        'n_samples': n_samples,
+        'n_features': n_features,
+        'dof': dof,
+        'X': X_model,
+        'XtX_inv': XtX_inv,
+        'leverage': leverage,
+        'vif': pd.Series(vif, index=X_model.columns)
+    }
+
+    # Add experimental variance if replicates exist
+    if replicate_info:
+        results['experimental_std'] = replicate_info['pooled_std']
+        results['experimental_dof'] = replicate_info['pooled_dof']
+
+        # Calculate t-critical for predictions
+        t_critical = stats.t.ppf(0.975, replicate_info['pooled_dof'])
+        results['t_critical'] = t_critical
+
+        # Prediction standard errors
+        prediction_se = replicate_info['pooled_std'] * np.sqrt(leverage)
+        results['prediction_se'] = prediction_se
+
+    print(f"  Design analysis completed: DOF={dof}, Rank={rank}")
+    return results
+
+
+# ============================================================================
+# UI DISPLAY FUNCTIONS
+# ============================================================================
 
 
 def show_model_computation_ui(data, dataset_name):
@@ -19,12 +645,10 @@ def show_model_computation_ui(data, dataset_name):
         data: DataFrame with experimental data
         dataset_name: name of the current dataset
     """
-    # Import helper functions from parent module
-    from mlr_doe import (
-        create_model_matrix, fit_mlr_model, detect_replicates,
-        detect_central_points, display_term_selection_ui,
-        create_term_selection_matrix, build_model_formula, design_analysis
-    )
+    # Import helper functions from parent module (avoid circular imports)
+    # Note: create_model_matrix and fit_mlr_model are already in this module
+    # We only need detect_replicates and detect_central_points from mlr_doe
+    from mlr_doe import detect_replicates, detect_central_points
 
     st.markdown("## 🔧 MLR Model Computation")
     st.markdown("*Equivalent to DOE_model_computation.r*")
@@ -1004,7 +1628,7 @@ def _display_model_summary(model_results):
             if not vif_df_clean.empty:
                 def interpret_vif(vif_val):
                     if vif_val <= 1:
-                        return "✅ No correlation"
+                        return "✅ No covariance"
                     elif vif_val <= 2:
                         return "✅ OK"
                     elif vif_val <= 4:
@@ -1019,7 +1643,7 @@ def _display_model_summary(model_results):
 
                 st.info("""
                 **VIF Interpretation:**
-                - VIF = 1: No correlation
+                - VIF = 1: No covariance
                 - VIF < 2: OK
                 - VIF < 4: Good
                 - VIF < 8: Acceptable
@@ -1310,7 +1934,7 @@ def _display_design_analysis_results(design_results, x_vars, X_data):
     st.markdown("### 🔍 Variance Inflation Factors (VIF)")
     st.info("""
     **VIF measures multicollinearity** between predictor variables:
-    - VIF = 1: No correlation
+    - VIF = 1: No covariance
     - VIF < 2: Excellent
     - VIF < 4: Good
     - VIF < 8: Acceptable
@@ -1325,7 +1949,7 @@ def _display_design_analysis_results(design_results, x_vars, X_data):
         if not vif_df_clean.empty:
             def interpret_vif(vif_val):
                 if vif_val <= 1:
-                    return "✅ No correlation"
+                    return "✅ No covariance"
                 elif vif_val <= 2:
                     return "✅ Excellent"
                 elif vif_val <= 4:

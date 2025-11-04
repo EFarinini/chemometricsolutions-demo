@@ -105,10 +105,15 @@ def calculate_hotelling_t2(
         # Edge case: not enough samples
         t2_limit = 1e10
     else:
-        df1 = n_components
-        df2 = n_samples - n_components
+        df1 = n_components  # a = number of PCs
+        df2 = n_samples - n_components  # n - a
+
+        # Get F critical value at specified confidence level
         f_value = f.ppf(alpha, df1, df2)
-        t2_limit = ((n_samples - 1) * n_components / (n_samples - n_components)) * f_value
+
+        # Apply Hotelling T² limit formula with safe division
+        # Ensure denominator is at least 1 to avoid division issues
+        t2_limit = ((n_samples - 1) * n_components / max(1, n_samples - n_components)) * f_value
 
     return t2_values, t2_limit
 
@@ -148,27 +153,33 @@ def calculate_q_residuals(
 
     Notes
     -----
-    Q statistic formula (Squared Prediction Error):
+    Q statistic formula (from R script PCA_t2vsq_Dataset.r):
+
+    .. math::
+        Q_i = diag(X \\cdot M_Q \\cdot X^T)
+
+    where:
+    - :math:`M_Q = I - P \\cdot P^T` (residual projection matrix)
+    - :math:`P` is the loadings matrix (n_features × n_components)
+    - :math:`I` is the identity matrix
+    - :math:`X` is the centered/scaled data matrix
+
+    This is mathematically equivalent to:
 
     .. math::
         Q_i = SPE_i = \sum_{j=1}^{p} (x_{ij} - \hat{x}_{ij})^2
 
-    where:
-    - :math:`x_{ij}` is the original value
-    - :math:`\hat{x}_{ij}` is the reconstructed value
-    - :math:`\hat{X} = T \cdot P^T` (scores times loadings transpose)
-    - :math:`p` is the number of features
+    where :math:`\hat{x}_{ij}` is the reconstructed value from :math:`T \\cdot P^T`.
 
-    Critical limit (Jackson-Mudholkar approximation):
+    Critical limit (log-normal approximation from R script):
 
     .. math::
-        Q_{crit} = \\theta_1 \left[1 - \\frac{\\theta_2 h_0^2}{2\\theta_1^2} +
-                   z_\\alpha\sqrt{\\frac{2\\theta_2 h_0^2}{\\theta_1}}\\right]^{1/h_0}
+        Q_{crit} = 10^{\\mu_{log} + t_{\\alpha,n-1} \\cdot \\sigma_{log}}
 
     where:
-    - :math:`\\theta_i = \sum \\lambda_j^i` (sum over residual eigenvalues)
-    - :math:`h_0 = 1 - \\frac{2\\theta_1\\theta_3}{3\\theta_2^2}`
-    - :math:`z_\\alpha` is the normal quantile at confidence level :math:`\\alpha`
+    - :math:`\\mu_{log}` = mean of log10(Q) values
+    - :math:`\\sigma_{log}` = standard deviation of log10(Q) values
+    - :math:`t_{\\alpha,n-1}` is the t-distribution critical value
 
     Examples
     --------
@@ -201,36 +212,36 @@ def calculate_q_residuals(
     else:
         loadings_array = np.asarray(loadings)
 
-    # Reconstruct data: X_reconstructed = scores @ loadings.T
-    X_reconstructed = scores_array @ loadings_array.T
+    # === CORRECT Q CALCULATION (from R script PCA_t2vsq_Dataset.r) ===
+    # Q = diag(X * MQ * X^T)
+    # where MQ = I - P * P^T (residual projection matrix)
 
-    # Calculate residuals
-    residuals = X_array - X_reconstructed
-
-    # Q statistic = sum of squared residuals for each sample
-    q_values = np.sum(residuals ** 2, axis=1)
-
-    # Calculate critical value using Jackson-Mudholkar approximation
-    # For this, we need the residual eigenvalues
-    # Simplified approach: use chi-square approximation
     n_samples, n_features = X_array.shape
     n_components = scores_array.shape[1]
 
-    # Degrees of freedom for residual space
-    df_residual = n_features - n_components
+    # Create residual projection matrix: MQ = I - P * P^T
+    # This projects data onto the residual space (not explained by PCA model)
+    I = np.eye(n_features)
+    MQ = I - (loadings_array @ loadings_array.T)
 
-    if df_residual > 0:
-        # Estimate mean and variance of Q from data
-        q_mean = np.mean(q_values)
-        q_var = np.var(q_values)
+    # Calculate Q for each sample: Q = diag(X * MQ * X^T)
+    # This is the squared residual distance from PCA model plane
+    q_values = np.diag(X_array @ MQ @ X_array.T)
 
-        # Chi-square approximation
-        g = q_var / (2 * q_mean) if q_mean > 0 else 1
-        h = (2 * q_mean ** 2) / q_var if q_var > 0 else df_residual
+    # === CORRECT Q_LIMIT using log-normal approximation (from R script) ===
+    # Q_limit = 10^(mean(log10(Q)) + t(alpha, n-1) * sd(log10(Q)))
+    # This uses a log-normal distribution fit to the Q residuals
 
-        q_limit = g * chi2.ppf(alpha, h)
-    else:
-        q_limit = 0.0
+    # Calculate log-transformed Q values
+    q_log = np.log10(q_values + 1e-10)  # Add small value to avoid log(0)
+    q_mean_log = np.mean(q_log)
+    q_std_log = np.std(q_log, ddof=1)  # Use sample std (ddof=1)
+
+    # Get t-distribution critical value
+    t_val = t.ppf(alpha, n_samples - 1)
+
+    # Calculate Q limit in log space, then convert back to original scale
+    q_limit = 10 ** (q_mean_log + t_val * q_std_log)
 
     return q_values, q_limit
 

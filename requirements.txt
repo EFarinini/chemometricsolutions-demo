@@ -39,3 +39,8 @@ streamlit>=1.28.0
 pandas>=1.5.0
 numpy>=1.21.0
 
+# Bayesian Optimization dependencies
+gpyopt>=1.2.5
+GPy>=1.10.6
+pyDOE>=0.3.8
+scipy>=1.10.0

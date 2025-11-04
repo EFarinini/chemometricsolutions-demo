@@ -28,7 +28,9 @@ def count_missing_values(X: Union[pd.DataFrame, np.ndarray]) -> Tuple[int, int, 
         Percentage of missing values
     """
     if isinstance(X, pd.DataFrame):
-        X_array = X.values
+        # Select only numeric columns to avoid errors with object/string types
+        X_numeric = X.select_dtypes(include=[np.number])
+        X_array = X_numeric.values
     else:
         X_array = np.asarray(X)
 
@@ -160,12 +162,16 @@ def get_reconstruction_info(
         - 'filled_max': Maximum filled value
     """
     if isinstance(X_original, pd.DataFrame):
-        X_orig_array = X_original.values
+        # Select only numeric columns to avoid errors with object/string types
+        X_orig_numeric = X_original.select_dtypes(include=[np.number])
+        X_orig_array = X_orig_numeric.values
     else:
         X_orig_array = np.asarray(X_original)
 
     if isinstance(X_reconstructed, pd.DataFrame):
-        X_recon_array = X_reconstructed.values
+        # Select only numeric columns to avoid errors with object/string types
+        X_recon_numeric = X_reconstructed.select_dtypes(include=[np.number])
+        X_recon_array = X_recon_numeric.values
     else:
         X_recon_array = np.asarray(X_reconstructed)
 

@@ -59,9 +59,12 @@ def _load_csv_txt(uploaded_file, separator, decimal, encoding, has_header, has_i
     data = None
     na_list = [x.strip() for x in na_values.split(',') if x.strip()]
     quote_setting = None if quote_char == "None" else quote_char
-    
+
     for enc in encodings:
         try:
+            # Reset file pointer to beginning
+            uploaded_file.seek(0)
+
             data = pd.read_csv(uploaded_file, 
                              sep=separator,
                              header=0 if has_header else None,
@@ -116,124 +119,6 @@ def _load_spectral_data(uploaded_file, separator, decimal, encoding, has_header,
         st.info("Wavelength/frequency information detected in headers")
     
     return data
-
-def _load_sam_data(uploaded_file, extract_metadata=True, wavelength_range="Auto-detect"):
-    """Load SAM (NIR Spectra) files - Based on real export format"""
-    try:
-        # Read binary content
-        content = uploaded_file.read()
-        file_name = uploaded_file.name.split('.')[0]
-        
-        # Extract sample info from filename
-        sample_id = file_name.split('_')[0] if '_' in file_name else file_name
-        
-        # Detect known compounds
-        compounds = ['Paracetamol', 'BTTR', 'FTTP', 'QT4C', 'Ibuprofen', 'Aspirin']
-        detected_compound = sample_id
-        
-        for compound in compounds:
-            if compound.lower() in file_name.lower():
-                detected_compound = compound
-                break
-        
-        if content.startswith(b'MNIR'):
-            st.info("Detected MNIR format - creating NIR spectrum in standard format")
-            
-            # Create wavelength range matching real NIR export (908.1 to 1676.2 nm)
-            wavelengths = np.arange(908.1, 1676.3, 6.194)  # ~124 points like in real data
-            n_points = len(wavelengths)
-            
-            # Generate realistic NIR spectrum based on compound
-            spectrum = np.random.normal(0.0, 0.02, n_points)  # Base noise
-            
-            if "Paracetamol" in detected_compound or "BTTR" in detected_compound:
-                # Paracetamol-like spectrum (based on BTTR pattern)
-                spectrum += -0.1 + 0.5 * np.exp(-((wavelengths - 1200)**2) / (2 * 100**2))
-                spectrum += 0.3 * np.exp(-((wavelengths - 1400)**2) / (2 * 80**2))
-                spectrum += -0.05 * (wavelengths - 1000) / 700  # Baseline trend
-                
-            elif "FTTP" in detected_compound:
-                # FTTP-like pattern (higher absorbance)
-                spectrum += 0.1 + 0.6 * np.exp(-((wavelengths - 1300)**2) / (2 * 120**2))
-                spectrum += 0.2 * np.exp(-((wavelengths - 1500)**2) / (2 * 90**2))
-                
-            elif "QT4C" in detected_compound:
-                # QT4C-like pattern (different profile)
-                spectrum += -0.05 + 0.4 * np.exp(-((wavelengths - 1100)**2) / (2 * 150**2))
-                spectrum += 0.3 * np.exp(-((wavelengths - 1450)**2) / (2 * 70**2))
-            
-            else:
-                # Generic pharmaceutical spectrum
-                spectrum += 0.1 * np.sin(wavelengths / 100) + 0.2 * np.exp(-((wavelengths - 1300)**2) / (2 * 100**2))
-            
-            # Create DataFrame in the EXACT format of real export
-            import uuid
-            from datetime import datetime
-            
-            # Generate realistic metadata
-            sample_uuid = str(uuid.uuid4())
-            replica_name = f"{detected_compound}-1"
-            timestamp = datetime.now().isoformat() + "+00:00"
-            temperature = np.random.uniform(35, 45)  # Realistic instrument temperature
-            serial_numbers = ["M1-1000167", "M1-0000342", "M1-0000155"]
-            serial = np.random.choice(serial_numbers)
-            user_id = str(uuid.uuid4())
-            
-            # Create the data dictionary matching real format
-            data_dict = {
-                'UUID': sample_uuid,
-                'ID': detected_compound,
-                'Replicates': replica_name,
-                'Timestamp': timestamp
-            }
-            
-            # Add spectral data with exact wavelength column names
-            for i, wl in enumerate(wavelengths):
-                data_dict[f"{wl:.3f}"] = spectrum[i]
-            
-            # Add final metadata columns
-            data_dict.update({
-                'Temperature': temperature,
-                'Serial': serial,
-                'User': user_id
-            })
-            
-            # Create DataFrame
-            spectral_matrix = pd.DataFrame([data_dict])
-            
-            if extract_metadata:
-                st.success(f"NIR spectrum created: {detected_compound}")
-                st.info(f"Wavelength range: {wavelengths[0]:.1f} - {wavelengths[-1]:.1f} nm")
-                st.info(f"Data points: {n_points}")
-                st.info(f"Temperature: {temperature:.1f}Â°C")
-                st.info(f"Format: Compatible with NIR export standard")
-            
-            return spectral_matrix
-            
-        else:
-            # Fallback for non-MNIR files
-            st.warning("Not MNIR format - creating basic spectral data")
-            
-            # Create simple spectral format
-            wavelengths = np.arange(908.1, 1676.3, 6.194)
-            spectrum = np.random.normal(0.1, 0.05, len(wavelengths))
-            
-            data_dict = {'Sample_ID': detected_compound}
-            for i, wl in enumerate(wavelengths):
-                data_dict[f"{wl:.3f}"] = spectrum[i]
-            
-            return pd.DataFrame([data_dict])
-            
-    except Exception as e:
-        st.error(f"SAM file processing failed: {str(e)}")
-        
-        # Create minimal fallback
-        fallback_data = {
-            'Sample_ID': [file_name],
-            'Status': ['Processing_Failed'],
-            'Suggestion': ['Try CSV export from original software']
-        }
-        return pd.DataFrame(fallback_data)
 
 def _load_raw_data(uploaded_file, encoding="utf-8"):
     """Load RAW files (XRD spectra) - Enhanced version"""
@@ -446,9 +331,12 @@ def _load_excel_data(uploaded_file, sheet_name, skip_rows, skip_cols, has_header
         sheet_num = int(sheet_name)
     except ValueError:
         sheet_num = sheet_name
-    
+
     na_list_excel = [x.strip() for x in na_values_excel.split(',') if x.strip()]
-        
+
+    # Reset file pointer to beginning
+    uploaded_file.seek(0)
+
     data = pd.read_excel(uploaded_file,
                        sheet_name=sheet_num,
                        header=0 if has_header else None,
@@ -523,14 +411,22 @@ def _parse_clipboard_data(clipboard_text, separator, decimal, has_header, has_in
         
         # Detect separator if auto-detection is enabled
         if separator == "Auto-detect":
-            # Test common separators on first line
+            # Smart separator detection that prioritizes structural delimiters
+            # NEVER auto-select space (internal spaces in column names are common)
             first_line = lines[0]
-            separators = ['\t', ',', ';', ' ']
-            separator_counts = {sep: first_line.count(sep) for sep in separators}
-            separator = max(separator_counts, key=separator_counts.get)
-            
-            if separator_counts[separator] == 0:
-                # Fallback to comma if no separator found
+
+            # Priority order: Tab → Comma → Semicolon (NEVER space for auto-detect)
+            separators_priority = ['\t', ',', ';']
+            separator_counts = {sep: first_line.count(sep) for sep in separators_priority}
+
+            # Find separator with highest count (minimum 1)
+            valid_separators = {sep: count for sep, count in separator_counts.items() if count > 0}
+
+            if valid_separators:
+                # Select separator with highest count
+                separator = max(valid_separators, key=valid_separators.get)
+            else:
+                # No standard separators found, fallback to comma
                 separator = ','
         
         # Parse data manually
@@ -559,13 +455,42 @@ def _parse_clipboard_data(clipboard_text, separator, decimal, has_header, has_in
         else:
             columns = [f"Col_{i+1}" for i in range(max_cols)]
             data_rows = rows
-        
-        # Create DataFrame
+
+        # Normalize column names: strip whitespace, remove special chars
+        columns_normalized = []
+        for col in columns:
+            # Strip leading/trailing whitespace
+            col_clean = str(col).strip()
+            # Replace multiple spaces/newlines/tabs with underscore
+            col_clean = col_clean.replace('\n', '_').replace('\t', '_').replace('\r', '_')
+            col_clean = '_'.join(col_clean.split())  # Multiple spaces → single underscore
+            # Remove problematic characters but keep numbers and letters
+            col_clean = ''.join(c if c.isalnum() or c in '_.' else '_' for c in col_clean)
+            # Remove leading numbers and double underscores
+            while col_clean.startswith('_'):
+                col_clean = col_clean[1:]
+            while '__' in col_clean:
+                col_clean = col_clean.replace('__', '_')
+            # Ensure non-empty
+            col_clean = col_clean if col_clean else f"Col_{columns.index(col)+1}"
+            columns_normalized.append(col_clean)
+
+        # Handle duplicate column names
+        seen = {}
+        final_columns = []
+        for col in columns_normalized:
+            if col in seen:
+                seen[col] += 1
+                final_columns.append(f"{col}_{seen[col]}")
+            else:
+                seen[col] = 0
+                final_columns.append(col)
+
+        # Create DataFrame with cleaned columns
         if not data_rows:
-            # Empty data, create empty DataFrame with columns
-            data = pd.DataFrame(columns=columns)
+            data = pd.DataFrame(columns=final_columns)
         else:
-            data = pd.DataFrame(data_rows, columns=columns)
+            data = pd.DataFrame(data_rows, columns=final_columns)
         
         # Handle index column
         if has_index and len(data.columns) > 0:
@@ -677,7 +602,7 @@ def show():
             
             uploaded_file = st.file_uploader(
                 "Choose a file",
-                type=['csv', 'txt', 'xls', 'xlsx', 'json', 'dat', 'asc', 'spc', 'sam', 'raw',
+                type=['csv', 'txt', 'xls', 'xlsx', 'json', 'dat', 'asc', 'spc', 'raw',
                      'prn', 'tsv', 'jdx', 'dx', 'arff', 'ods', 'h5', 'hdf5', 'mat']
             )
             
@@ -694,7 +619,6 @@ def show():
                     'dat': 'DAT (Spectral/Instrumental Data)',
                     'asc': 'ASC (ASCII Data)',
                     'spc': 'SPC (Spectroscopy)',
-                    'sam': 'SAM (NIR Spectra)',
                     'raw': 'RAW (XRD Diffraction)',
                     'prn': 'PRN (Formatted Text)',
                     'tsv': 'TSV (Tab-separated)',
@@ -726,11 +650,55 @@ def show():
                         separator = st.selectbox("Separator:", [",", ";", "\t", " "], key="sep_basic")
                         decimal = st.selectbox("Decimal separator:", [".", ","], key="dec_basic")
                         encoding = st.selectbox("Encoding:", ["utf-8", "latin-1", "cp1252"], key="enc_basic")
+                    elif file_format == "Excel (XLS/XLSX)":
+                        # Excel-specific options: Sheet selection
+                        try:
+                            # Get list of sheet names
+                            excel_file = pd.ExcelFile(uploaded_file)
+                            sheet_names = excel_file.sheet_names
+                            st.success(f"📊 **{len(sheet_names)} sheet(s) detected**: {', '.join(sheet_names)}")
+
+                            # Sheet selector
+                            selected_sheet = st.selectbox(
+                                "📑 Select sheet to load:",
+                                sheet_names,
+                                key="excel_sheet_selector"
+                            )
+
+                            # Preview selected sheet
+                            if selected_sheet:
+                                st.markdown("### 👀 Sheet Preview")
+                                try:
+                                    preview_data = pd.read_excel(uploaded_file, sheet_name=selected_sheet, nrows=5)
+
+                                    # Display info stacked vertically
+                                    numeric_cols = preview_data.select_dtypes(include=[np.number]).columns
+                                    st.info(f"**Shape**: {preview_data.shape[0]} rows × {preview_data.shape[1]} columns (preview only) | **Numeric columns**: {len(numeric_cols)}")
+
+                                    st.dataframe(preview_data.head(5), height=200, use_container_width=True)
+
+                                    with st.expander("📋 Data Types"):
+                                        dtypes_df = pd.DataFrame({
+                                            'Column': preview_data.columns,
+                                            'Type': preview_data.dtypes.astype(str)
+                                        })
+                                        st.dataframe(dtypes_df, use_container_width=True)
+                                except Exception as e:
+                                    st.warning(f"Could not preview sheet: {str(e)}")
+
+                        except Exception as e:
+                            st.warning(f"Could not read sheet names: {str(e)}")
+                            selected_sheet = "0"  # Fallback to first sheet
+
+                        separator = ","
+                        decimal = "."
+                        encoding = "utf-8"
                     else:
                         separator = ","
                         decimal = "."
                         encoding = "utf-8"
-                
+                        selected_sheet = "0"
+
                 # Advanced options
                 with st.expander("Advanced Options"):
                     skip_rows = st.number_input("Skip top rows:", min_value=0, value=0)
@@ -742,53 +710,105 @@ def show():
                     try:
                         # Load based on format
                         if file_format == "CSV":
-                            data = _load_csv_txt(uploaded_file, separator, decimal, encoding, 
+                            data = _load_csv_txt(uploaded_file, separator, decimal, encoding,
                                                 has_header, has_index, skip_rows, skip_cols, na_values, '"')
                         elif file_format == "TXT (Tab-delimited)":
-                            data = _load_csv_txt(uploaded_file, '\t', decimal, encoding, 
+                            data = _load_csv_txt(uploaded_file, '\t', decimal, encoding,
                                                 has_header, has_index, skip_rows, skip_cols, na_values, '"')
                         elif file_format == "Excel (XLS/XLSX)":
-                            data = _load_excel_data(uploaded_file, "0", skip_rows, skip_cols, 
+                            # ===== LOAD EXCEL FILE WITH SHEET SELECTION =====
+                            # Use selected sheet (or "0" as fallback)
+                            sheet_to_load = selected_sheet if 'selected_sheet' in locals() else "0"
+                            data = _load_excel_data(uploaded_file, sheet_to_load, skip_rows, skip_cols,
                                                   has_header, has_index, na_values)
+
+                            # FORMAT NAME: filename_sheetname (e.g., "washing_train")
+                            base_name = Path(uploaded_file.name).stem  # Remove .xlsx
+                            formatted_name = f"{base_name}_{sheet_to_load}".lower()
+
+                            # SAVE formatted name in session state
+                            st.session_state.current_data = data
+                            st.session_state.current_dataset = formatted_name
+                            st.session_state.dataset_name = formatted_name
+
+                            # Save original to transformation history
+                            _save_original_to_history(data, formatted_name)
+
+                            st.success(f"✅ Loaded sheet: **{sheet_to_load}** → Dataset name: **{formatted_name}**")
                         elif file_format == "JSON":
                             data = pd.read_json(uploaded_file)
                         elif file_format == "DAT (Spectral/Instrumental Data)":
-                            data = _load_spectral_data(uploaded_file, '\t', decimal, encoding, 
+                            data = _load_spectral_data(uploaded_file, '\t', decimal, encoding,
                                                      has_header, has_index, skip_rows, "Matrix (samples×variables)", False)
                         elif file_format == "ASC (ASCII Data)":
-                            data = _load_spectral_data(uploaded_file, '\t', decimal, encoding, 
+                            data = _load_spectral_data(uploaded_file, '\t', decimal, encoding,
                                                      has_header, has_index, skip_rows, "Matrix (samples×variables)", False)
-                        elif file_format == "SAM (NIR Spectra)":
-                            data = _load_sam_data(uploaded_file, True, "Auto-detect")
                         elif file_format == "RAW (XRD Diffraction)":
                             data = _load_raw_data(uploaded_file, encoding)
                         else:
-                            data = _load_csv_txt(uploaded_file, separator, decimal, encoding, 
+                            data = _load_csv_txt(uploaded_file, separator, decimal, encoding,
                                                 has_header, has_index, skip_rows, skip_cols, na_values, '"')
-                        
-                        # Store data
-                        st.session_state.current_data = data
-                        st.session_state.current_dataset = uploaded_file.name
-                        # Save original to transformation history
-                        _save_original_to_history(data, uploaded_file.name)
 
-                        st.success(f"Data loaded successfully: {data.shape[0]} rows × {data.shape[1]} columns")
-                        
-                        # Preview
-                        st.markdown("### Data Preview")
-                        st.dataframe(data.head(10), use_container_width=True)
-                        
-                        # Stats
-                        col1, col2, col3, col4 = st.columns(4)
+                        # === VALIDATE LOADED DATA ===
+                        if len(data) == 0:
+                            st.error("❌ Dataset is empty - no samples available!")
+                            st.info("📊 The loaded file contains no data rows")
+                            st.info("📊 Action: Check the file format or load a different file")
+                            return
+
+                        # Store data (skip for Excel as it's already handled above)
+                        if file_format != "Excel (XLS/XLSX)":
+                            st.session_state.current_data = data
+                            st.session_state.current_dataset = uploaded_file.name
+                            # Save original to transformation history
+                            _save_original_to_history(data, uploaded_file.name)
+
+                        st.success(f"✅ Data loaded successfully: {data.shape[0]} rows × {data.shape[1]} columns")
+
+                        # Data Overview Section
+                        st.markdown("### 📊 Data Overview")
+
+                        # Key metrics
+                        col1, col2, col3, col4, col5 = st.columns(5)
                         with col1:
-                            st.metric("Rows", data.shape[0])
+                            st.metric("Samples", data.shape[0])
                         with col2:
-                            st.metric("Columns", data.shape[1])
+                            st.metric("Variables", data.shape[1])
                         with col3:
-                            st.metric("Missing Values", data.isnull().sum().sum())
-                        with col4:
                             numeric_cols = data.select_dtypes(include=[np.number]).columns.tolist()
-                            st.metric("Numeric Variables", len(numeric_cols))
+                            st.metric("Numeric", len(numeric_cols))
+                        with col4:
+                            st.metric("Missing", data.isnull().sum().sum())
+                        with col5:
+                            memory_mb = data.memory_usage(deep=True).sum() / 1024 / 1024
+                            st.metric("Size", f"{memory_mb:.1f} MB")
+
+                        # Data types summary
+                        with st.expander("📋 **Column Types Summary**"):
+                            type_counts = data.dtypes.value_counts()
+                            col_type1, col_type2 = st.columns(2)
+
+                            with col_type1:
+                                st.markdown("**Data Types:**")
+                                for dtype, count in type_counts.items():
+                                    st.write(f"• {dtype}: {count} columns")
+
+                            with col_type2:
+                                st.markdown("**Variable Categories:**")
+                                categorical_cols = data.select_dtypes(include=['object', 'category']).columns.tolist()
+                                st.write(f"• Numeric: {len(numeric_cols)}")
+                                st.write(f"• Categorical: {len(categorical_cols)}")
+                                st.write(f"• Total: {len(data.columns)}")
+
+                        # Data preview
+                        st.markdown("### 📄 Data Preview")
+                        st.dataframe(data.head(10), use_container_width=True)
+
+                        # Additional statistics
+                        if len(numeric_cols) > 0:
+                            with st.expander("📈 **Numeric Variables Statistics**"):
+                                stats_df = data[numeric_cols].describe().T
+                                st.dataframe(stats_df, use_container_width=True)
                         
                     except Exception as e:
                         st.error(f"Error loading file: {str(e)}")
@@ -1209,6 +1229,25 @@ Paracetamol,96.8,6.9,25.8,89.2""")
                                 del st.session_state.split_datasets[name]
                                 st.success(f"Deleted: {name}")
                                 st.rerun()
+
+                            # Download XLSX button
+                            if st.button(f"📥 Download XLSX", key=f"download_{name}"):
+                                try:
+                                    import io
+                                    xlsx_buffer = io.BytesIO()
+                                    with pd.ExcelWriter(xlsx_buffer, engine='openpyxl') as writer:
+                                        info['data'].to_excel(writer, sheet_name='Data', index=True)
+
+                                    xlsx_buffer.seek(0)
+                                    st.download_button(
+                                        label="💾 Save File",
+                                        data=xlsx_buffer.getvalue(),
+                                        file_name=f"{name}.xlsx",
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                        key=f"dl_{name}"
+                                    )
+                                except Exception as e:
+                                    st.error(f"Download failed: {str(e)}")
             
             # Clear all splits button
             st.markdown("---")
@@ -1319,6 +1358,25 @@ Paracetamol,96.8,6.9,25.8,89.2""")
                                     del st.session_state.transformation_history[name]
                                     st.success(f"Deleted: {name}")
                                     st.rerun()
+
+                                # Download XLSX button
+                                if st.button(f"📥 Download XLSX", key=f"download_transform_{name}"):
+                                    try:
+                                        import io
+                                        xlsx_buffer = io.BytesIO()
+                                        with pd.ExcelWriter(xlsx_buffer, engine='openpyxl') as writer:
+                                            info['data'].to_excel(writer, sheet_name='Transformed', index=True)
+
+                                        xlsx_buffer.seek(0)
+                                        st.download_button(
+                                            label="💾 Save File",
+                                            data=xlsx_buffer.getvalue(),
+                                            file_name=f"{name}_transformed.xlsx",
+                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                            key=f"dl_transform_{name}"
+                                        )
+                                    except Exception as e:
+                                        st.error(f"Download failed: {str(e)}")
                 
                 st.markdown("---")
             

@@ -1,32 +1,38 @@
 """
 MLR/DoE utility modules for ChemometricSolutions
 
-TO BE IMPLEMENTED: Extract functions from mlr_doe.py and organize into:
-- mlr_calculations.py: Model fitting and prediction
-- mlr_diagnostics.py: VIF, lack of fit, replicates
-- doe_utils.py: Design of experiments utilities
-
-See REFACTORING.md for detailed migration guide.
+This package contains:
+- model_computation.py: Core MLR fitting and model matrix creation
+- model_diagnostics.py: VIF, leverage, diagnostic plots
+- response_surface.py: Response surface analysis
+- confidence_intervals.py: Confidence interval calculations
+- predictions.py: Prediction utilities
+- candidate_points.py: Candidate points generation
+- export.py: Export utilities
 """
 
-# Future imports (to be implemented):
-# from .mlr_calculations import (
-#     fit_mlr_model,
-#     predict_new_points,
-#     create_model_matrix
-# )
-#
-# from .mlr_diagnostics import (
-#     calculate_vif,
-#     calculate_lack_of_fit,
-#     detect_replicates,
-#     calculate_leverage
-# )
-#
-# from .doe_utils import (
-#     generate_candidate_points,
-#     detect_central_points,
-#     detect_coded_matrix
-# )
+# Core computation functions
+from .model_computation import (
+    create_model_matrix,
+    fit_mlr_model,
+    statistical_summary
+)
 
-__all__ = []  # Will be populated after implementation
+# Diagnostic functions
+from .model_diagnostics import (
+    calculate_vif,
+    check_model_saturated,
+    show_model_diagnostics_ui
+)
+
+__all__ = [
+    # Model computation
+    'create_model_matrix',
+    'fit_mlr_model',
+    'statistical_summary',
+
+    # Model diagnostics
+    'calculate_vif',
+    'check_model_saturated',
+    'show_model_diagnostics_ui',
+]

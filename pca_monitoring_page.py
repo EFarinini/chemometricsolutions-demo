@@ -28,17 +28,34 @@ from workspace_utils import display_workspace_dataset_selector
 # ============================================================================
 
 def create_score_plot(test_scores, explained_variance, timestamps=None,
-                      pca_params=None, start_sample_num=1):
+                      pca_params=None, start_sample_num=1, show_trajectory=True,
+                      color_data=None, labels_data=None):
     """
     Create PCA score plot with confidence ellipses (same as process_monitoring.py).
+
+    Parameters:
+    -----------
+    show_trajectory : bool, default True
+        Whether to show the trajectory line connecting samples
+    color_data : array-like, optional
+        Data to use for coloring points
+    labels_data : array-like, optional
+        Data to use for labeling points
     """
     import numpy as np
     import plotly.graph_objects as go
+    import plotly.express as px
 
     fig = go.Figure()
 
     # Correct sample numbering
     sample_numbers_correct = [f"{start_sample_num + i}" for i in range(len(test_scores))]
+
+    # Use labels_data if provided, otherwise use sample numbers
+    if labels_data is not None and len(labels_data) == len(test_scores):
+        text_labels = labels_data
+    else:
+        text_labels = sample_numbers_correct
 
     # Create dynamic hover template
     if timestamps is not None and len(timestamps) == len(test_scores):
@@ -49,23 +66,32 @@ def create_score_plot(test_scores, explained_variance, timestamps=None,
         hover_template = 'Sample: %{text}<br>PC1: %{x:.2f}<br>PC2: %{y:.2f}<extra></extra>'
         custom_data = None
 
-    # Gradient across trajectory
+    # Data points visualization
     n_points = len(test_scores)
 
-    if n_points > 1:
-        # Create line segments with color gradient
+    # Determine if we should use color_data
+    use_color_data = color_data is not None and len(color_data) == len(test_scores)
+
+    if show_trajectory and n_points > 1:
+        # Create line segments with color gradient (trajectory mode)
         for i in range(n_points - 1):
-            # Gradient from dark blue to red
-            ratio = i / max(1, n_points - 2)
-            r = int(255 * ratio)
-            g = 0
-            b = int(255 * (1 - ratio))
-            line_color = f'rgb({r},{g},{b})'
-            marker_color = f'rgb({r},{g},{b})'
+            # Use color_data if provided, otherwise use gradient
+            if use_color_data:
+                # Use the color value for this specific point
+                marker_color = color_data[i]
+                line_color = color_data[i]
+            else:
+                # Gradient from dark blue to red
+                ratio = i / max(1, n_points - 2)
+                r = int(255 * ratio)
+                g = 0
+                b = int(255 * (1 - ratio))
+                line_color = f'rgb({r},{g},{b})'
+                marker_color = f'rgb({r},{g},{b})'
 
             # Increase thickness toward the end
-            line_width = 1.5 + (ratio * 1.5)
-            marker_size = 3 + (ratio * 3)
+            line_width = 1.5 + (ratio * 1.5) if not use_color_data else 2.0
+            marker_size = 3 + (ratio * 3) if not use_color_data else 6
 
             # Line segment + marker
             fig.add_trace(go.Scatter(
@@ -77,25 +103,40 @@ def create_score_plot(test_scores, explained_variance, timestamps=None,
                 marker=dict(color=marker_color, size=marker_size, opacity=0.8),
                 hovertemplate=hover_template,
                 customdata=[custom_data[i]] if custom_data is not None else None,
-                text=[sample_numbers_correct[i]],
+                text=[text_labels[i]],
                 showlegend=(i == 0),
                 legendgroup='trajectory'
             ))
-    else:
-        # Single point
+    elif show_trajectory and n_points == 1:
+        # Single point with trajectory enabled
+        marker_color = color_data[0] if use_color_data else 'darkblue'
         fig.add_trace(go.Scatter(
             x=test_scores[:, 0],
             y=test_scores[:, 1],
             mode='markers',
             name='Test Trajectory',
-            marker=dict(color='darkblue', size=4),
+            marker=dict(color=marker_color, size=4),
             hovertemplate=hover_template,
             customdata=custom_data,
-            text=sample_numbers_correct
+            text=text_labels
+        ))
+    elif not show_trajectory and n_points > 0:
+        # Show all points without trajectory (simple scatter)
+        marker_colors = color_data if use_color_data else 'steelblue'
+        fig.add_trace(go.Scatter(
+            x=test_scores[:, 0],
+            y=test_scores[:, 1],
+            mode='markers+text' if labels_data is not None else 'markers',
+            name='Test Samples',
+            marker=dict(color=marker_colors, size=8),
+            text=text_labels,
+            textposition='top center',
+            hovertemplate=hover_template,
+            customdata=custom_data
         ))
 
-    # Highlight last point
-    if len(test_scores) > 0:
+    # Highlight last point (only if show_trajectory is True)
+    if show_trajectory and len(test_scores) > 0:
         last_sample_num = start_sample_num + len(test_scores) - 1
         if timestamps is not None and len(timestamps) == len(test_scores):
             last_time = timestamps[-1].strftime('%Y-%m-%d %H:%M') if hasattr(timestamps[-1], 'strftime') else str(timestamps[-1])
@@ -187,14 +228,30 @@ def create_score_plot(test_scores, explained_variance, timestamps=None,
     return fig
 
 
-def create_t2_q_plot(t2_values, q_values, t2_limits, q_limits, timestamps=None, start_sample_num=1):
+def create_t2_q_plot(t2_values, q_values, t2_limits, q_limits, timestamps=None, start_sample_num=1, show_trajectory=True,
+                     color_data=None, labels_data=None):
     """
     Create T²-Q plot for fault detection (same as process_monitoring.py).
+
+    Parameters:
+    -----------
+    show_trajectory : bool, default True
+        Whether to show the trajectory line connecting samples
+    color_data : array-like, optional
+        Data to use for coloring points
+    labels_data : array-like, optional
+        Data to use for labeling points
     """
     fig = go.Figure()
 
     # Correct sample numbering
     sample_numbers_correct = [f"{start_sample_num + i}" for i in range(len(t2_values))]
+
+    # Use labels_data if provided, otherwise use sample numbers
+    if labels_data is not None and len(labels_data) == len(t2_values):
+        text_labels = labels_data
+    else:
+        text_labels = sample_numbers_correct
 
     # Create dynamic hover template
     if timestamps is not None and len(timestamps) == len(t2_values):
@@ -205,20 +262,28 @@ def create_t2_q_plot(t2_values, q_values, t2_limits, q_limits, timestamps=None, 
         hover_template = 'Sample: %{text}<br>T²: %{x:.2f}<br>Q: %{y:.2f}<extra></extra>'
         custom_data = None
 
-    # Gradient across trajectory
+    # Data points visualization
     n_points = len(t2_values)
 
-    if n_points > 1:
-        for i in range(n_points - 1):
-            ratio = i / max(1, n_points - 2)
-            r = int(255 * ratio)
-            g = 0
-            b = int(255 * (1 - ratio))
-            line_color = f'rgb({r},{g},{b})'
-            marker_color = f'rgb({r},{g},{b})'
+    # Determine if we should use color_data
+    use_color_data = color_data is not None and len(color_data) == len(t2_values)
 
-            line_width = 1.5 + (ratio * 1.5)
-            marker_size = 3 + (ratio * 3)
+    if show_trajectory and n_points > 1:
+        for i in range(n_points - 1):
+            # Use color_data if provided, otherwise use gradient
+            if use_color_data:
+                marker_color = color_data[i]
+                line_color = color_data[i]
+            else:
+                ratio = i / max(1, n_points - 2)
+                r = int(255 * ratio)
+                g = 0
+                b = int(255 * (1 - ratio))
+                line_color = f'rgb({r},{g},{b})'
+                marker_color = f'rgb({r},{g},{b})'
+
+            line_width = 1.5 + (ratio * 1.5) if not use_color_data else 2.0
+            marker_size = 3 + (ratio * 3) if not use_color_data else 6
 
             fig.add_trace(go.Scatter(
                 x=t2_values[i:i+2],
@@ -229,24 +294,40 @@ def create_t2_q_plot(t2_values, q_values, t2_limits, q_limits, timestamps=None, 
                 marker=dict(color=marker_color, size=marker_size, opacity=0.8),
                 hovertemplate=hover_template,
                 customdata=[custom_data[i]] if custom_data is not None else None,
-                text=[sample_numbers_correct[i]],
+                text=[text_labels[i]],
                 showlegend=(i == 0),
                 legendgroup='trajectory_t2q'
             ))
-    else:
+    elif show_trajectory and n_points == 1:
+        # Single point with trajectory enabled
+        marker_color = color_data[0] if use_color_data else 'darkblue'
         fig.add_trace(go.Scatter(
             x=t2_values,
             y=q_values,
             mode='markers',
             name='T²-Q Trajectory',
-            marker=dict(color='darkblue', size=4),
+            marker=dict(color=marker_color, size=4),
             hovertemplate=hover_template,
             customdata=custom_data,
-            text=sample_numbers_correct
+            text=text_labels
+        ))
+    elif not show_trajectory and n_points > 0:
+        # Show all points without trajectory (simple scatter)
+        marker_colors = color_data if use_color_data else 'steelblue'
+        fig.add_trace(go.Scatter(
+            x=t2_values,
+            y=q_values,
+            mode='markers+text' if labels_data is not None else 'markers',
+            name='T²-Q Points',
+            marker=dict(color=marker_colors, size=8),
+            text=text_labels,
+            textposition='top center',
+            hovertemplate=hover_template,
+            customdata=custom_data
         ))
 
-    # Highlight last point
-    if len(t2_values) > 0:
+    # Highlight last point (only if show_trajectory is True)
+    if show_trajectory and len(t2_values) > 0:
         last_sample_num = start_sample_num + len(t2_values) - 1
         if timestamps is not None and len(timestamps) == len(t2_values):
             last_time = timestamps[-1].strftime('%Y-%m-%d %H:%M') if hasattr(timestamps[-1], 'strftime') else str(timestamps[-1])
@@ -337,31 +418,35 @@ def create_t2_q_plot(t2_values, q_values, t2_limits, q_limits, timestamps=None, 
 
 def calculate_t2_statistic_process(scores, explained_variance_pct, n_samples_train, n_variables):
     """
-    Calculate T² statistic (same formula as process_monitoring.py).
+    DEPRECATED: Use calculate_hotelling_t2 from pca_utils.pca_statistics instead.
 
-    T² = scores' * inv(diag(varexp/(n-1))) * scores
+    This function is kept for backward compatibility but delegates to the correct implementation.
     """
-    # Calculate variances as in process_monitoring.py
-    vartot = (n_samples_train - 1) * n_variables
-    varexp = (explained_variance_pct / 100.0) * vartot  # Variance explained per component
-    vvv_diag = varexp / (n_samples_train - 1)
+    # Import correct function
+    from pca_utils.pca_statistics import calculate_hotelling_t2
 
-    # Calculate T² for each sample
-    t2_values = np.sum((scores ** 2) / vvv_diag, axis=1)
+    # Need to reconstruct eigenvalues from explained variance
+    # eigenvalue = explained_variance * (n-1)
+    total_var = n_variables  # For scaled data, total variance = n_variables
+    eigenvalues = (explained_variance_pct / 100.0) * total_var * (n_samples_train - 1)
+
+    # Use correct T² calculation
+    t2_values, _ = calculate_hotelling_t2(scores, eigenvalues, alpha=0.95)
 
     return t2_values
 
 
 def calculate_q_statistic_process(test_scaled, scores, loadings):
     """
-    Calculate Q (SPE) statistic (same as process_monitoring.py).
-    """
-    # Reconstruct data
-    reconstructed = scores @ loadings.T
+    DEPRECATED: Use calculate_q_residuals from pca_utils.pca_statistics instead.
 
-    # Calculate Q for each sample
-    residuals = test_scaled - reconstructed
-    q_values = np.sum(residuals ** 2, axis=1)
+    This function is kept for backward compatibility but delegates to the correct implementation.
+    """
+    # Import correct function
+    from pca_utils.pca_statistics import calculate_q_residuals
+
+    # Use correct Q calculation
+    q_values, _ = calculate_q_residuals(test_scaled, scores, loadings, alpha=0.95)
 
     return q_values
 
@@ -1041,17 +1126,20 @@ def show():
                     X_plot_array = X_plot.values
 
                     if st.session_state.pca_monitor_scale:
-                        scaler = st.session_state.pca_monitor_model['scaler']
-                        X_plot_scaled = scaler.transform(X_plot_array)
+                        # Use NIPALS means and stds
+                        means = pca_results['means']
+                        stds = pca_results['stds']
+                        X_plot_scaled = (X_plot_array - means) / stds
                     elif st.session_state.pca_monitor_center:
-                        mean = pca_results['model'].mean_
-                        X_plot_scaled = X_plot_array - mean
+                        # Use NIPALS means
+                        means = pca_results['means']
+                        X_plot_scaled = X_plot_array - means
                     else:
                         X_plot_scaled = X_plot_array
 
-                    # Project to PCA space
-                    pca_model = pca_results['model']
-                    scores_plot_full = pca_model.transform(X_plot_scaled)
+                    # Project to PCA space using manual calculation: T = X @ P
+                    loadings_full = pca_results['loadings'].values
+                    scores_plot_full = X_plot_scaled @ loadings_full
 
                     # Use only N selected components
                     scores_plot = scores_plot_full[:, :n_components_use]
@@ -1066,40 +1154,49 @@ def show():
                     n_samples_train = X_plot.shape[0]  # Use training data size for params
                     n_variables = len(model_vars)
 
-                    # Calculate T² and Q (using N selected components)
-                    t2_values = calculate_t2_statistic_process(
-                        scores_plot,
-                        explained_variance_pct,
-                        n_samples_train,
-                        n_variables
-                    )
+                    # ===== IMPORT CORRECT FUNCTIONS =====
+                    from pca_utils.pca_statistics import calculate_hotelling_t2, calculate_q_residuals
+                    from scipy.stats import f, chi2
 
-                    q_values = calculate_q_statistic_process(
-                        X_plot_scaled,
-                        scores_plot,
-                        loadings
-                    )
+                    # Get eigenvalues for the selected components
+                    eigenvalues_diag = pca_results['eigenvalues'][:n_components_use]
 
-                    # Calculate limits (simplified F-distribution, using N selected components)
-                    from scipy.stats import f as f_dist, chi2
+                    # ===== CALCULATE T² FOR ALL SAMPLES =====
+                    # Use correct formula: T² = Σ(score_k² / λ_k)
+                    t2_values = np.sum((scores_plot ** 2) / eigenvalues_diag[np.newaxis, :], axis=1)
+
+                    # ===== CALCULATE Q FOR ALL SAMPLES =====
+                    # Correct formula: Q = ||residuals||² = ||X - X_reconstructed||²
+                    X_reconstructed = scores_plot @ loadings.T
+                    residuals = X_plot_scaled - X_reconstructed
+                    q_values = np.sum(residuals ** 2, axis=1)
+
+                    # ===== CALCULATE CONTROL LIMITS (3 levels) =====
+                    # For Independent approach (97.5%, 99.5%, 99.95%)
+                    alpha_levels = [0.975, 0.995, 0.9995]
+                    confidence_labels = ['97.5%', '99.5%', '99.95%']
 
                     t2_limits = []
-                    for alpha in [0.975, 0.995, 0.9995]:
-                        f_val = f_dist.ppf(alpha, n_components_use, n_samples_train - n_components_use)
-                        t2_lim = ((n_samples_train - 1) * n_components_use / (n_samples_train - n_components_use)) * f_val
+                    q_limits = []
+
+                    for alpha in alpha_levels:
+                        # T² limit using F-distribution
+                        df1 = n_components_use
+                        df2 = n_samples_train - n_components_use
+                        f_value = f.ppf(alpha, df1, df2)
+                        t2_lim = ((n_samples_train - 1) * n_components_use / (n_samples_train - n_components_use)) * f_value
                         t2_limits.append(t2_lim)
 
-                    # Q limits (chi-square approximation)
-                    q_mean = np.mean(q_values)
-                    q_var = np.var(q_values)
+                        # Q limit using chi-square approximation (Box 1954)
+                        q_mean = np.mean(q_values)
+                        q_var = np.var(q_values, ddof=1)
 
-                    q_limits = []
-                    for alpha in [0.975, 0.995, 0.9995]:
                         if q_var > 0 and q_mean > 0:
                             g = q_var / (2 * q_mean)
                             h = (2 * q_mean ** 2) / q_var
                             q_lim = g * chi2.ppf(alpha, h)
                         else:
+                            # Fallback to percentile if variance is zero
                             q_lim = np.percentile(q_values, alpha * 100)
                         q_limits.append(q_lim)
 
@@ -1420,9 +1517,44 @@ def show():
                 if len(missing_vars) > 0:
                     st.error(f"❌ **Missing variables in test data**: {missing_vars}")
                 else:
-                    X_test = test_data[model_vars]
+                    st.info(f"📊 Full test data: {len(test_data)} samples × {len(model_vars)} variables")
 
-                    st.info(f"📊 Test data: {X_test.shape[0]} samples × {X_test.shape[1]} variables")
+                    # ===== ROW SELECTION (OBJECTS/SAMPLES) =====
+                    st.markdown("### 🎯 Row Selection (Objects/Samples)")
+                    st.info("Select a subset of samples from test data for analysis")
+
+                    # Get total samples in test data
+                    n_test_samples = len(test_data)
+
+                    col1, col2 = st.columns(2)
+
+                    with col1:
+                        first_sample = st.number_input(
+                            "First sample (1-based):",
+                            min_value=1,
+                            max_value=n_test_samples,
+                            value=1,
+                            key="test_first_sample"
+                        )
+
+                    with col2:
+                        last_sample = st.number_input(
+                            "Last sample (1-based):",
+                            min_value=first_sample,
+                            max_value=n_test_samples,
+                            value=n_test_samples,  # Default to all samples
+                            key="test_last_sample"
+                        )
+
+                    # Show range info
+                    n_selected = last_sample - first_sample + 1
+                    st.info(f"✅ Will analyze {n_selected} samples (from sample {first_sample} to {last_sample})")
+
+                    # SELECT subset (convert 1-based to 0-based indexing)
+                    test_data_subset = test_data.iloc[first_sample-1:last_sample]
+                    X_test = test_data_subset[model_vars]
+
+                    st.divider()
 
                     # ===== PRETREATMENT WARNING =====
                     # Check if pretreatment info exists from training
@@ -1441,22 +1573,24 @@ def show():
                     if st.button("🔍 Test Data on Model", type="primary", use_container_width=True):
                         with st.spinner("Testing data on model..."):
                             try:
-                                # Preprocess test data (use training scaler/centering)
+                                # Preprocess test data (use training means/stds)
                                 X_test_array = X_test.values
 
                                 if st.session_state.pca_monitor_scale:
-                                    scaler = st.session_state.pca_monitor_model['scaler']
-                                    X_test_scaled = scaler.transform(X_test_array)
+                                    # Use NIPALS means and stds from training
+                                    means = pca_results['means']
+                                    stds = pca_results['stds']
+                                    X_test_scaled = (X_test_array - means) / stds
                                 elif st.session_state.pca_monitor_center:
-                                    # Use training mean for centering
-                                    mean = pca_results['model'].mean_
-                                    X_test_scaled = X_test_array - mean
+                                    # Use NIPALS means from training
+                                    means = pca_results['means']
+                                    X_test_scaled = X_test_array - means
                                 else:
                                     X_test_scaled = X_test_array
 
-                                # Project test data to PCA space
-                                pca_model = pca_results['model']
-                                scores_test_full = pca_model.transform(X_test_scaled)
+                                # Project test data to PCA space using manual calculation: T = X @ P
+                                loadings_full = pca_results['loadings'].values
+                                scores_test_full = X_test_scaled @ loadings_full
 
                                 # Use only N selected components
                                 scores_test = scores_test_full[:, :n_components_use]
@@ -1472,41 +1606,66 @@ def show():
                                 n_samples_train = pca_results['scores'].shape[0]  # Training set size
                                 n_variables = len(model_vars)
 
-                                # Calculate T² and Q for test data (using N selected components)
-                                t2_values = calculate_t2_statistic_process(
-                                    scores_test,
-                                    explained_variance_pct,
-                                    n_samples_train,  # Use training set size!
-                                    n_variables
-                                )
+                                # ===== IMPORT CORRECT FUNCTIONS =====
+                                from pca_utils.pca_statistics import calculate_hotelling_t2, calculate_q_residuals
+                                from scipy.stats import f, chi2
 
-                                q_values = calculate_q_statistic_process(
-                                    X_test_scaled,
-                                    scores_test,
-                                    loadings
-                                )
+                                # Get eigenvalues for the selected components
+                                eigenvalues_diag = pca_results['eigenvalues'][:n_components_use]
 
-                                # Calculate limits based on TRAINING model (using N selected components)
-                                from scipy.stats import f as f_dist, chi2
+                                # ===== CALCULATE T² FOR TEST SAMPLES =====
+                                # Use correct formula: T² = Σ(score_k² / λ_k)
+                                t2_values = np.sum((scores_test ** 2) / eigenvalues_diag[np.newaxis, :], axis=1)
+
+                                # ===== CALCULATE Q FOR TEST SAMPLES =====
+                                # Correct formula: Q = ||residuals||² = ||X - X_reconstructed||²
+                                X_test_reconstructed = scores_test @ loadings.T
+                                test_residuals = X_test_scaled - X_test_reconstructed
+                                q_values = np.sum(test_residuals ** 2, axis=1)
+
+                                # ===== CALCULATE CONTROL LIMITS BASED ON TRAINING DATA =====
+                                # Limits must be calculated from TRAINING set, not test set
+                                alpha_levels = [0.975, 0.995, 0.9995]
 
                                 t2_limits = []
-                                for alpha in [0.975, 0.995, 0.9995]:
-                                    f_val = f_dist.ppf(alpha, n_components_use, n_samples_train - n_components_use)
-                                    t2_lim = ((n_samples_train - 1) * n_components_use / (n_samples_train - n_components_use)) * f_val
+                                q_limits = []
+
+                                # Get training scores for limit calculation
+                                training_scores = pca_results['scores'].values[:, :n_components_use]
+
+                                # Reconstruct training data preprocessing
+                                X_train_for_limit = st.session_state.pca_monitor_training_data.values
+                                if st.session_state.pca_monitor_scale:
+                                    X_train_scaled_for_limit = (X_train_for_limit - pca_results['means']) / pca_results['stds']
+                                elif st.session_state.pca_monitor_center:
+                                    X_train_scaled_for_limit = X_train_for_limit - pca_results['means']
+                                else:
+                                    X_train_scaled_for_limit = X_train_for_limit
+
+                                # Calculate training Q values for limit estimation
+                                X_train_reconstructed = training_scores @ loadings.T
+                                train_residuals = X_train_scaled_for_limit - X_train_reconstructed
+                                q_values_train = np.sum(train_residuals ** 2, axis=1)
+
+                                for alpha in alpha_levels:
+                                    # T² limit using F-distribution (based on training set size)
+                                    df1 = n_components_use
+                                    df2 = n_samples_train - n_components_use
+                                    f_value = f.ppf(alpha, df1, df2)
+                                    t2_lim = ((n_samples_train - 1) * n_components_use / (n_samples_train - n_components_use)) * f_value
                                     t2_limits.append(t2_lim)
 
-                                # Q limits (chi-square approximation)
-                                q_mean = np.mean(q_values)
-                                q_var = np.var(q_values)
+                                    # Q limit using chi-square approximation (based on training Q distribution)
+                                    q_mean_train = np.mean(q_values_train)
+                                    q_var_train = np.var(q_values_train, ddof=1)
 
-                                q_limits = []
-                                for alpha in [0.975, 0.995, 0.9995]:
-                                    if q_var > 0 and q_mean > 0:
-                                        g = q_var / (2 * q_mean)
-                                        h = (2 * q_mean ** 2) / q_var
+                                    if q_var_train > 0 and q_mean_train > 0:
+                                        g = q_var_train / (2 * q_mean_train)
+                                        h = (2 * q_mean_train ** 2) / q_var_train
                                         q_lim = g * chi2.ppf(alpha, h)
                                     else:
-                                        q_lim = np.percentile(q_values, alpha * 100)
+                                        # Fallback to percentile if variance is zero
+                                        q_lim = np.percentile(q_values_train, alpha * 100)
                                     q_limits.append(q_lim)
 
                                 # Prepare params for plotting (use TRAINING params!)
@@ -1718,11 +1877,14 @@ def show():
                             # Scale training data the same way
                             pca_results = st.session_state.pca_monitor_model
                             if st.session_state.pca_monitor_scale:
-                                scaler = st.session_state.pca_monitor_model['scaler']
-                                X_train_scaled = scaler.transform(X_train_array)
+                                # Use NIPALS means and stds
+                                means = pca_results['means']
+                                stds = pca_results['stds']
+                                X_train_scaled = (X_train_array - means) / stds
                             elif st.session_state.pca_monitor_center:
-                                mean = pca_results['model'].mean_
-                                X_train_scaled = X_train_array - mean
+                                # Use NIPALS means
+                                means = pca_results['means']
+                                X_train_scaled = X_train_array - means
                             else:
                                 X_train_scaled = X_train_array
 
@@ -1731,7 +1893,9 @@ def show():
                                 's': pca_results['scores'].values[:, :n_components_use]
                             }
 
-                            scores_train_calc = pca_results['model'].transform(X_train_scaled)[:, :n_components_use]
+                            # Project training data using manual calculation: T = X @ P
+                            loadings_train = pca_results['loadings'].values[:, :n_components_use]
+                            scores_train_calc = X_train_scaled @ loadings_train
 
                             q_contrib_train, t2_contrib_train = calculate_all_contributions(
                                 X_train_scaled,
