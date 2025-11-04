@@ -10,7 +10,7 @@ streamlit-plotly-events>=0.0.6 # Interactive Plotly charts
 # ===== DATA MANIPULATION & ANALYSIS =====
 pandas>=1.5.0                  # Data structures and manipulation
 numpy>=1.23.0                  # Numerical computing
-scipy>=1.13.0                  # Scientific computing (FIXED: use pre-compiled wheels)
+scipy==1.11.4                  # Scientific computing (PINNED - compatible with GPy on Streamlit Cloud)
 
 # ===== VISUALIZATION =====
 plotly>=5.0.0                  # Interactive plots (main visualization library)
@@ -24,16 +24,15 @@ statsmodels>=0.13.0            # Advanced statistical models
 
 # ===== DESIGN OF EXPERIMENTS & OPTIMIZATION =====
 pyDOE>=0.3.8                   # Design of Experiments (Plackett-Burman, Factorial, etc.)
-GPy>=1.10.6                    # Gaussian Process Regression (Bayesian Optimization)
-gpyopt>=1.2.5                  # Bayesian Optimization
+GPy==1.13.2                    # Gaussian Process Regression (PINNED - must use scipy<1.12)
+gpyopt==1.2.6                  # Bayesian Optimization
 
 # ===== FILE HANDLING =====
 openpyxl>=3.0.9                # Excel file writing (.xlsx)
 xlrd>=2.0.1                    # Excel file reading (.xls, .xlsx legacy)
 
 # ===== MODEL PERSISTENCE (Optional but recommended) =====
-# Uncomment if you need to save/load models:
-# joblib>=1.1.0                # Model serialization and parallel computing
+joblib>=1.2.0                  # Model serialization and parallel computing
 # pickle (built-in)            # Python object serialization
 
 # ===== DEVELOPMENT & DEBUGGING (Optional) =====
@@ -43,11 +42,12 @@ xlrd>=2.0.1                    # Excel file reading (.xls, .xlsx legacy)
 # flake8>=4.0.0                # Linting
 
 # ===== NOTES =====
-# - All versions are tested and compatible with Streamlit Cloud
+# - scipy==1.11.4: PINNED VERSION for Streamlit Cloud compatibility with GPy
+# - GPy==1.13.2 and gpyopt==1.2.6: PINNED for stability and scipy<1.12 requirement
+# - All other versions tested and compatible with Streamlit Cloud
 # - Minimum Python version: 3.8
-# - scipy>=1.13.0: Uses pre-compiled wheels on Streamlit Cloud (avoids gfortran compilation)
-# - For local development, consider creating a virtual environment:
+# - For local development:
 #   python -m venv venv
 #   source venv/bin/activate (or venv\Scripts\activate on Windows)
 #   pip install -r requirements.txt
-# - To update: pip install --upgrade -r requirements.txt
+# - To update packages: pip install --upgrade -r requirements.txt
