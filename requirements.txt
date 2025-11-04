@@ -10,7 +10,7 @@ streamlit-plotly-events>=0.0.6 # Interactive Plotly charts
 # ===== DATA MANIPULATION & ANALYSIS =====
 pandas>=1.5.0                  # Data structures and manipulation
 numpy>=1.23.0                  # Numerical computing
-scipy>=1.10.0                  # Scientific computing (stats, optimization)
+scipy>=1.13.0                  # Scientific computing (FIXED: use pre-compiled wheels)
 
 # ===== VISUALIZATION =====
 plotly>=5.0.0                  # Interactive plots (main visualization library)
@@ -45,6 +45,7 @@ xlrd>=2.0.1                    # Excel file reading (.xls, .xlsx legacy)
 # ===== NOTES =====
 # - All versions are tested and compatible with Streamlit Cloud
 # - Minimum Python version: 3.8
+# - scipy>=1.13.0: Uses pre-compiled wheels on Streamlit Cloud (avoids gfortran compilation)
 # - For local development, consider creating a virtual environment:
 #   python -m venv venv
 #   source venv/bin/activate (or venv\Scripts\activate on Windows)
