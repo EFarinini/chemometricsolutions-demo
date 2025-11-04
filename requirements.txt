@@ -1,46 +1,52 @@
+# ChemometricSolutions - Comprehensive Requirements
+# Complete interactive demos for chemometric analysis
+# Deployment on Streamlit Cloud
 
-# ChemometricSolutions Interactive Demos
-# Requirements file for Streamlit deployment
+# ===== CORE FRAMEWORK =====
+streamlit>=1.28.0              # Web app framework
+streamlit-aggrid>=0.3.0        # Advanced tables for data display
+streamlit-plotly-events>=0.0.6 # Interactive Plotly charts
 
-# Core framework
-streamlit>=1.28.0
+# ===== DATA MANIPULATION & ANALYSIS =====
+pandas>=1.5.0                  # Data structures and manipulation
+numpy>=1.23.0                  # Numerical computing
+scipy>=1.10.0                  # Scientific computing (stats, optimization)
 
-# Data manipulation and analysis
-pandas>=1.5.0
-numpy>=1.21.0
+# ===== VISUALIZATION =====
+plotly>=5.0.0                  # Interactive plots (main visualization library)
+plotly-express>=0.4.1          # High-level Plotly interface (usually with plotly)
+matplotlib>=3.5.0              # Static plotting (fallback/compatibility)
+seaborn>=0.11.0                # Statistical visualization
 
-# Plotting and visualization
-plotly>=5.0.0
-matplotlib>=3.5.0
-seaborn>=0.11.0
+# ===== MACHINE LEARNING & STATISTICS =====
+scikit-learn>=1.0.0            # ML algorithms (classification, preprocessing)
+statsmodels>=0.13.0            # Advanced statistical models
 
-# Machine learning and statistics
-scikit-learn>=1.0.0
-scipy>=1.7.0
+# ===== DESIGN OF EXPERIMENTS & OPTIMIZATION =====
+pyDOE>=0.3.8                   # Design of Experiments (Plackett-Burman, Factorial, etc.)
+GPy>=1.10.6                    # Gaussian Process Regression (Bayesian Optimization)
+gpyopt>=1.2.5                  # Bayesian Optimization
 
-# File handling
-openpyxl>=3.0.9          # Excel files
-xlrd>=2.0.1              # Excel files (legacy)
+# ===== FILE HANDLING =====
+openpyxl>=3.0.9                # Excel file writing (.xlsx)
+xlrd>=2.0.1                    # Excel file reading (.xls, .xlsx legacy)
 
-# Optional but recommended for advanced features
-# Uncomment if you use these in your apps:
-statsmodels>=0.13.0    # Advanced statistics
-plotly-express>=0.4.1  # Plotly Express (usually included with plotly)
+# ===== MODEL PERSISTENCE (Optional but recommended) =====
+# Uncomment if you need to save/load models:
+# joblib>=1.1.0                # Model serialization and parallel computing
+# pickle (built-in)            # Python object serialization
 
-# For potential future features
-pathlib2>=2.3.6         # Path handling (Python < 3.4 compatibility)
+# ===== DEVELOPMENT & DEBUGGING (Optional) =====
+# Uncomment for development:
+# pytest>=7.0.0                # Testing framework
+# black>=22.0.0                # Code formatting
+# flake8>=4.0.0                # Linting
 
-# Development and debugging (optional)
-streamlit-aggrid>=0.3.0  # Advanced tables
-streamlit-plotly-events>=0.0.6  # Interactive plotly events
-
-# Existing dependencies...
-streamlit>=1.28.0
-pandas>=1.5.0
-numpy>=1.21.0
-
-# Bayesian Optimization dependencies
-gpyopt>=1.2.5
-GPy>=1.10.6
-pyDOE>=0.3.8
-scipy>=1.10.0
+# ===== NOTES =====
+# - All versions are tested and compatible with Streamlit Cloud
+# - Minimum Python version: 3.8
+# - For local development, consider creating a virtual environment:
+#   python -m venv venv
+#   source venv/bin/activate (or venv\Scripts\activate on Windows)
+#   pip install -r requirements.txt
+# - To update: pip install --upgrade -r requirements.txt
