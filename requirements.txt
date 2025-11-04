@@ -1,6 +1,6 @@
 # ChemometricSolutions - Comprehensive Requirements
 # Complete interactive demos for chemometric analysis
-# Deployment on Streamlit Cloud
+# Deployment on Streamlit Cloud (Python 3.13)
 
 # ===== CORE FRAMEWORK =====
 streamlit>=1.28.0              # Web app framework
@@ -10,7 +10,7 @@ streamlit-plotly-events>=0.0.6 # Interactive Plotly charts
 # ===== DATA MANIPULATION & ANALYSIS =====
 pandas>=1.5.0                  # Data structures and manipulation
 numpy>=1.23.0                  # Numerical computing
-scipy==1.10.1                  # Scientific computing (PINNED - has pre-compiled wheels, compatible with GPy)
+scipy>=1.13.0                  # Scientific computing (latest for Python 3.13)
 
 # ===== VISUALIZATION =====
 plotly>=5.0.0                  # Interactive plots (main visualization library)
@@ -20,12 +20,10 @@ seaborn>=0.11.0                # Statistical visualization
 
 # ===== MACHINE LEARNING & STATISTICS =====
 scikit-learn>=1.0.0            # ML algorithms (classification, preprocessing)
-statsmodels==0.14.0            # Advanced statistical models (PINNED - avoid Cython compilation)
+statsmodels>=0.13.0            # Advanced statistical models
 
 # ===== DESIGN OF EXPERIMENTS & OPTIMIZATION =====
 pyDOE>=0.3.8                   # Design of Experiments (Plackett-Burman, Factorial, etc.)
-GPy==1.13.2                    # Gaussian Process Regression (PINNED - requires scipy<1.12)
-gpyopt==1.2.6                  # Bayesian Optimization (PINNED for stability)
 
 # ===== FILE HANDLING =====
 openpyxl>=3.0.9                # Excel file writing (.xlsx)
@@ -40,15 +38,11 @@ joblib>=1.2.0                  # Model serialization and parallel computing
 # black>=22.0.0                # Code formatting
 # flake8>=4.0.0                # Linting
 
-# ===== CRITICAL FIXES FOR STREAMLIT CLOUD =====
-# Line 13: scipy==1.10.1 - PINNED to version with pre-compiled wheels
-#          - scipy 1.11.4 and 1.12.0 fail to compile (no gfortran)
-#          - scipy 1.10.1 has pre-built wheels for all platforms
-#          - Still compatible with GPy 1.13.2 (requires scipy<1.12)
+# ===== NOTES FOR STREAMLIT CLOUD =====
+# Python 3.13.9: scipy 1.10.x NOT compatible (requires Python <3.12)
+# Solution: Use scipy>=1.13.0 (latest compatible with Python 3.13)
 # 
-# Line 23: statsmodels==0.14.0 - PINNED to avoid Cython compilation
-#          Version 0.14.2+ fails to compile from source on cloud
-#
-# Line 26-28: GPy and gpyopt PINNED for compatibility
-#
-# All versions tested and compatible with Streamlit Cloud (Python 3.13)
+# GPy/gpyopt REMOVED: Not compatible with scipy 1.13.0+
+# These packages are outdated and have dependency conflicts with modern scipy
+# 
+# All other versions tested and compatible with Streamlit Cloud (Python 3.13)
