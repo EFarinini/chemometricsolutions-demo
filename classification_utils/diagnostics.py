@@ -14,7 +14,7 @@ import pandas as pd
 from typing import Dict, Optional, Tuple, List, Callable
 from sklearn.metrics import confusion_matrix, accuracy_score, precision_recall_fscore_support
 from .config import DEFAULT_CV_FOLDS
-from .preprocessing import create_cv_folds
+from .preprocessing import create_cv_folds, create_stratified_cv_folds
 from . import calculations
 
 
@@ -43,12 +43,14 @@ def calculate_confusion_matrix(
     if classes is None:
         classes = np.unique(np.concatenate([y_true, y_pred]))
 
-    cm = confusion_matrix(y_true, y_pred, labels=classes)
+    # Filter classes to only those actually present in y_true
+    classes_in_test = np.intersect1d(classes, y_true)
+    cm = confusion_matrix(y_true, y_pred, labels=classes_in_test)
 
     return pd.DataFrame(
         cm,
-        index=[f"True_{cls}" for cls in classes],
-        columns=[f"Pred_{cls}" for cls in classes]
+        index=[f"True_{cls}" for cls in classes_in_test],
+        columns=[f"Pred_{cls}" for cls in classes_in_test]
     )
 
 
@@ -74,26 +76,60 @@ def calculate_classification_metrics(
     dict
         Dictionary of metrics including accuracy, precision, recall, F1-score
     """
+    # Validate inputs
+    if y_true is None or len(y_true) == 0:
+        raise ValueError("y_true is empty or None. Cannot calculate metrics.")
+
+    if y_pred is None or len(y_pred) == 0:
+        raise ValueError("y_pred is empty or None. Cannot calculate metrics.")
+
+    # Convert to numpy arrays for consistent type handling
+    y_true_arr = np.asarray(y_true)
+    y_pred_arr = np.asarray(y_pred)
+
     if classes is None:
-        classes = np.unique(np.concatenate([y_true, y_pred]))
+        classes = np.unique(np.concatenate([y_true_arr, y_pred_arr]))
+    else:
+        classes = np.asarray(classes)
+
+    if len(classes) == 0:
+        raise ValueError("classes is empty. Cannot calculate metrics.")
 
     # Overall accuracy
-    accuracy = accuracy_score(y_true, y_pred)
+    accuracy = accuracy_score(y_true_arr, y_pred_arr)
+
+    # Filter classes to only those actually present in y_true
+    classes_in_test = np.intersect1d(classes, y_true_arr)
+
+    # Validate that we have common classes
+    if len(classes_in_test) == 0:
+        import streamlit as st
+        st.error(f"❌ DEBUG: classes_in_test is EMPTY!")
+        st.write(f"  - classes parameter: {classes}")
+        st.write(f"  - unique values in y_true: {np.unique(y_true_arr)}")
+        st.write(f"  - unique values in y_pred: {np.unique(y_pred_arr)}")
+        st.write(f"  - y_true dtype: {y_true_arr.dtype}")
+        st.write(f"  - classes dtype: {classes.dtype}")
+        raise ValueError(
+            f"No common classes found between y_true and classes parameter. "
+            f"y_true contains: {np.unique(y_true_arr).tolist()}, "
+            f"classes parameter contains: {classes.tolist()}"
+        )
 
     # Per-class metrics
     precision, recall, f1, support = precision_recall_fscore_support(
-        y_true, y_pred, labels=classes, zero_division=0
+        y_true_arr, y_pred_arr, labels=classes_in_test, zero_division=0
     )
 
     # Confusion matrix
-    cm = confusion_matrix(y_true, y_pred, labels=classes)
+    cm = confusion_matrix(y_true_arr, y_pred_arr, labels=classes_in_test)
 
     # Calculate sensitivity (recall) and specificity per class
-    n_classes = len(classes)
+    n_classes = len(classes_in_test)
     sensitivity = np.zeros(n_classes)
     specificity = np.zeros(n_classes)
 
-    for i, cls in enumerate(classes):
+    for i, cls in enumerate(classes_in_test):
         # True positives
         tp = cm[i, i]
 
@@ -117,7 +153,7 @@ def calculate_classification_metrics(
 
     # Per-class results
     class_metrics = {}
-    for i, cls in enumerate(classes):
+    for i, cls in enumerate(classes_in_test):
         class_metrics[cls] = {
             'sensitivity': sensitivity[i] * 100,
             'specificity': specificity[i] * 100,
@@ -135,7 +171,7 @@ def calculate_classification_metrics(
         'avg_efficiency': np.mean(efficiency),
         'class_metrics': class_metrics,
         'confusion_matrix': cm,
-        'classes': classes
+        'classes': classes_in_test
     }
 
 
@@ -700,17 +736,43 @@ def compute_classification_metrics(
     >>> print(f"Accuracy: {metrics['accuracy']:.2f}%")
     Accuracy: 66.67%
     """
+    # Validate inputs
+    if y_true is None or len(y_true) == 0:
+        raise ValueError("y_true is empty or None. Cannot calculate metrics.")
+
+    if y_pred is None or len(y_pred) == 0:
+        raise ValueError("y_pred is empty or None. Cannot calculate metrics.")
+
+    # Convert to numpy arrays for consistent type handling
+    y_true_arr = np.asarray(y_true)
+    y_pred_arr = np.asarray(y_pred)
+
     # Determine class labels
     if class_names is None:
-        class_names = np.unique(np.concatenate([y_true, y_pred]))
+        class_names = np.unique(np.concatenate([y_true_arr, y_pred_arr]))
     else:
-        class_names = np.array(class_names)
+        class_names = np.asarray(class_names)
+        # Filter classes to only those actually present in y_true
+        class_names = np.intersect1d(class_names, y_true_arr)
+
+    if len(class_names) == 0:
+        import streamlit as st
+        st.error(f"❌ DEBUG: class_names is EMPTY in compute_classification_metrics!")
+        st.write(f"  - class_names parameter: {class_names if class_names is not None else 'None'}")
+        st.write(f"  - unique values in y_true: {np.unique(y_true_arr)}")
+        st.write(f"  - unique values in y_pred: {np.unique(y_pred_arr)}")
+        st.write(f"  - y_true dtype: {y_true_arr.dtype}")
+        raise ValueError(
+            f"No classes found. "
+            f"y_true contains: {np.unique(y_true_arr).tolist()}, "
+            f"y_pred contains: {np.unique(y_pred_arr).tolist()}"
+        )
 
     n_classes = len(class_names)
-    n_samples = len(y_true)
+    n_samples = len(y_true_arr)
 
     # Create confusion matrix: [i,j] = count(true=i, pred=j)
-    conf_matrix = confusion_matrix(y_true, y_pred, labels=class_names)
+    conf_matrix = confusion_matrix(y_true_arr, y_pred_arr, labels=class_names)
 
     # Overall accuracy: trace(conf_matrix) / total
     accuracy = np.trace(conf_matrix) / n_samples * 100.0
@@ -809,7 +871,8 @@ def compute_classification_metrics(
         'f1_per_class': f1_per_class,
         'class_counts': class_counts,
         'misclassified_samples': misclassified_samples,
-        'n_misclassified': n_misclassified
+        'n_misclassified': n_misclassified,
+        'classes': class_names
     }
 
 
@@ -914,8 +977,8 @@ def cross_validate_classifier(
     classes = np.unique(y)
     n_classes = len(classes)
 
-    # Create stratified fold assignments
-    fold_assignments = create_cv_folds(n_samples, n_folds, random_state)
+    # Create stratified fold assignments (maintains class proportions)
+    fold_assignments = create_stratified_cv_folds(y, n_folds, random_state)
 
     # Initialize storage for out-of-fold predictions
     cv_predictions = np.zeros_like(y)
@@ -991,9 +1054,10 @@ def cross_validate_classifier(
 
         # Accumulate per-class metrics
         for cls in classes:
-            fold_sensitivity[cls].append(fold_metrics['sensitivity_per_class'][cls])
-            fold_specificity[cls].append(fold_metrics['specificity_per_class'][cls])
-            fold_f1[cls].append(fold_metrics['f1_per_class'][cls])
+            # Use .get() with default 0.0 for classes not in this fold's test set
+            fold_sensitivity[cls].append(fold_metrics['sensitivity_per_class'].get(cls, 0.0))
+            fold_specificity[cls].append(fold_metrics['specificity_per_class'].get(cls, 0.0))
+            fold_f1[cls].append(fold_metrics['f1_per_class'].get(cls, 0.0))
 
         # Accumulate confusion matrix
         cv_confusion_matrix += fold_metrics['confusion_matrix']

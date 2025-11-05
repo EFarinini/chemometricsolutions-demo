@@ -57,6 +57,7 @@ from .preprocessing import (
     scale_data,
     split_by_class,
     create_cv_folds,
+    create_stratified_cv_folds,
     prepare_training_test,
     balance_classes
 )
@@ -141,6 +142,7 @@ __all__ = [
     'scale_data',
     'split_by_class',
     'create_cv_folds',
+    'create_stratified_cv_folds',
     'prepare_training_test',
     'balance_classes',
 

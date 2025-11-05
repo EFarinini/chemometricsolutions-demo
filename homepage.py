@@ -61,6 +61,12 @@ try:
 except ImportError:
     CLASSIFICATION_AVAILABLE = False
 
+try:
+    import calibration_page
+    CALIBRATION_AVAILABLE = True
+except ImportError:
+    CALIBRATION_AVAILABLE = False
+
 def show_home():
     """Show the main homepage"""
     
@@ -129,7 +135,7 @@ def show_home():
     
     with col2:
         st.markdown("""
-        ### 🎯 PCA Analysis
+        ### 🎯 PCA
         *Principal Component Analysis suite*
         
         **Features:**
@@ -142,7 +148,7 @@ def show_home():
         
         if PCA_AVAILABLE:
             if st.button("🚀 Launch PCA Demo", key="launch_pca_demo"):
-                st.session_state.current_page = "PCA Analysis"
+                st.session_state.current_page = "PCA"
                 st.rerun()
         else:
             st.warning("PCA demo not available")
@@ -209,7 +215,7 @@ def show_home():
 
     # Additional row for Transformations and Classification
     st.markdown("---")
-    col_trans1, col_trans2, col_trans3, col_trans4 = st.columns(4)
+    col_trans1, col_trans2, col_trans3, col_trans4, col_trans5 = st.columns(5)
 
     with col_trans1:
         st.markdown("""
@@ -250,7 +256,28 @@ def show_home():
                 st.rerun()
         else:
             st.info("🚧 Classification coming soon")
-    
+
+    with col_trans5:
+        st.markdown("""
+        ### ⚗️ PLS Calibration
+        *Partial Least Squares for Multivariate Calibration*
+
+        **Features:**
+        - Repeated K-fold cross-validation
+        - Intelligent component selection
+        - RMSECV analysis
+        - Predictions vs observed
+        - Test set validation
+        - Model export & comparison
+        """)
+
+        if CALIBRATION_AVAILABLE:
+            if st.button("🚀 Launch PLS Calibration", key="launch_calibration"):
+                st.session_state.current_page = "PLS Calibration"
+                st.rerun()
+        else:
+            st.info("🚧 PLS Calibration coming soon")
+
     st.markdown("---")
     
  
@@ -314,7 +341,7 @@ def show_home():
     <div style='text-align: center; padding: 2rem 0; background: linear-gradient(90deg, rgba(30,144,255,0.1) 0%, rgba(30,144,255,0.05) 100%); border-radius: 10px; margin: 2rem 0;'>
         <h3 style='color: #1E90FF; margin-bottom: 1rem;'>Ready to Explore?</h3>
         <p style='font-size: 1.1rem; margin-bottom: 1.5rem;'>
-            Start with Data Handling to load your datasets, then explore PCA Analysis or MLR/DOE for multivariate methods.
+            Start with Data Handling to load your datasets, then explore PCA or MLR/DOE for multivariate methods.
         </p>
         <p style='font-size: 0.9rem; color: #666;'>
             These demos represent a subset of our full chemometric capabilities. 
@@ -385,11 +412,11 @@ def main():
         st.sidebar.caption("Module not found")
     
     if PCA_AVAILABLE:
-        if st.sidebar.button("🎯 PCA Analysis", use_container_width=True, key="nav_pca"):
-            st.session_state.current_page = "PCA Analysis"
+        if st.sidebar.button("🎯 PCA", use_container_width=True, key="nav_pca"):
+            st.session_state.current_page = "PCA"
             st.rerun()
     else:
-        st.sidebar.button("🎯 PCA Analysis", disabled=True, use_container_width=True, key="nav_pca_disabled")
+        st.sidebar.button("🎯 PCA", disabled=True, use_container_width=True, key="nav_pca_disabled")
         st.sidebar.caption("Module not found")
 
     if PCA_MONITORING_AVAILABLE:
@@ -430,6 +457,14 @@ def main():
             st.rerun()
     else:
         st.sidebar.button("🎲 Classification", disabled=True, use_container_width=True, key="nav_classification_disabled")
+        st.sidebar.caption("Module not found")
+
+    if CALIBRATION_AVAILABLE:
+        if st.sidebar.button("⚗️ PLS Calibration", use_container_width=True, key="nav_calibration"):
+            st.session_state.current_page = "PLS Calibration"
+            st.rerun()
+    else:
+        st.sidebar.button("⚗️ PLS Calibration", disabled=True, use_container_width=True, key="nav_calibration_disabled")
         st.sidebar.caption("Module not found")
 
     st.sidebar.markdown("---")
@@ -509,7 +544,7 @@ def main():
         show_home()
     elif st.session_state.current_page == "Data Handling" and DATA_HANDLING_AVAILABLE:
         data_handling.show()
-    elif st.session_state.current_page == "PCA Analysis" and PCA_AVAILABLE:
+    elif st.session_state.current_page == "PCA" and PCA_AVAILABLE:
         pca.show()
     elif st.session_state.current_page == "Quality Control" and PCA_MONITORING_AVAILABLE:
         pca_monitoring_page.show()
@@ -521,6 +556,8 @@ def main():
         bayesian_optimization_page.show_bayesian_optimization_page()
     elif st.session_state.current_page == "Classification" and CLASSIFICATION_AVAILABLE:
         classification_page.show()
+    elif st.session_state.current_page == "PLS Calibration" and CALIBRATION_AVAILABLE:
+        calibration_page.show()
     else:
         st.error(f"Page '{st.session_state.current_page}' not found or module not available")
         st.session_state.current_page = "Home"

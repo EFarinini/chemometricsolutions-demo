@@ -139,8 +139,9 @@ def plot_ci_surface_3d(x_grid, y_grid, ci_grid, var1_name, var2_name, y_var,
                 eye=dict(x=1.5, y=1.5, z=1.3)
             )
         ),
-        height=600,
-        width=800
+        height=500,
+        width=450,
+        margin=dict(l=50, r=50, t=60, b=60),
     )
     
     return fig
@@ -191,8 +192,9 @@ def plot_ci_contour(x_grid, y_grid, ci_grid, var1_name, var2_name, y_var,
         title=title_text,
         xaxis_title=var1_name,
         yaxis_title=var2_name,
-        height=600,
-        width=800,
+        height=500,
+        width=450,
+        margin=dict(l=50, r=50, t=60, b=60),
         yaxis=dict(scaleanchor="x", scaleratio=1)
     )
     
@@ -319,16 +321,22 @@ def show_confidence_intervals_ui(model_results, x_vars, y_var):
                 st.metric("Average CI Semiampl.", f"{ci_grid.mean():.4f}")
             with col_stat3:
                 st.metric("Max CI Semiampl.", f"{ci_grid.max():.4f}")
-            
-            # 3D Surface
-            st.markdown("### 3D CI Semiamplitude Surface")
-            fig_3d = plot_ci_surface_3d(x_grid, y_grid, ci_grid, var1, var2, y_var, fixed_values)
-            st.plotly_chart(fig_3d, use_container_width=True)
-            
-            # 2D Contour
-            st.markdown("### 2D CI Semiamplitude Contour")
-            fig_contour = plot_ci_contour(x_grid, y_grid, ci_grid, var1, var2, y_var, fixed_values)
-            st.plotly_chart(fig_contour, use_container_width=True)
+
+            # Vertical spacing
+            st.markdown("")
+
+            # 3D & 2D side-by-side
+            col_plot1, col_plot2 = st.columns(2)
+
+            with col_plot1:
+                st.markdown("### 3D CI Semiamplitude Surface")
+                fig_3d = plot_ci_surface_3d(x_grid, y_grid, ci_grid, var1, var2, y_var, fixed_values)
+                st.plotly_chart(fig_3d, use_container_width=True)
+
+            with col_plot2:
+                st.markdown("### 2D CI Semiamplitude Contour")
+                fig_contour = plot_ci_contour(x_grid, y_grid, ci_grid, var1, var2, y_var, fixed_values)
+                st.plotly_chart(fig_contour, use_container_width=True)
             
             # Interpretation
             st.markdown("### Interpretation")

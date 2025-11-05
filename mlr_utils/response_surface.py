@@ -164,8 +164,9 @@ def plot_response_surface_3d(x_grid, y_grid, z_grid, var1_name, var2_name, y_var
                 eye=dict(x=1.5, y=1.5, z=1.3)
             )
         ),
-        height=600,
-        width=800
+        height=500,
+        width=450,
+        margin=dict(l=50, r=50, t=60, b=60),
     )
     
     return fig
@@ -217,8 +218,10 @@ def plot_response_contour(x_grid, y_grid, z_grid, var1_name, var2_name, y_var,
         title=title_text,
         xaxis_title=var1_name,
         yaxis_title=var2_name,
-        height=600,
-        width=800,
+        height=500,
+        width=450,
+        margin=dict(l=50, r=50, t=60, b=60),
+        font=dict(size=11),
         yaxis=dict(scaleanchor="x", scaleratio=1)
     )
     
@@ -286,16 +289,63 @@ def show_response_surface_ui(model_results, x_vars, y_var):
                     help=f"Fixed value for {var} (typically 0 for coded variables)"
                 )
     
-    # Range settings
-    st.markdown("### Surface Range")
+    # DESIGN SPACE LIMITS (auto-detect from data)
+    var1_data = st.session_state.get('X_data', pd.DataFrame())[var1] if 'X_data' in st.session_state else None
+    var2_data = st.session_state.get('X_data', pd.DataFrame())[var2] if 'X_data' in st.session_state else None
+
+    # Set min/max based on actual data range (with small margin)
+    if var1_data is not None and var2_data is not None:
+        var1_min = var1_data.min()
+        var1_max = var1_data.max()
+        var2_min = var2_data.min()
+        var2_max = var2_data.max()
+
+        # Use data range with 10% margin
+        margin = 0.1
+        design_min = min(var1_min, var2_min) - margin
+        design_max = max(var1_max, var2_max) + margin
+    else:
+        # Fallback to typical coded variable range
+        design_min = -1.0
+        design_max = 1.0
+
+    # Range settings (constrained to design space)
+    st.markdown("### Surface Range (within design space)")
+
     col_range1, col_range2, col_range3 = st.columns(3)
-    
+
     with col_range1:
-        min_range = st.number_input("Minimum value:", value=-1.0, step=0.1, format="%.2f")
+        min_range = st.number_input(
+            "Minimum value:",
+            value=design_min,
+            min_value=design_min - 0.5,  # Allow slight extrapolation
+            max_value=design_max - 0.1,
+            step=0.1,
+            format="%.2f"
+        )
+
     with col_range2:
-        max_range = st.number_input("Maximum value:", value=1.0, step=0.1, format="%.2f")
+        max_range = st.number_input(
+            "Maximum value:",
+            value=design_max,
+            min_value=design_min + 0.1,
+            max_value=design_max + 0.5,  # Allow slight extrapolation
+            step=0.1,
+            format="%.2f"
+        )
+
     with col_range3:
-        n_steps = st.number_input("Grid resolution:", min_value=10, max_value=100, value=30, step=5)
+        n_steps = st.number_input(
+            "Grid resolution:",
+            min_value=10,
+            max_value=100,
+            value=30,
+            step=5
+        )
+
+    # Warn if extrapolating
+    if min_range < design_min or max_range > design_max:
+        st.warning("⚠️ You are extrapolating beyond the design space (narrow colors indicate unreliable predictions)")
     
     # Generate surface button
     if st.button("🚀 Generate Response Surface", type="primary"):
@@ -331,23 +381,26 @@ def show_response_surface_ui(model_results, x_vars, y_var):
             with col_stat3:
                 st.metric("Range", f"{z_range:.4f}")
             
-            # 3D Surface plot
-            st.markdown("### 3D Response Surface")
-            fig_3d = plot_response_surface_3d(
-                x_grid, y_grid, z_grid,
-                var1, var2, y_var,
-                fixed_values=fixed_values
-            )
-            st.plotly_chart(fig_3d, use_container_width=True)
-            
-            # 2D Contour plot
-            st.markdown("### 2D Contour Plot")
-            fig_contour = plot_response_contour(
-                x_grid, y_grid, z_grid,
-                var1, var2, y_var,
-                fixed_values=fixed_values
-            )
-            st.plotly_chart(fig_contour, use_container_width=True)
+            # 3D Surface plot + 2D Contour plot (side-by-side)
+            col_plot1, col_plot2 = st.columns(2)
+
+            with col_plot1:
+                st.markdown("### 3D Response Surface")
+                fig_3d = plot_response_surface_3d(
+                    x_grid, y_grid, z_grid,
+                    var1, var2, y_var,
+                    fixed_values=fixed_values
+                )
+                st.plotly_chart(fig_3d, use_container_width=True)
+
+            with col_plot2:
+                st.markdown("### 2D Contour Plot")
+                fig_contour = plot_response_contour(
+                    x_grid, y_grid, z_grid,
+                    var1, var2, y_var,
+                    fixed_values=fixed_values
+                )
+                st.plotly_chart(fig_contour, use_container_width=True)
             
             # Optimum finding
             st.markdown("### Response Optimization")

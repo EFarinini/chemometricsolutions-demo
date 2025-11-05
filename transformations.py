@@ -13,6 +13,8 @@ from scipy.signal import savgol_filter
 from color_utils import (get_unified_color_schemes, create_categorical_color_map,
                         create_quantitative_color_map, is_quantitative_variable,
                         get_continuous_color_for_value)
+# Import column DoE coding from transforms module
+from transforms.column_transforms import column_doe_coding, detect_column_type
 # Import preprocessing theory module (optional)
 try:
     from preprocessing_theory_module import SimulatedSpectralDataGenerator, PreprocessingEffectsAnalyzer, get_all_simulated_datasets
@@ -507,15 +509,18 @@ def show():
         # Show preview of ORIGINAL data
         original_preview = data.iloc[:, first_col-1:last_col]
 
+        # Create format dict: only format numeric columns
+        format_dict = {col: "{:.3f}" for col in original_preview.select_dtypes(include=[np.number]).columns}
+
         if preview_type_orig == "First 10 rows":
             st.dataframe(
-                original_preview.head(n_preview_orig).style.format("{:.3f}"),
+                original_preview.head(n_preview_orig).style.format(format_dict, na_rep="-"),
                 use_container_width=True,
                 height=300
             )
         elif preview_type_orig == "Random samples":
             st.dataframe(
-                original_preview.sample(n=min(n_preview_orig, len(original_preview)), random_state=42).style.format("{:.3f}"),
+                original_preview.sample(n=min(n_preview_orig, len(original_preview)), random_state=42).style.format(format_dict, na_rep="-"),
                 use_container_width=True,
                 height=300
             )
@@ -666,15 +671,18 @@ def show():
                 n_preview_trans = st.slider("Rows to show:", 5, 20, 10, key="row_preview_rows_after")
 
             # Show preview of TRANSFORMED data
+            # Create format dict: only format numeric columns
+            format_dict_trans = {col: "{:.3f}" for col in result['transformed'].select_dtypes(include=[np.number]).columns}
+
             if preview_type_trans == "First 10 rows":
                 st.dataframe(
-                    result['transformed'].head(n_preview_trans).style.format("{:.3f}"),
+                    result['transformed'].head(n_preview_trans).style.format(format_dict_trans, na_rep="-"),
                     use_container_width=True,
                     height=300
                 )
             elif preview_type_trans == "Random samples":
                 st.dataframe(
-                    result['transformed'].sample(n=min(n_preview_trans, len(result['transformed'])), random_state=42).style.format("{:.3f}"),
+                    result['transformed'].sample(n=min(n_preview_trans, len(result['transformed'])), random_state=42).style.format(format_dict_trans, na_rep="-"),
                     use_container_width=True,
                     height=300
                 )
@@ -887,11 +895,12 @@ def show():
         st.markdown("*Transformations applied within each variable*")
         
         col_transforms = {
+            "🚀 Automatic DoE Coding": "auto_doe",
             "Centering": "centc",
             "Scaling (Unit Variance)": "scalc",
             "Autoscaling": "autosc",
             "Range [0,1]": "01c",
-            "Range [-1,1] (DoE Coding)": "cod",
+            "Range [-1,1]": "cod",
             "Maximum = 100": "max100c",
             "Sum = 100": "sum100c",
             "Length = 1": "l1c",
@@ -984,15 +993,18 @@ def show():
         # Show preview of ORIGINAL data (before transformation)
         original_preview_col = data.iloc[:, col_range_c[0]:col_range_c[1]]
 
+        # Create format dict: only format numeric columns
+        format_dict_col_orig = {col: "{:.3f}" for col in original_preview_col.select_dtypes(include=[np.number]).columns}
+
         if preview_type_col_orig == "First 10 rows":
             st.dataframe(
-                original_preview_col.head(n_preview_col_orig).style.format("{:.3f}"),
+                original_preview_col.head(n_preview_col_orig).style.format(format_dict_col_orig, na_rep="-"),
                 use_container_width=True,
                 height=300
             )
         elif preview_type_col_orig == "Random samples":
             st.dataframe(
-                original_preview_col.sample(n=min(n_preview_col_orig, len(original_preview_col)), random_state=42).style.format("{:.3f}"),
+                original_preview_col.sample(n=min(n_preview_col_orig, len(original_preview_col)), random_state=42).style.format(format_dict_col_orig, na_rep="-"),
                 use_container_width=True,
                 height=300
             )
@@ -1004,10 +1016,118 @@ def show():
 
         st.info(f"📊 Original data: {original_preview_col.shape[0]} samples × {original_preview_col.shape[1]} variables")
 
+        # ========================================================================
+        # AUTOMATIC DoE CODING - REFERENCE LEVEL SELECTOR
+        # ========================================================================
+
+        reference_levels = {}
+
+        if transform_code_col == "auto_doe":
+            st.markdown("---")
+            st.markdown("### 🎯 Automatic DoE Coding Configuration")
+            st.markdown("*Intelligently encodes: 2-level→[-1,+1], numeric→range, categorical→dummy*")
+
+            # Preview what will happen
+            st.info("""
+**How it works:**
+- **2-level (numeric or categorical)** → Maps to [-1, +1]
+- **3+ levels numeric only** → Scales to [-1, ..., +1] range
+- **3+ levels categorical** → Dummy coding (k-1) with reference level
+            """)
+
+            # Check for multiclass categorical in selected range
+            multiclass_cols = {}
+            for col in data.columns[col_range_c[0]:col_range_c[1]]:
+                detection = detect_column_type(data[col])
+                if detection['dtype_detected'] == 'multiclass_cat':
+                    multiclass_cols[col] = detection
+
+            if multiclass_cols:
+                st.markdown("---")
+                st.markdown("#### 📋 Categorical Variables with 3+ Levels")
+                st.markdown("*Select the IMPLICIT (reference) level for each variable*")
+
+                # Initialize session state
+                if 'doe_reference_levels' not in st.session_state:
+                    st.session_state.doe_reference_levels = {}
+
+                for col_name, col_detection in multiclass_cols.items():
+                    st.markdown(f"**Variable: `{col_name}`**")
+
+                    unique_vals = col_detection['unique_values']
+                    value_counts = col_detection['value_counts']
+
+                    # Find auto-suggested reference (highest frequency)
+                    auto_suggested = max(value_counts, key=value_counts.get)
+                    auto_freq = value_counts[auto_suggested]
+
+                    # Create frequency display table
+                    freq_df = pd.DataFrame({
+                        'Level': list(value_counts.keys()),
+                        'Frequency': list(value_counts.values()),
+                        'Percentage': [f"{v/sum(value_counts.values())*100:.1f}%" for v in value_counts.values()]
+                    }).sort_values('Frequency', ascending=False)
+
+                    col_freq, col_select = st.columns([1, 1])
+
+                    with col_freq:
+                        st.dataframe(freq_df, use_container_width=True, hide_index=True, height=150)
+
+                    with col_select:
+                        # Selectbox with auto-suggested as default
+                        default_idx = unique_vals.index(auto_suggested) if auto_suggested in unique_vals else 0
+
+                        selected_ref = st.selectbox(
+                            label="Reference level:",
+                            options=unique_vals,
+                            index=default_idx,
+                            key=f"doe_ref_{col_name}",
+                            help=f"✨ Suggested: '{auto_suggested}' (freq={auto_freq}). This level will be coded as all zeros."
+                        )
+
+                        st.session_state.doe_reference_levels[col_name] = selected_ref
+
+                        st.success(f"✓ Reference: **{selected_ref}** → [0, 0, ...]")
+
+                        # Show dummy columns that will be created
+                        dummy_levels = [v for v in sorted(unique_vals) if v != selected_ref]
+                        st.caption(f"Will create {len(dummy_levels)} dummy columns:")
+                        for level in dummy_levels:
+                            st.caption(f"  • `{col_name}_{level}`")
+
+                    # Show preview
+                    with st.expander(f"📊 Preview encoding for {col_name}", expanded=False):
+                        st.write(f"**Reference (implicit):** `{selected_ref}` → [0, 0, ..., 0]")
+                        dummy_levels = [v for v in sorted(unique_vals) if v != selected_ref]
+                        for i, level in enumerate(dummy_levels):
+                            encoding = [0] * len(dummy_levels)
+                            encoding[i] = 1
+                            st.write(f"**`{level}`** → {encoding}")
+
+                    st.divider()
+
+                # Store reference levels for use in transformation
+                reference_levels = st.session_state.doe_reference_levels
+
+                st.success(f"✅ Configuration complete! {len(multiclass_cols)} categorical variable(s) configured.")
+            else:
+                st.success("✅ No multiclass categorical variables detected. All variables will be automatically encoded!")
+
         if st.button("Apply Transformation", type="primary", key="apply_col_transform"):
             try:
                 with st.spinner(f"Applying {selected_transform_col}..."):
-                    if transform_code_col == "centc":
+                    # Special handling for Automatic DoE Coding
+                    if transform_code_col == "auto_doe":
+                        # Use reference levels from UI (already selected above)
+                        transformed_col, encoding_metadata, multiclass_info = column_doe_coding(
+                            data, col_range_c, reference_levels=reference_levels
+                        )
+
+                        # Store metadata for later use
+                        st.session_state.doe_encoding_metadata = encoding_metadata
+                        st.session_state.doe_multiclass_info = multiclass_info
+
+                    elif transform_code_col == "centc":
                         transformed_col = column_centering(data, col_range_c)
                     elif transform_code_col == "scalc":
                         transformed_col = column_scaling(data, col_range_c)
@@ -1035,11 +1155,14 @@ def show():
                         transformed_col = block_scaling(data, params_col['blocks'])
                     
                     # Store in session state
-                    if transform_code_col != "blsc":
+                    if transform_code_col == "blsc":
+                        original_slice_col = original_data
+                    elif transform_code_col == "auto_doe":
+                        # For DoE coding, original slice is just the selected columns
                         original_slice_col = original_data.iloc[:, col_range_c[0]:col_range_c[1]]
                     else:
-                        original_slice_col = original_data
-                    
+                        original_slice_col = original_data.iloc[:, col_range_c[0]:col_range_c[1]]
+
                     st.session_state.current_col_transform_result = {
                         'transformed_col': transformed_col,
                         'original_slice_col': original_slice_col,
@@ -1060,16 +1183,18 @@ def show():
         # Display column transformation results
         if 'current_col_transform_result' in st.session_state:
             result_col = st.session_state.current_col_transform_result
-            
-            fig_col = plot_comparison(
-                result_col['original_slice_col'],
-                result_col['transformed_col'],
-                f"Original Data ({result_col['original_slice_col'].shape[0]} × {result_col['original_slice_col'].shape[1]})",
-                f"Transformed Data ({result_col['transformed_col'].shape[0]} × {result_col['transformed_col'].shape[1]}) - {result_col['selected_transform_col']}"
-            )
-            
-            st.plotly_chart(fig_col, width='stretch')
-            
+
+            # Skip plots for Automatic DoE Coding (categorical data doesn't need line plots)
+            if result_col['transform_code_col'] != 'auto_doe':
+                fig_col = plot_comparison(
+                    result_col['original_slice_col'],
+                    result_col['transformed_col'],
+                    f"Original Data ({result_col['original_slice_col'].shape[0]} × {result_col['original_slice_col'].shape[1]})",
+                    f"Transformed Data ({result_col['transformed_col'].shape[0]} × {result_col['transformed_col'].shape[1]}) - {result_col['selected_transform_col']}"
+                )
+
+                st.plotly_chart(fig_col, width='stretch')
+
             # Statistics
             st.markdown("### Transformation Statistics")
             
@@ -1083,44 +1208,193 @@ def show():
                 mean_val = result_col['transformed_col'].mean().mean()
                 st.metric("Mean Value", f"{mean_val:.3f}")
 
-            # Data Preview section
-            st.markdown("### 👁️ Data Preview")
+            # Special section for DoE Encoding metadata
+            if result_col.get('transform_code_col') == 'auto_doe' and 'doe_encoding_metadata' in st.session_state:
+                st.markdown("---")
+                st.markdown("### 🔢 DoE Encoding Report")
 
-            col_preview1, col_preview2 = st.columns(2)
+                metadata = st.session_state.doe_encoding_metadata
 
-            with col_preview1:
-                preview_type_col = st.radio(
-                    "Preview type:",
-                    ["First 10 rows", "Random samples", "Statistics"],
-                    horizontal=True,
-                    key="col_preview_type"
-                )
+                # Create summary table
+                summary_data = []
+                for col_name, meta in metadata.items():
+                    row = {
+                        'Column': col_name,
+                        'Type': meta['type'],
+                        'N Levels': meta['n_levels'],
+                        'Encoding': meta['encoding_rule']
+                    }
 
-            with col_preview2:
-                n_preview_col = st.slider("Rows to show:", 5, 20, 10, key="col_preview_rows")
+                    # Add dummy columns info if multiclass
+                    if meta['type'] == 'categorical_multiclass':
+                        row['Dummy Columns'] = ', '.join(meta['dummy_columns'])
+                        row['Reference'] = meta['reference_level']
+                    else:
+                        row['Dummy Columns'] = '-'
+                        row['Reference'] = '-'
 
-            # Show preview of transformed data
-            transformed_data_col = result_col['transformed_col']
+                    summary_data.append(row)
 
-            if preview_type_col == "First 10 rows":
-                st.dataframe(
-                    transformed_data_col.head(n_preview_col).style.format("{:.3f}"),
-                    use_container_width=True,
-                    height=300
-                )
-            elif preview_type_col == "Random samples":
-                st.dataframe(
-                    transformed_data_col.sample(n=min(n_preview_col, len(transformed_data_col)), random_state=42).style.format("{:.3f}"),
-                    use_container_width=True,
-                    height=300
-                )
-            else:  # Statistics
-                st.dataframe(
-                    transformed_data_col.describe().style.format("{:.3f}"),
-                    use_container_width=True
-                )
+                summary_df = pd.DataFrame(summary_data)
+                st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
-            st.info(f"📊 Showing transformed data: {transformed_data_col.shape[0]} samples × {transformed_data_col.shape[1]} variables")
+                # Expandable detailed encoding maps
+                with st.expander("📋 Detailed Encoding Maps"):
+                    for col_name, meta in metadata.items():
+                        st.markdown(f"**{col_name}** ({meta['type']})")
+
+                        if meta['type'] in ['numeric_2level', 'categorical_2level']:
+                            # Show simple encoding map
+                            encoding_df = pd.DataFrame({
+                                'Original Value': list(meta['encoding_map'].keys()),
+                                'Encoded Value': list(meta['encoding_map'].values())
+                            })
+                            st.dataframe(encoding_df, use_container_width=True, hide_index=True)
+
+                        elif meta['type'] == 'numeric_multiclass':
+                            # Show formula
+                            st.code(meta['formula'])
+                            st.caption(f"Maps: [{meta['min']:.2f}, {meta['max']:.2f}] → [-1, +1]")
+
+                        elif meta['type'] == 'categorical_multiclass':
+                            # Show dummy encoding pattern
+                            st.caption(f"**Reference level:** {meta['reference_level']} (implicit, all zeros)")
+                            st.caption(f"**Dummy columns:** {', '.join(meta['dummy_columns'])}")
+
+                            # Show encoding pattern table
+                            encoding_rows = []
+                            for orig_val, pattern in meta['encoding_map'].items():
+                                encoding_rows.append({
+                                    'Original Value': orig_val,
+                                    'Encoding Pattern': str(pattern),
+                                    'Is Reference': '✓' if orig_val == meta['reference_level'] else ''
+                                })
+
+                            encoding_pattern_df = pd.DataFrame(encoding_rows)
+                            st.dataframe(encoding_pattern_df, use_container_width=True, hide_index=True)
+
+                        st.markdown("---")
+
+                # ════════════════════════════════════════════════════════════════════════════
+                # SPECIAL SECTION FOR DoE CODING: DATA COMPARISON (Original ↔ Transformed)
+                # ════════════════════════════════════════════════════════════════════════════
+                st.markdown("---")
+                st.markdown("### 📊 Data Comparison: Original ↔ Transformed")
+
+                col_toggle_orig, col_toggle_trans = st.columns(2)
+
+                with col_toggle_orig:
+                    show_original_doe = st.checkbox("📥 Show Original Data", value=True, key="doe_show_original")
+
+                with col_toggle_trans:
+                    show_transformed_doe = st.checkbox("📤 Show Transformed Data", value=True, key="doe_show_transformed")
+
+                if show_original_doe and show_transformed_doe:
+                    # Show side by side
+                    col_data_orig, col_data_trans = st.columns(2)
+
+                    with col_data_orig:
+                        st.markdown("**🔵 Original Data**")
+                        st.dataframe(
+                            result_col['original_slice_col'].head(20),
+                            use_container_width=True,
+                            height=400
+                        )
+
+                    with col_data_trans:
+                        st.markdown("**🟢 Transformed Data (Coded)**")
+                        format_dict_doe = {col: "{:.3f}" for col in result_col['transformed_col'].select_dtypes(include=[np.number]).columns}
+                        st.dataframe(
+                            result_col['transformed_col'].head(20).style.format(format_dict_doe, na_rep="-"),
+                            use_container_width=True,
+                            height=400
+                        )
+
+                elif show_original_doe:
+                    st.markdown("**🔵 Original Data**")
+                    st.dataframe(result_col['original_slice_col'], use_container_width=True)
+
+                elif show_transformed_doe:
+                    st.markdown("**🟢 Transformed Data (Coded)**")
+                    format_dict_doe = {col: "{:.3f}" for col in result_col['transformed_col'].select_dtypes(include=[np.number]).columns}
+                    st.dataframe(
+                        result_col['transformed_col'].style.format(format_dict_doe, na_rep="-"),
+                        use_container_width=True
+                    )
+
+                # Export options for DoE Coding
+                st.markdown("---")
+                st.markdown("### 💾 Export Options")
+
+                col_export_a, col_export_b = st.columns(2)
+
+                with col_export_a:
+                    # Download transformed data as CSV
+                    csv_data = result_col['transformed_col'].to_csv(index=False)
+                    st.download_button(
+                        label="📥 Download Transformed Data (CSV)",
+                        data=csv_data,
+                        file_name="doe_coded_data.csv",
+                        mime="text/csv",
+                        use_container_width=True,
+                        key="doe_download_csv"
+                    )
+
+                with col_export_b:
+                    # Download encoding metadata as JSON
+                    import json
+                    encoding_json = json.dumps(metadata, indent=2, default=str)
+                    st.download_button(
+                        label="📥 Download Encoding Metadata (JSON)",
+                        data=encoding_json,
+                        file_name="doe_encoding_metadata.json",
+                        mime="application/json",
+                        use_container_width=True,
+                        key="doe_download_json"
+                    )
+
+            # Data Preview section (ONLY for NON-DoE transformations)
+            else:
+                st.markdown("### 👁️ Data Preview")
+
+                col_preview1, col_preview2 = st.columns(2)
+
+                with col_preview1:
+                    preview_type_col = st.radio(
+                        "Preview type:",
+                        ["First 10 rows", "Random samples", "Statistics"],
+                        horizontal=True,
+                        key="col_preview_type"
+                    )
+
+                with col_preview2:
+                    n_preview_col = st.slider("Rows to show:", 5, 20, 10, key="col_preview_rows")
+
+                # Show preview of transformed data
+                transformed_data_col = result_col['transformed_col']
+
+                # Create format dict: only format numeric columns
+                format_dict_col_trans = {col: "{:.3f}" for col in transformed_data_col.select_dtypes(include=[np.number]).columns}
+
+                if preview_type_col == "First 10 rows":
+                    st.dataframe(
+                        transformed_data_col.head(n_preview_col).style.format(format_dict_col_trans, na_rep="-"),
+                        use_container_width=True,
+                        height=300
+                    )
+                elif preview_type_col == "Random samples":
+                    st.dataframe(
+                        transformed_data_col.sample(n=min(n_preview_col, len(transformed_data_col)), random_state=42).style.format(format_dict_col_trans, na_rep="-"),
+                        use_container_width=True,
+                        height=300
+                    )
+                else:  # Statistics
+                    st.dataframe(
+                        transformed_data_col.describe().style.format("{:.3f}"),
+                        use_container_width=True
+                    )
+
+                st.info(f"📊 Showing transformed data: {transformed_data_col.shape[0]} samples × {transformed_data_col.shape[1]} variables")
 
             # Save section
             st.markdown("---")

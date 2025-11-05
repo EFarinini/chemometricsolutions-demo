@@ -483,7 +483,9 @@ def fit_knn(
     dict
         kNN model
     """
-    classes = np.unique(y)
+    # Ensure y is numpy array (not pandas Series with non-sequential index)
+    y_arr = y.values if hasattr(y, 'values') else np.array(y)
+    classes = np.unique(y_arr)
 
     # Calculate covariance if using Mahalanobis
     cov = None
@@ -492,7 +494,7 @@ def fit_knn(
 
     return {
         'X_train': X,
-        'y_train': y,
+        'y_train': y_arr,  # Store as numpy array for positional indexing
         'classes': classes,
         'metric': metric,
         'cov': cov

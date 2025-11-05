@@ -442,91 +442,221 @@
         </div>
     </section>
     
-    <!-- Demos Section -->
+    <!-- Modules Architecture Section -->
     <section class="section">
         <div class="container">
-            <h2 class="section-title">Interactive Demonstrations</h2>
-            <p class="section-subtitle">Professional chemometric analysis tools - completely free</p>
+            <h2 class="section-title">Modular Architecture</h2>
+            <p class="section-subtitle">Independent calculation modules with organized folder structure</p>
             
             <div class="demos-grid">
+                <!-- Data Handling Module -->
                 <div class="demo-card">
                     <div class="demo-icon">
                         <i class="fas fa-database"></i>
                     </div>
-                    <h3>Data Handling</h3>
-                    <p>Import, manage, and transform analytical chemistry data with ease.</p>
+                    <h3>📁 Data Handling</h3>
+                    <p>Complete data import, management, and export system.</p>
                     <ul class="features-list">
-                        <li>Multi-format support (CSV, Excel, RAW)</li>
-                        <li>Spectroscopy data conversion</li>
-                        <li>Data preprocessing tools</li>
-                        <li>Workspace management</li>
+                        <li><strong>modules/data_handling/</strong></li>
+                        <li>loaders.py - CSV, Excel, RAW support</li>
+                        <li>exporters.py - Data export & backup</li>
+                        <li>transformations.py - Data operations</li>
+                        <li>validators.py - Input validation</li>
                     </ul>
-                    <a href="https://chemometricsolutions.streamlit.app" target="_blank" class="btn btn-primary" style="width: 100%;">
+                    <a href="https://chemometricsolutions-demo.streamlit.app/" target="_blank" class="btn btn-primary" style="width: 100%;">
                         Try Data Handling
                     </a>
                 </div>
                 
+                <!-- PCA Module -->
                 <div class="demo-card">
                     <div class="demo-icon">
                         <i class="fas fa-chart-line"></i>
                     </div>
-                    <h3>PCA Analysis</h3>
-                    <p>Complete Principal Component Analysis suite with advanced diagnostics.</p>
+                    <h3>📁 PCA Analysis</h3>
+                    <p>Principal Component Analysis with advanced diagnostics.</p>
                     <ul class="features-list">
-                        <li>Standard PCA & Varimax rotation</li>
-                        <li>Interactive 2D/3D visualization</li>
-                        <li>T² & Q diagnostics</li>
-                        <li>Loadings and scores plots</li>
+                        <li><strong>modules/pca/</strong></li>
+                        <li>calculations.py - Core PCA & rotations</li>
+                        <li>diagnostics.py - T² & Q statistics</li>
+                        <li>plots.py - 2D/3D visualizations</li>
+                        <li>statistics.py - PCA metrics</li>
                     </ul>
-                    <a href="https://chemometricsolutions.streamlit.app" target="_blank" class="btn btn-primary" style="width: 100%;">
+                    <a href="https://chemometricsolutions-demo.streamlit.app/" target="_blank" class="btn btn-primary" style="width: 100%;">
                         Try PCA Analysis
                     </a>
                 </div>
                 
+                <!-- MLR & DoE Module -->
                 <div class="demo-card">
                     <div class="demo-icon">
                         <i class="fas fa-flask"></i>
                     </div>
-                    <h3>MLR & DoE</h3>
-                    <p>Multiple Linear Regression and Design of Experiments tools.</p>
+                    <h3>📁 MLR & DoE</h3>
+                    <p>Multiple Linear Regression & Design of Experiments.</p>
                     <ul class="features-list">
-                        <li>Full factorial design generation</li>
-                        <li>MLR model computation</li>
-                        <li>Response surface analysis</li>
-                        <li>VIF and diagnostics</li>
+                        <li><strong>modules/mlr_doe/</strong></li>
+                        <li>doe_generator.py - Factorial matrices</li>
+                        <li>mlr_model.py - Model computation</li>
+                        <li>diagnostics.py - VIF & residuals</li>
+                        <li>response_surface.py - RS analysis</li>
                     </ul>
-                    <a href="https://chemometricsolutions.streamlit.app" target="_blank" class="btn btn-primary" style="width: 100%;">
+                    <a href="https://chemometricsolutions-demo.streamlit.app/" target="_blank" class="btn btn-primary" style="width: 100%;">
                         Try MLR & DoE
+                    </a>
+                </div>
+
+                <!-- Preprocessing Module -->
+                <div class="demo-card">
+                    <div class="demo-icon">
+                        <i class="fas fa-sliders-h"></i>
+                    </div>
+                    <h3>📁 Preprocessing</h3>
+                    <p>Data preprocessing and spectral transformation.</p>
+                    <ul class="features-list">
+                        <li><strong>modules/preprocessing/</strong></li>
+                        <li>scaling.py - Standardization & normalization</li>
+                        <li>centering.py - Mean centering</li>
+                        <li>spectral.py - Spectral preprocessing</li>
+                        <li>missing_data.py - Missing value handling</li>
+                    </ul>
+                    <a href="https://chemometricsolutions-demo.streamlit.app/" target="_blank" class="btn btn-primary" style="width: 100%;">
+                        Try Preprocessing
+                    </a>
+                </div>
+
+                <!-- Visualization Module -->
+                <div class="demo-card">
+                    <div class="demo-icon">
+                        <i class="fas fa-palette"></i>
+                    </div>
+                    <h3>📁 Visualization</h3>
+                    <p>Unified visualization and theming system.</p>
+                    <ul class="features-list">
+                        <li><strong>modules/visualization/</strong></li>
+                        <li>colors.py - Color theme management</li>
+                        <li>plots_common.py - Shared plot functions</li>
+                        <li>themes.py - Consistent styling</li>
+                    </ul>
+                    <a href="https://chemometricsolutions-demo.streamlit.app/" target="_blank" class="btn btn-primary" style="width: 100%;">
+                        View Visualizations
+                    </a>
+                </div>
+
+                <!-- Calibration / PLS Module -->
+                <div class="demo-card">
+                    <div class="demo-icon">
+                        <i class="fas fa-flask-vial"></i>
+                    </div>
+                    <h3>📁 Multivariate Calibration (PLS)</h3>
+                    <p>Partial Least Squares regression for quantitative analysis.</p>
+                    <ul class="features-list">
+                        <li><strong>modules/calibration/</strong></li>
+                        <li>pls_regression.py - PLS model computation</li>
+                        <li>calibration.py - Calibration & validation</li>
+                        <li>predictions.py - Sample prediction & uncertainty</li>
+                        <li>diagnostics.py - Model quality & outliers</li>
+                    </ul>
+                    <a href="https://chemometricsolutions-demo.streamlit.app/" target="_blank" class="btn btn-primary" style="width: 100%;">
+                        Try PLS Calibration
+                    </a>
+                </div>
+
+                <!-- Classification Module -->
+                <div class="demo-card">
+                    <div class="demo-icon">
+                        <i class="fas fa-cube"></i>
+                    </div>
+                    <h3>📁 Classification</h3>
+                    <p>Supervised classification and pattern recognition.</p>
+                    <ul class="features-list">
+                        <li><strong>modules/classification/</strong></li>
+                        <li>models.py - Classification algorithms</li>
+                        <li>training.py - Model training pipeline</li>
+                        <li>evaluation.py - Performance metrics</li>
+                        <li>plots.py - Classification plots</li>
+                    </ul>
+                    <a href="https://chemometricsolutions-demo.streamlit.app/" target="_blank" class="btn btn-primary" style="width: 100%;">
+                        Try Classification
                     </a>
                 </div>
             </div>
         </div>
     </section>
     
-    <!-- Stats Section -->
+    <!-- Architecture Info Section -->
     <section class="section stats-section">
         <div class="container">
             <div class="stats-grid">
                 <div>
-                    <div class="stat-value">100%</div>
-                    <div class="stat-label">Free & Open Source</div>
-                </div>
-                <div>
-                    <div class="stat-value">7+</div>
+                    <div class="stat-value">7</div>
                     <div class="stat-label">Core Modules</div>
                 </div>
                 <div>
-                    <div class="stat-value">15+</div>
-                    <div class="stat-label">File Formats Supported</div>
+                    <div class="stat-value">21+</div>
+                    <div class="stat-label">Calculation Files</div>
                 </div>
                 <div>
-                    <div class="stat-value">20+</div>
-                    <div class="stat-label">Visualization Types</div>
+                    <div class="stat-value">100%</div>
+                    <div class="stat-label">Modular Design</div>
+                </div>
+                <div>
+                    <div class="stat-value">∞</div>
+                    <div class="stat-label">Scalability</div>
                 </div>
             </div>
         </div>
     </section>
     
+    <!-- Technical Overview Section -->
+    <section class="section" style="background: linear-gradient(135deg, rgba(30, 144, 255, 0.05) 0%, rgba(77, 163, 255, 0.05) 100%);">
+        <div class="container" style="max-width: 900px;">
+            <h2 class="section-title">Technical Architecture</h2>
+            
+            <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(30, 144, 255, 0.2); border-radius: 12px; padding: 30px; margin-bottom: 40px;">
+                <h3 style="color: var(--secondary); margin-bottom: 20px; font-size: 1.3rem;">📂 Project Structure</h3>
+                <pre style="background: rgba(0, 0, 0, 0.4); padding: 15px; border-radius: 8px; overflow-x: auto; font-size: 0.85rem; color: #90EE90;">chemometricsolutions/
+├── streamlit_app.py         # Main entry point
+├── requirements.txt
+├── pages/                    # Streamlit pages
+│   ├── 1_Data_Handling.py
+│   ├── 2_PCA_Analysis.py
+│   ├── 3_MLR_DoE.py
+│   ├── 4_Calibration_PLS.py
+│   └── 5_Classification.py
+└── <strong style="color: var(--secondary);">modules/</strong>              # Calculation modules
+    ├── data_handling/       # Data I/O and transformations
+    ├── pca/                 # PCA calculations & diagnostics
+    ├── mlr_doe/             # MLR & DoE computations
+    ├── calibration/         # PLS multivariate calibration
+    ├── preprocessing/       # Data preprocessing
+    ├── visualization/       # Unified theming & plots
+    └── classification/      # Classification algorithms</pre>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 40px;">
+                <div style="background: rgba(30, 144, 255, 0.1); border-left: 3px solid var(--secondary); padding: 20px; border-radius: 8px;">
+                    <h4 style="color: var(--secondary); margin-bottom: 15px;">✓ Benefits</h4>
+                    <ul style="list-style: none; color: rgba(255, 255, 255, 0.8);">
+                        <li style="margin-bottom: 10px;">• Independent, testable modules</li>
+                        <li style="margin-bottom: 10px;">• Easy maintenance & debugging</li>
+                        <li style="margin-bottom: 10px;">• Scalable architecture</li>
+                        <li style="margin-bottom: 10px;">• Reusable calculations</li>
+                    </ul>
+                </div>
+                <div style="background: rgba(77, 163, 255, 0.1); border-left: 3px solid var(--secondary); padding: 20px; border-radius: 8px;">
+                    <h4 style="color: var(--secondary); margin-bottom: 15px;">🔧 Technologies</h4>
+                    <ul style="list-style: none; color: rgba(255, 255, 255, 0.8);">
+                        <li style="margin-bottom: 10px;">• Python 3.9+ (NumPy, SciPy)</li>
+                        <li style="margin-bottom: 10px;">• Streamlit for web interface</li>
+                        <li style="margin-bottom: 10px;">• Plotly for visualizations</li>
+                        <li style="margin-bottom: 10px;">• scikit-learn for ML algorithms</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
     <!-- CTA Section -->
     <section class="section">
         <div class="container" style="text-align: center;">
@@ -534,11 +664,11 @@
             <p class="section-subtitle">Try our interactive demos now - no installation required</p>
             
             <div style="display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; margin-top: 40px;">
-                <a href="https://chemometricsolutions.streamlit.app" target="_blank" class="btn btn-primary" style="font-size: 1.2rem; padding: 20px 50px;">
+                <a href="https://chemometricsolutions-demo.streamlit.app/" target="_blank" class="btn btn-primary" style="font-size: 1.2rem; padding: 20px 50px;">
                     <i class="fas fa-play-circle"></i> Launch Demo App
                 </a>
-                <a href="https://chemometricsolutions.com" target="_blank" class="btn btn-outline" style="font-size: 1.2rem; padding: 20px 50px;">
-                    <i class="fas fa-globe"></i> Visit Main Site
+                <a href="https://github.com/FarininiChemometricSolutions/chemometricsolutions-demos" target="_blank" class="btn btn-outline" style="font-size: 1.2rem; padding: 20px 50px;">
+                    <i class="fab fa-github"></i> View Code
                 </a>
             </div>
         </div>
@@ -547,12 +677,40 @@
     <!-- Footer -->
     <footer class="footer">
         <div class="container">
-            <p>
-                <strong>ChemometricSolutions</strong> - Interactive Demos<br>
-                Developed by Dr. Emanuele Farinini, PhD<br>
-                <a href="https://github.com/FarininiChemometricSolutions/chemometricsolutions-demos">GitHub</a> | 
-                <a href="https://chemometricsolutions.com">Website</a><br>
-                © 2025 ChemometricSolutions. MIT License.
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 30px; margin-bottom: 40px; text-align: left;">
+                <div>
+                    <h4 style="color: var(--secondary); margin-bottom: 15px;">About</h4>
+                    <p style="font-size: 0.9rem; line-height: 1.6;">
+                        <strong>ChemometricSolutions</strong> brings professional chemometric analysis tools to the web. Built with Python, Streamlit, and scientific rigor.
+                    </p>
+                </div>
+                <div>
+                    <h4 style="color: var(--secondary); margin-bottom: 15px;">Modules</h4>
+                    <ul style="list-style: none; font-size: 0.9rem;">
+                        <li><a href="https://chemometricsolutions-demo.streamlit.app/" style="color: var(--text-light); text-decoration: none;">Data Handling</a></li>
+                        <li><a href="https://chemometricsolutions-demo.streamlit.app/" style="color: var(--text-light); text-decoration: none;">PCA Analysis</a></li>
+                        <li><a href="https://chemometricsolutions-demo.streamlit.app/" style="color: var(--text-light); text-decoration: none;">MLR & DoE</a></li>
+                        <li><a href="https://chemometricsolutions-demo.streamlit.app/" style="color: var(--text-light); text-decoration: none;">PLS Calibration</a></li>
+                        <li><a href="https://chemometricsolutions-demo.streamlit.app/" style="color: var(--text-light); text-decoration: none;">Classification</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 style="color: var(--secondary); margin-bottom: 15px;">Resources</h4>
+                    <ul style="list-style: none; font-size: 0.9rem;">
+                        <li><a href="https://github.com/FarininiChemometricSolutions/chemometricsolutions-demos" style="color: var(--text-light); text-decoration: none;">GitHub Repository</a></li>
+                        <li><a href="https://chemometricsolutions.com" style="color: var(--text-light); text-decoration: none;">Main Website</a></li>
+                        <li><a href="https://github.com/FarininiChemometricSolutions/chemometricsolutions-demos/blob/main/README.md" style="color: var(--text-light); text-decoration: none;">Documentation</a></li>
+                    </ul>
+                </div>
+            </div>
+            
+            <hr style="border: 0; border-top: 1px solid rgba(255, 255, 255, 0.1); margin: 40px 0;">
+            
+            <p style="text-align: center; font-size: 0.85rem; color: rgba(255, 255, 255, 0.6);">
+                © 2025 <strong>ChemometricSolutions</strong> by Dr. Emanuele Farinini<br>
+                MIT License | <a href="https://github.com/FarininiChemometricSolutions/chemometricsolutions-demos" style="color: var(--primary); text-decoration: none;">GitHub</a> | 
+                <a href="https://chemometricsolutions.com" style="color: var(--primary); text-decoration: none;">Website</a><br>
+                <em>Professional chemometric analysis for modern science</em>
             </p>
         </div>
     </footer>

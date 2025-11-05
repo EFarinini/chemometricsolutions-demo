@@ -263,6 +263,62 @@ def create_cv_folds(
     return fold_indices
 
 
+def create_stratified_cv_folds(
+    y: Union[pd.Series, np.ndarray],
+    n_folds: int,
+    random_state: Optional[int] = None
+) -> np.ndarray:
+    """
+    Create stratified K-fold indices maintaining class distribution per fold.
+    Each fold preserves the class proportions of the full dataset.
+
+    Parameters
+    ----------
+    y : Series or ndarray
+        Class labels
+    n_folds : int
+        Number of folds
+    random_state : int, optional
+        Random seed for reproducibility
+
+    Returns
+    -------
+    ndarray
+        Array of fold indices (0 to n_folds-1) maintaining class proportions
+    """
+    if random_state is not None:
+        np.random.seed(random_state)
+
+    # Convert to array if needed
+    if isinstance(y, pd.Series):
+        y_arr = y.values
+    else:
+        y_arr = np.array(y)
+
+    n_samples = len(y_arr)
+    fold_indices = np.zeros(n_samples, dtype=int)
+
+    # For each class, distribute samples across folds cyclically
+    for cls in np.unique(y_arr):
+        cls_indices = np.where(y_arr == cls)[0]
+        np.random.shuffle(cls_indices)
+
+        # Assign to folds cyclically (preserves class proportion in each fold)
+        fold_assignment = np.arange(len(cls_indices)) % n_folds
+        fold_indices[cls_indices] = fold_assignment
+
+    # Final shuffle to randomize sample order within each fold
+    shuffle_idx = np.random.permutation(n_samples)
+    y_shuffled = y_arr[shuffle_idx]
+    fold_shuffled = fold_indices[shuffle_idx]
+
+    # Create reverse mapping to restore original order
+    fold_indices_original = np.zeros(n_samples, dtype=int)
+    fold_indices_original[shuffle_idx] = fold_shuffled
+
+    return fold_indices_original
+
+
 def prepare_training_test(
     X_train: Union[pd.DataFrame, np.ndarray],
     y_train: Union[pd.Series, np.ndarray],
