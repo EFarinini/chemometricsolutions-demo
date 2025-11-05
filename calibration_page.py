@@ -67,7 +67,7 @@ from workspace_utils import get_workspace_datasets
 import color_utils
 
 # Import TAB 3 Test Set Validation
-from TAB3_TEST_SET_VALIDATION import show_tab3_test_set_validation
+from calibration_utils.tab3_test_set_validation import show_tab3_test_set_validation
 
 
 # Note: Page configuration is handled by homepage.py/streamlit_app.py
