@@ -460,6 +460,142 @@ def calculate_leverage(
     return leverage
 
 
+def calculate_variable_variance_explained(
+    X_preprocessed: Union[pd.DataFrame, np.ndarray],
+    scores: Union[pd.DataFrame, np.ndarray],
+    loadings: Union[pd.DataFrame, np.ndarray],
+    n_components: int
+) -> pd.DataFrame:
+    """
+    Calculate fraction of variance explained by each variable.
+
+    Equivalent to R chemometrics::pcaVarexpl()
+
+    This implements the EXACT R formula:
+        varexpl = 1 - Σ(residuals²) / Σ(X²)
+
+    where residuals = X - T[1:a] × P[1:a]ᵀ
+
+    This measures how well each variable can be reconstructed using
+    the first n_components principal components.
+
+    Parameters
+    ----------
+    X_preprocessed : pd.DataFrame or np.ndarray
+        Preprocessed (centered/scaled) data matrix.
+        Shape: (n_samples, n_variables).
+
+    scores : pd.DataFrame or np.ndarray
+        PCA scores matrix (T in PCA notation).
+        Shape: (n_samples, n_total_components).
+
+    loadings : pd.DataFrame or np.ndarray
+        PCA loadings matrix (P in PCA notation).
+        Shape: (n_variables, n_total_components).
+
+    n_components : int
+        Number of components to use for reconstruction (a in R formula).
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with columns:
+        - 'Variable': variable names
+        - 'Variance_Explained_Ratio': fraction of variance explained (0-1)
+
+        Sorted by 'Variance_Explained_Ratio' in descending order.
+
+    Notes
+    -----
+    R chemometrics::pcaVarexpl() formula:
+
+    .. math::
+        VarExpl_j = 1 - \\frac{\\sum (X_j - \\hat{X}_j)^2}{\\sum X_j^2}
+
+    where:
+    - :math:`X_j` is the preprocessed data for variable j
+    - :math:`\\hat{X}_j = T_{1:a} \\cdot P_{j,1:a}^T` is reconstruction with a components
+    - :math:`a` is the number of components used
+
+    Interpretation:
+    - Close to 1.0: variable is very well represented by the model
+    - 0.7-0.9: good representation
+    - 0.5-0.7: moderate representation
+    - < 0.5: poor representation (may follow different patterns)
+
+    Examples
+    --------
+    >>> X_preprocessed = ...  # Centered/scaled data
+    >>> scores = ...  # T from PCA
+    >>> loadings = ...  # P from PCA
+    >>> result = calculate_variable_variance_explained(
+    ...     X_preprocessed, scores, loadings, n_components=2
+    ... )
+
+    References
+    ----------
+    .. [1] R package 'chemometrics' - pcaVarexpl function
+    .. [2] Varmuza & Filzmoser (2009). Introduction to Multivariate
+           Statistical Analysis in Chemometrics. CRC Press.
+    """
+    # Convert inputs to numpy arrays
+    if isinstance(X_preprocessed, pd.DataFrame):
+        X_array = X_preprocessed.values
+        var_names = X_preprocessed.columns.tolist()
+    else:
+        X_array = np.asarray(X_preprocessed)
+        var_names = [f'Var{i+1}' for i in range(X_array.shape[1])]
+
+    if isinstance(scores, pd.DataFrame):
+        T_array = scores.values
+    else:
+        T_array = np.asarray(scores)
+
+    if isinstance(loadings, pd.DataFrame):
+        P_array = loadings.values
+    else:
+        P_array = np.asarray(loadings)
+
+    # EXACT R formula: varexpl = 1 - Σ(residuals²) / Σ(X²)
+    #
+    # Step 1: Reconstruct data using first n_components
+    T_a = T_array[:, :n_components]  # Scores for first a components
+    P_a = P_array[:, :n_components]  # Loadings for first a components
+    X_reconstructed = T_a @ P_a.T  # Reconstruction: T[1:a] × P[1:a]ᵀ
+
+    # Step 2: Calculate residuals
+    residuals = X_array - X_reconstructed
+
+    # Step 3: Calculate unexplained variance per variable (sum over samples)
+    unexplained_var = np.sum(residuals ** 2, axis=0)
+
+    # Step 4: Calculate total variance per variable
+    total_var = np.sum(X_array ** 2, axis=0)
+
+    # Step 5: Calculate variance explained (R formula)
+    # Handle division by zero
+    variance_explained = np.zeros(len(var_names))
+    non_zero_mask = total_var > 1e-10
+
+    variance_explained[non_zero_mask] = 1 - (
+        unexplained_var[non_zero_mask] / total_var[non_zero_mask]
+    )
+
+    # Clip to [0, 1] range (negative values can occur due to numerical errors)
+    variance_explained = np.clip(variance_explained, 0, 1)
+
+    # Create result DataFrame
+    result_df = pd.DataFrame({
+        'Variable': var_names,
+        'Variance_Explained_Ratio': variance_explained
+    })
+
+    # Sort by variance explained (descending)
+    result_df = result_df.sort_values('Variance_Explained_Ratio', ascending=False)
+
+    return result_df
+
+
 def cross_validate_pca(
     X: Union[np.ndarray, pd.DataFrame],
     max_components: int,

@@ -130,7 +130,7 @@ def check_model_saturated(model_results):
 
     if is_saturated:
         print(f"  MODEL IS SATURATED (DoF <= 0)")
-        print(f"    - Cannot compute: R², RMSE, residual plots, p-values")
+        print(f"    - Cannot compute: Adjusted R², RMSE, residual plots, p-values")
         print(f"    - Can compute: VIF, Leverage, Coefficients")
     else:
         print(f"  Model has adequate DoF (DoF > 0)")
@@ -192,7 +192,7 @@ def show_model_diagnostics_ui(model_results=None, X=None, y=None):
         - ✅ Coefficients display
 
         **❌ Unavailable** (require DoF > 0):
-        - ❌ R², RMSE (no residual variance to estimate)
+        - ❌ Adjusted R², RMSE (no residual variance to estimate)
         - ❌ Residual plots (residuals are zero by definition)
         - ❌ Statistical tests (p-values, confidence intervals)
         - ❌ Cross-validation
@@ -211,7 +211,7 @@ def show_model_diagnostics_ui(model_results=None, X=None, y=None):
         if 'r_squared' in model_results and 'rmse' in model_results:
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("R²", f"{model_results['r_squared']:.4f}")
+                st.metric("Adjusted R²", f"{model_results['r_squared']:.4f}")
             with col2:
                 st.metric("RMSE", f"{model_results['rmse']:.4f}")
             with col3:
@@ -340,9 +340,9 @@ def _plot_experimental_vs_fitted(model_results):
     col1, col2, col3 = st.columns(3)
     with col1:
         if 'r_squared' in model_results:
-            st.metric("R²", f"{model_results['r_squared']:.4f}")
+            st.metric("Adjusted R²", f"{model_results['r_squared']:.4f}")
         else:
-            st.metric("R²", "N/A")
+            st.metric("Adjusted R²", "N/A")
     with col2:
         if 'rmse' in model_results:
             st.metric("RMSE", f"{model_results['rmse']:.4f}")
@@ -592,13 +592,20 @@ def _plot_leverage(model_results):
 
 def _plot_coefficients_bar(model_results):
     """
-    Plot model coefficients as bar chart
+    Plot model coefficients as bar chart with proper styling and significance markers.
 
-    ALWAYS AVAILABLE - independent of DoF
-    Shows coefficient values (with confidence intervals if DoF > 0)
+    STYLING RULES:
+    - RED: Linear terms (no operators)
+    - GREEN: Single interactions (single * or ^)
+    - CYAN: Double interactions (multiple *) or quadratic terms (^2)
+    - Black borders with line width=1
+    - Error bars: asymmetric confidence intervals
+    - Significance markers: *, **, *** positioned above/below bars
 
     REQUIRES:
     - coefficients
+    - ci_lower, ci_upper (if DoF > 0)
+    - p_values (if DoF > 0)
     """
     st.markdown("### 📐 Model Coefficients")
 
@@ -618,61 +625,245 @@ def _plot_coefficients_bar(model_results):
         return
 
     # Determine colors based on coefficient type
+    # RED: linear (no operators)
+    # GREEN: single interaction (exactly one *)
+    # CYAN: double interactions (multiple *) or quadratic (^2)
     colors = []
     for name in coef_names:
-        if '*' in name:
-            colors.append('green')  # Interactions
-        elif '^2' in name:
-            colors.append('cyan')  # Quadratic
-        else:
-            colors.append('red')  # Linear
+        asterisk_count = name.count('*')
 
+        if asterisk_count > 1:
+            # Multiple asterisks: double interaction
+            colors.append('cyan')
+        elif asterisk_count == 1:
+            # Single asterisk: simple interaction
+            colors.append('green')
+        elif '^2' in name or '^' in name:
+            # Quadratic term
+            colors.append('cyan')
+        else:
+            # Linear term
+            colors.append('red')
+
+    # Create figure
     fig = go.Figure()
 
+    # Add bar trace
     fig.add_trace(go.Bar(
         x=coef_names,
         y=coef_no_intercept.values,
         marker_color=colors,
-        name='Coefficients'
+        marker_line_color='black',      # Black border
+        marker_line_width=1,            # Border width
+        name='Coefficients',
+        showlegend=False
     ))
 
-    # Add error bars if available
-    if 'ci_lower' in model_results:
+    # Add error bars if confidence intervals available
+    if 'ci_lower' in model_results and 'ci_upper' in model_results:
         ci_lower = model_results['ci_lower'][coef_no_intercept.index].values
         ci_upper = model_results['ci_upper'][coef_no_intercept.index].values
 
-        for i, name in enumerate(coef_names):
-            fig.add_trace(go.Scatter(
-                x=[name, name],
-                y=[ci_lower[i], ci_upper[i]],
-                mode='lines',
-                line=dict(color='black', width=2),
-                showlegend=False
-            ))
+        error_minus = coef_no_intercept.values - ci_lower
+        error_plus = ci_upper - coef_no_intercept.values
 
-    # Add significance markers
+        fig.update_traces(
+            error_y=dict(
+                type='data',
+                symmetric=False,        # Asymmetric error bars
+                array=error_plus,
+                arrayminus=error_minus,
+                color='black',
+                thickness=2,
+                width=4
+            )
+        )
+
+    # Add significance markers (*, **, ***)
     if 'p_values' in model_results:
         p_values = model_results['p_values'][coef_no_intercept.index].values
-        for i, (name, coef, p) in enumerate(zip(coef_names, coef_no_intercept.values, p_values)):
-            if p <= 0.001:
-                fig.add_annotation(x=name, y=coef, text='***', showarrow=False, font=dict(size=16))
-            elif p <= 0.01:
-                fig.add_annotation(x=name, y=coef, text='**', showarrow=False, font=dict(size=16))
-            elif p <= 0.05:
-                fig.add_annotation(x=name, y=coef, text='*', showarrow=False, font=dict(size=16))
 
+        for i, (name, coef, p) in enumerate(zip(coef_names, coef_no_intercept.values, p_values)):
+            # Determine significance level and marker text
+            if p <= 0.001:
+                sig_text = '***'
+            elif p <= 0.01:
+                sig_text = '**'
+            elif p <= 0.05:
+                sig_text = '*'
+            else:
+                sig_text = None
+
+            # Position marker above or below bar depending on coefficient sign
+            if sig_text:
+                y_pos = coef
+                # Calculate offset as 5% of absolute coefficient value, minimum 0.01
+                y_offset = max(abs(coef) * 0.05, 0.01) if coef >= 0 else -max(abs(coef) * 0.05, 0.01)
+
+                fig.add_annotation(
+                    x=name,
+                    y=y_pos + y_offset,
+                    text=sig_text,
+                    showarrow=False,
+                    font=dict(size=20, color='black'),
+                    yshift=10 if coef >= 0 else -10
+                )
+
+    # Update layout
     fig.update_layout(
-        title=f"Coefficients - {st.session_state.mlr_y_var} (excluding intercept)",
+        title=f"Coefficients - {st.session_state.get('mlr_y_var', 'Response')} (excluding intercept)",
         xaxis_title="Term",
         yaxis_title="Coefficient Value",
         height=600,
-        xaxis={'tickangle': 45}
+        xaxis={'tickangle': 45},
+        hovermode='x unified',
+        showlegend=False,
+        yaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='gray')
     )
 
     st.plotly_chart(fig, use_container_width=True)
 
-    st.info("Red=Linear, Green=Interactions, Cyan=Quadratic")
-    st.info("Significance: *** p≤0.001, ** p≤0.01, * p≤0.05")
+    # Display legend
+    st.markdown("""
+    **Color legend:**
+    - Red = Linear terms
+    - Green = Two-term interactions
+    - Cyan = Quadratic terms
+    """)
+    st.info("Significance markers: *** p≤0.001, ** p≤0.01, * p≤0.05")
+
+    # ===== FITTED MODEL FORMULA WITH UNCERTAINTY-BASED DECIMALS =====
+    st.markdown("---")
+    st.markdown("#### Fitted Model Formula")
+
+    import math
+
+    # Get response variable name
+    y_var = st.session_state.get('mlr_y_var', 'Response')
+
+    # Get intercept
+    intercept = model_results['coefficients'].get('Intercept', 0)
+
+    # Helper function: determine decimals from uncertainty
+    def get_decimals_from_uncertainty(coef_value, ci_lower, ci_upper):
+        """
+        Determine decimal places based on confidence interval width.
+
+        Rule: Show coefficient decimals = where CI uncertainty starts
+
+        Examples:
+        - CI: [0.02, 0.07] → width 0.05 (1st decimal) → 1 decimal
+        - CI: [0.039, 0.051] → width 0.012 (2nd decimal) → 2 decimals
+        - CI: [0.0440, 0.0462] → width 0.0022 (3rd decimal) → 3 decimals
+        """
+        # Calculate uncertainty half-width
+        uncertainty_width = ci_upper - ci_lower
+        uncertainty_half_width = uncertainty_width / 2
+
+        # If no uncertainty, use 3 decimals
+        if uncertainty_half_width == 0:
+            return 3
+
+        # Find order of magnitude of uncertainty
+        try:
+            # Get the order of magnitude
+            magnitude = math.floor(math.log10(abs(uncertainty_half_width)))
+
+            # Convert magnitude to decimal places
+            # magnitude = -1 (0.1) → 1 decimal
+            # magnitude = -2 (0.01) → 2 decimals
+            # magnitude = -3 (0.001) → 3 decimals
+            decimals = -magnitude
+
+            # Cap at range [1, 3]
+            decimals = max(1, min(3, decimals))
+
+        except (ValueError, OverflowError):
+            # Fallback to 2 decimals if calculation fails
+            decimals = 2
+
+        return decimals
+
+    # Build fitted formula with adaptive decimals
+    formula_parts = []
+
+    # Format intercept (1-3 decimals based on its uncertainty)
+    if 'ci_lower' in model_results and 'ci_upper' in model_results:
+        ci_lower_intercept = model_results['ci_lower'].get('Intercept', intercept)
+        ci_upper_intercept = model_results['ci_upper'].get('Intercept', intercept)
+        decimals_intercept = get_decimals_from_uncertainty(intercept, ci_lower_intercept, ci_upper_intercept)
+    else:
+        decimals_intercept = 2  # Default if no CI available
+
+    # Format all coefficients with adaptive decimals
+    coef_formatted = {}
+    all_decimals = []
+
+    for name in coef_names:
+        coef_value = coef_no_intercept[name]
+
+        # Get decimals from uncertainty if available
+        if 'ci_lower' in model_results and 'ci_upper' in model_results:
+            try:
+                ci_lower = model_results['ci_lower'][name]
+                ci_upper = model_results['ci_upper'][name]
+                decimals = get_decimals_from_uncertainty(coef_value, ci_lower, ci_upper)
+            except (KeyError, TypeError):
+                decimals = 2  # Fallback
+        else:
+            decimals = 2  # Default if no CI available
+
+        coef_formatted[name] = (coef_value, decimals)
+        all_decimals.append(decimals)
+
+    # Special rule: If many coefficients round to zero, increase precision
+    # Try formatting with current decimals
+    test_formatted = []
+    for name in coef_names:
+        coef_value, decimals = coef_formatted[name]
+        test_str = f"{coef_value:.{decimals}f}"
+        test_formatted.append(test_str)
+
+    # Count how many are "0.0" or "-0.0" or "0.00" etc
+    zero_count = sum(1 for s in test_formatted if float(s) == 0.0)
+
+    # If more than 50% are zeros, add 1 decimal to all (but cap at 3)
+    if len(test_formatted) > 0 and zero_count / len(test_formatted) > 0.5:
+        for name in coef_names:
+            coef_value, decimals = coef_formatted[name]
+            # Increase decimals by 1, cap at 3
+            coef_formatted[name] = (coef_value, min(3, decimals + 1))
+        decimals_intercept = min(3, decimals_intercept + 1)
+
+    # Build formula string
+    intercept_str = f"{intercept:.{decimals_intercept}f}"
+    formula_parts.append(f"{y_var} = {intercept_str}")
+
+    for name in coef_names:
+        coef_value, decimals = coef_formatted[name]
+        coef_str = f"{coef_value:+.{decimals}f}"
+        formula_parts.append(f"{coef_str}·{name}")
+
+    fitted_formula = " ".join(formula_parts)
+
+    # Display in code block
+    st.code(fitted_formula, language="text")
+
+    # Optional: Show precision info
+    if 'ci_lower' in model_results:
+        st.info("📊 **Coefficient precision:** Decimal places based on confidence interval width")
+
+    # Copy to clipboard button
+    col1, col2, col3 = st.columns([2, 1, 2])
+    with col2:
+        if st.button("📋 Copy to clipboard", key="copy_fitted_formula_tab2"):
+            st.write("""
+            <script>
+            var text = `""" + fitted_formula.replace("`", "\\`") + """`
+            navigator.clipboard.writeText(text);
+            </script>
+            """, unsafe_allow_html=True)
+            st.success("✓ Formula copied!")
 
 
 def _display_vif_multicollinearity(model_results):

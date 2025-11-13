@@ -640,7 +640,7 @@ def show():
             )
             
             st.plotly_chart(fig, width='stretch')
-            
+
             # Statistics
             st.markdown("### Transformation Statistics")
             

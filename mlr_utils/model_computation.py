@@ -418,7 +418,7 @@ def fit_mlr_model(X, y, terms=None, exclude_central=False, return_diagnostics=Tr
                 'ci_lower': pd.Series(ci_lower, index=X.columns),
                 'ci_upper': pd.Series(ci_upper, index=X.columns)
             })
-        else:            st.warning(f"⚠️ Saturated model (DOF={dof}): Cannot compute R², RMSE, or statistical tests")
+        else:            st.warning(f"⚠️ Saturated model (DOF={dof}): Cannot compute adjusted R², RMSE, or statistical tests")
 
 
         # ===== CONDITIONAL: Cross-validation (only if DOF > 0 and n ≤ 100) =====
@@ -711,7 +711,14 @@ def display_term_selection_ui(x_vars, key_prefix="", design_analysis=None):
 
 def build_model_formula(y_var, selected_terms, include_intercept=True):
     """
-    Build a readable model formula string
+    Build a readable model formula string with proper coefficient nomenclature.
+
+    NOMENCLATURE RULES:
+    - Linear terms: β1, β2, β3, ... (sequential subscripts based on variable order)
+    - Interaction terms: βij where i,j are indices of variables in the interaction
+      Example: β12 for X1*X2, β23 for X2*X3
+    - Quadratic terms: βii where i is the variable index
+      Example: β11 for X1^2, β22 for X2^2, β33 for X3^2
 
     Args:
         y_var: response variable name
@@ -719,29 +726,49 @@ def build_model_formula(y_var, selected_terms, include_intercept=True):
         include_intercept: bool, include intercept term
 
     Returns:
-        str: model formula
+        str: model formula with proper coefficient notation
     """
     terms = []
 
+    # Add intercept
     if include_intercept:
         terms.append("β₀")
 
+    # Build mapping: variable name -> index (1-based)
+    all_vars_ordered = []
+    for var in selected_terms['linear']:
+        if var not in all_vars_ordered:
+            all_vars_ordered.append(var)
 
-    # Linear terms
-    for i, var in enumerate(selected_terms['linear'], 1):
-        terms.append(f"β{i}·{var}")
+    var_to_index = {var: i+1 for i, var in enumerate(all_vars_ordered)}
 
+    # LINEAR TERMS: β1·X1, β2·X2, β3·X3, ...
+    for var in selected_terms['linear']:
+        idx = var_to_index[var]
+        terms.append(f"β{idx}·{var}")
 
-    # Interaction terms
-    offset = len(selected_terms['linear'])
-    for i, term in enumerate(selected_terms['interactions'], offset + 1):
-        terms.append(f"β{i}·{term}")
+    # INTERACTION TERMS: β12·X1*X2, β13·X1*X3, etc.
+    # Parse interaction term to extract variable names
+    for interaction_term in selected_terms['interactions']:
+        # Interaction format: "X1*X2" or "Var1*Var2"
+        parts = interaction_term.split('*')
+        if len(parts) == 2:
+            var1, var2 = parts[0].strip(), parts[1].strip()
+            if var1 in var_to_index and var2 in var_to_index:
+                idx1 = var_to_index[var1]
+                idx2 = var_to_index[var2]
+                # Ensure lower index first (β12, not β21)
+                if idx1 > idx2:
+                    idx1, idx2 = idx2, idx1
+                terms.append(f"β{idx1}{idx2}·{interaction_term}")
 
-
-    # Quadratic terms
-    offset += len(selected_terms['interactions'])
-    for i, term in enumerate(selected_terms['quadratic'], offset + 1):
-        terms.append(f"β{i}·{term}")
+    # QUADRATIC TERMS: β11·X1^2, β22·X2^2, etc.
+    for quadratic_term in selected_terms['quadratic']:
+        # Quadratic format: "X1^2" or "Var1^2"
+        var_name = quadratic_term.replace('^2', '').strip()
+        if var_name in var_to_index:
+            idx = var_to_index[var_name]
+            terms.append(f"β{idx}{idx}·{quadratic_term}")
 
     formula = f"{y_var} = {' + '.join(terms)}"
     return formula
@@ -1220,7 +1247,7 @@ def show_model_computation_ui(data, dataset_name):
 
     st.markdown("---")
     if y_var:
-        st.markdown("### 📐 Model Formula")
+        st.markdown("### 📐 Postulated Model Formula")
 
         try:
             formula = build_model_formula(y_var, selected_terms, include_intercept)
@@ -1479,7 +1506,7 @@ def _display_model_results(model_results, y_var, x_vars, data, selected_samples,
     with summary_col1:
         if 'r_squared' in model_results:
             var_explained_pct = model_results['r_squared'] * 100
-            st.metric("% Explained Variance (R²)", f"{var_explained_pct:.2f}%")
+            st.metric("% Explained Variance (adjusted R²)", f"{var_explained_pct:.2f}%")
 
     with summary_col2:
         if 'rmse' in model_results:
@@ -1905,7 +1932,7 @@ def _display_statistical_summary(model_results, all_y_data, y_data, central_poin
     diagnostics_lines = ["", "    🎯 **Model Diagnostics:**"]
 
     if 'r_squared' in model_results:
-        diagnostics_lines.append(f"    - R² (explained variance): {model_results['r_squared']:.4f}")
+        diagnostics_lines.append(f"    - Adjusted R² (explained variance): {model_results['r_squared']:.4f}")
 
     if 'rmse' in model_results:
         diagnostics_lines.append(f"    - RMSE (model error): {model_results['rmse']:.4f}")
@@ -1992,7 +2019,7 @@ def _display_statistical_summary(model_results, all_y_data, y_data, central_poin
         summary_parts.append("""
     🔬 **Experimental Error:**
     - No replicates detected - pure error cannot be estimated
-    - Model quality assessed using R², RMSE, and cross-validation only""")
+    - Model quality assessed using adjusted R², RMSE, and cross-validation only""")
 
 
     # ===== CONDITIONAL: Central Points Validation (only if excluded) =====
@@ -2131,7 +2158,7 @@ def _display_error_comparison(model_results, replicate_info):
         st.info("ℹ️ Model error is reasonable compared to experimental error")
 
     else:
-        st.warning("⚠️ Model error significantly exceeds experimental error - consider additional terms or transformation")
+        st.warning("⚠️ Model error significantly exceeds experimental error")
 
 
 def _display_coefficients_table(model_results):
@@ -2298,6 +2325,136 @@ def _display_coefficients_barplot(model_results, y_var):
 
 
         st.info("Significance markers: *** p≤0.001, ** p≤0.01, * p≤0.05")
+
+        # ===== FITTED MODEL FORMULA WITH UNCERTAINTY-BASED DECIMALS =====
+        st.markdown("---")
+        st.markdown("#### Fitted Model Formula")
+
+        import math
+
+        # Get intercept
+        intercept = model_results['coefficients'].get('Intercept', 0)
+
+        # Helper function: determine decimals from uncertainty
+        def get_decimals_from_uncertainty(coef_value, ci_lower, ci_upper):
+            """
+            Determine decimal places based on confidence interval width.
+
+            Rule: Show coefficient decimals = where CI uncertainty starts
+
+            Examples:
+            - CI: [0.02, 0.07] → width 0.05 (1st decimal) → 1 decimal
+            - CI: [0.039, 0.051] → width 0.012 (2nd decimal) → 2 decimals
+            - CI: [0.0440, 0.0462] → width 0.0022 (3rd decimal) → 3 decimals
+            """
+            # Calculate uncertainty half-width
+            uncertainty_width = ci_upper - ci_lower
+            uncertainty_half_width = uncertainty_width / 2
+
+            # If no uncertainty, use 3 decimals
+            if uncertainty_half_width == 0:
+                return 3
+
+            # Find order of magnitude of uncertainty
+            try:
+                # Get the order of magnitude
+                magnitude = math.floor(math.log10(abs(uncertainty_half_width)))
+
+                # Convert magnitude to decimal places
+                # magnitude = -1 (0.1) → 1 decimal
+                # magnitude = -2 (0.01) → 2 decimals
+                # magnitude = -3 (0.001) → 3 decimals
+                decimals = -magnitude
+
+                # Cap at range [1, 3]
+                decimals = max(1, min(3, decimals))
+
+            except (ValueError, OverflowError):
+                # Fallback to 2 decimals if calculation fails
+                decimals = 2
+
+            return decimals
+
+        # Build fitted formula with adaptive decimals
+        formula_parts = []
+
+        # Format intercept (1-3 decimals based on its uncertainty)
+        if 'ci_lower' in model_results and 'ci_upper' in model_results:
+            ci_lower_intercept = model_results['ci_lower'].get('Intercept', intercept)
+            ci_upper_intercept = model_results['ci_upper'].get('Intercept', intercept)
+            decimals_intercept = get_decimals_from_uncertainty(intercept, ci_lower_intercept, ci_upper_intercept)
+        else:
+            decimals_intercept = 2  # Default if no CI available
+
+        # Format all coefficients with adaptive decimals
+        coef_formatted = {}
+        all_decimals = []
+
+        for name in coef_names:
+            coef_value = coef_no_intercept[name]
+
+            # Get decimals from uncertainty if available
+            if 'ci_lower' in model_results and 'ci_upper' in model_results:
+                try:
+                    ci_lower = model_results['ci_lower'][name]
+                    ci_upper = model_results['ci_upper'][name]
+                    decimals = get_decimals_from_uncertainty(coef_value, ci_lower, ci_upper)
+                except (KeyError, TypeError):
+                    decimals = 2  # Fallback
+            else:
+                decimals = 2  # Default if no CI available
+
+            coef_formatted[name] = (coef_value, decimals)
+            all_decimals.append(decimals)
+
+        # Special rule: If many coefficients round to zero, increase precision
+        # Try formatting with current decimals
+        test_formatted = []
+        for name in coef_names:
+            coef_value, decimals = coef_formatted[name]
+            test_str = f"{coef_value:.{decimals}f}"
+            test_formatted.append(test_str)
+
+        # Count how many are "0.0" or "-0.0" or "0.00" etc
+        zero_count = sum(1 for s in test_formatted if float(s) == 0.0)
+
+        # If more than 50% are zeros, add 1 decimal to all (but cap at 3)
+        if len(test_formatted) > 0 and zero_count / len(test_formatted) > 0.5:
+            for name in coef_names:
+                coef_value, decimals = coef_formatted[name]
+                # Increase decimals by 1, cap at 3
+                coef_formatted[name] = (coef_value, min(3, decimals + 1))
+            decimals_intercept = min(3, decimals_intercept + 1)
+
+        # Build formula string
+        intercept_str = f"{intercept:.{decimals_intercept}f}"
+        formula_parts.append(f"{y_var} = {intercept_str}")
+
+        for name in coef_names:
+            coef_value, decimals = coef_formatted[name]
+            coef_str = f"{coef_value:+.{decimals}f}"
+            formula_parts.append(f"{coef_str}·{name}")
+
+        fitted_formula = " ".join(formula_parts)
+
+        # Display in code block
+        st.code(fitted_formula, language="text")
+
+        # Optional: Show precision info
+        if 'ci_lower' in model_results:
+            st.info("📊 **Coefficient precision:** Decimal places based on confidence interval width")
+
+        # Copy to clipboard button
+        col1, col2, col3 = st.columns([2, 1, 2])
+        with col2:
+            if st.button("📋 Copy to clipboard", key="copy_fitted_formula_tab1"):
+                st.write("""
+                <script>
+                var text = `""" + fitted_formula.replace("`", "\\`") + """`
+                navigator.clipboard.writeText(text);
+                </script>
+                """, unsafe_allow_html=True)
+                st.success("✓ Formula copied!")
 
 
 def _display_design_analysis_results(design_results, x_vars, X_data):

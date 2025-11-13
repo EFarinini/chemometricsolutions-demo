@@ -24,10 +24,15 @@ try:
     from pca_utils.pca_plots import (
         plot_scores, plot_loadings, plot_scree,
         plot_cumulative_variance, plot_biplot, plot_loadings_line,
-        add_convex_hulls
+        plot_loadings_line_antiderivative, plot_loadings_antiderivative,
+        add_convex_hulls, add_sample_trajectory_lines, plot_line_scores
     )
     PLOTS_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    st.error(f"⚠️ Could not import plotting functions: {e}")
+    PLOTS_AVAILABLE = False
+except Exception as e:
+    st.error(f"⚠️ Unexpected error importing plotting functions: {e}")
     PLOTS_AVAILABLE = False
 
 try:
@@ -323,20 +328,20 @@ def _show_model_computation_tab(data: pd.DataFrame):
     
     # === NUMBER OF COMPONENTS ===
     st.markdown("### 📊 Number of Components")
-    
+
     max_components = min(len(numeric_data), len(numeric_data.columns)) - 1
     default_n = min(10, max_components)
-    
-    n_components = st.slider(
-        "Number of components to compute:",
+
+    n_components_display = st.slider(
+        "Number of components to display/analyze:",
         min_value=2,
         max_value=min(20, max_components),
         value=default_n,
-        help="NIPALS computes only requested components (efficient for large datasets)"
+        help="Components to display in plots and analysis (internally computes all for mathematical correctness)"
     )
-    
-    st.info(f"⚡ NIPALS will compute **{n_components}** components (max possible: {max_components})")
-    
+
+    st.info(f"🚀 Will compute **{n_components_display}** components using NIPALS algorithm")
+
     # === CHECK FOR MISSING VALUES ===
     has_missing = numeric_data.isnull().any().any()
     if has_missing:
@@ -345,36 +350,50 @@ def _show_model_computation_tab(data: pd.DataFrame):
         pct_missing = (n_missing / total_values) * 100
         st.warning(f"⚠️ Dataset contains **{n_missing:,}** missing values ({pct_missing:.2f}%)")
         st.info("✅ NIPALS algorithm handles missing values natively (no imputation needed)")
-    
+
     # === COMPUTE PCA BUTTON ===
     st.markdown("---")
-    
+
     if st.button("🚀 Compute PCA Model", type="primary", use_container_width=True):
         try:
             with st.spinner("Computing PCA with NIPALS algorithm..."):
                 import time
                 start_time = time.time()
-                
-                # Call NIPALS PCA
-                pca_dict = compute_pca(
+
+                # Compute ONLY the requested number of components
+                # No need to compute all - NIPALS is efficient with partial computation
+                pca_dict_display = compute_pca(
                     X=numeric_data,
-                    n_components=n_components,
+                    n_components=n_components_display,  # ← ONLY what user requested
                     center=center_data,
                     scale=scale_data
                 )
-                
+
                 elapsed = time.time() - start_time
-                
+
+                # Preprocess data for variance_explained calculation
+                # (NIPALS does this internally, but we need it for R formula)
+                X_preprocessed = numeric_data.copy()
+                if center_data:
+                    X_preprocessed = X_preprocessed - pca_dict_display['means']
+                if scale_data:
+                    X_preprocessed = X_preprocessed / pca_dict_display['stds']
+
                 # Store results in session state
                 st.session_state['pca_results'] = {
-                    **pca_dict,
+                    **pca_dict_display,
                     'method': 'Standard PCA',
                     'selected_vars': numeric_data.columns.tolist(),
                     'computation_time': elapsed,
                     'varimax_applied': False,
-                    'original_data': numeric_data
+                    'original_data': numeric_data,  # Raw data
+                    'X_preprocessed': X_preprocessed  # For variance_explained calculation
                 }
-                
+
+                # For backward compatibility with code below
+                pca_dict = pca_dict_display
+                n_components = n_components_display
+
                 st.success(f"✅ PCA computation completed in {elapsed:.2f} seconds!")
 
                 # DEBUG: Display variance calculation details
@@ -396,11 +415,11 @@ def _show_model_computation_tab(data: pd.DataFrame):
                     st.markdown("#### Variance Ratio Calculation:")
                     debug_df = pd.DataFrame({
                         'Component': [f'PC{i+1}' for i in range(n_components)],
-                        'Eigenvalue (λ)': pca_dict['eigenvalues'],
+                        'Eigenvalue (λ)': pca_dict['eigenvalues'][:n_components],
                         'total_ss': [total_ss] * n_components,
-                        'Ratio (λ/total_ss)': pca_dict['explained_variance_ratio'],
-                        'Ratio %': pca_dict['explained_variance_ratio'] * 100,
-                        'Cumulative %': pca_dict['cumulative_variance'] * 100
+                        'Ratio (λ/total_ss)': pca_dict['explained_variance_ratio'][:n_components],
+                        'Ratio %': pca_dict['explained_variance_ratio'][:n_components] * 100,
+                        'Cumulative %': pca_dict['cumulative_variance'][:n_components] * 100
                     })
                     st.dataframe(debug_df.style.format({
                         'Eigenvalue (λ)': '{:.4f}',
@@ -412,13 +431,13 @@ def _show_model_computation_tab(data: pd.DataFrame):
 
                     final_cumul = pca_dict['cumulative_variance'][-1] * 100
                     if final_cumul < 95:
-                        st.warning(f"⚠️ Cumulative variance is {final_cumul:.2f}% (computing only {n_components} out of {min(len(numeric_data), len(numeric_data.columns))-1} possible components)")
+                        st.warning(f"⚠️ Cumulative variance is {final_cumul:.2f}% with {n_components} components")
                     else:
                         st.success(f"✅ Cumulative variance: {final_cumul:.2f}%")
 
                 # Display results summary
                 st.markdown("### 📊 PCA Results Summary")
-                
+
                 # Create metrics row
                 metric_cols = st.columns(4)
                 with metric_cols[0]:
@@ -437,10 +456,10 @@ def _show_model_computation_tab(data: pd.DataFrame):
                 
                 variance_df = pd.DataFrame({
                     'Component': [f'PC{i+1}' for i in range(n_components)],
-                    'Eigenvalue': pca_dict['eigenvalues'],
-                    'Variance %': pca_dict['explained_variance_ratio'] * 100,
-                    'Cumulative %': pca_dict['cumulative_variance'] * 100,
-                    'Iterations': pca_dict['n_iterations']
+                    'Eigenvalue': pca_dict['eigenvalues'][:n_components],
+                    'Variance %': pca_dict['explained_variance_ratio'][:n_components] * 100,
+                    'Cumulative %': pca_dict['cumulative_variance'][:n_components] * 100,
+                    'Iterations': pca_dict['n_iterations'][:n_components]
                 })
                 
                 st.dataframe(
@@ -453,13 +472,264 @@ def _show_model_computation_tab(data: pd.DataFrame):
                     use_container_width=True,
                     hide_index=True
                 )
-                
-                st.info("👉 Go to other tabs to visualize scores, loadings, and diagnostics")
-        
+
+                # === SCREE PLOT: Guide component selection ===
+                # Only show if data has missing values (reconstruction context)
+                if has_missing:
+                    st.markdown("---")
+                    st.markdown("### 📊 Scree Plot - Choose Components")
+
+                    # Use simple Scree Plot from Tab 2 (consistent!)
+                    # Note: plot_scree is imported at module level (line 25)
+                    component_labels = [f'PC{i+1}' for i in range(len(pca_dict['explained_variance_ratio']))]
+                    fig = plot_scree(
+                        pca_dict['explained_variance_ratio'],
+                        is_varimax=False,
+                        component_labels=component_labels
+                    )
+
+                    st.plotly_chart(fig, use_container_width=True)
+
+                    # Find elbow point (80% cumulative variance)
+                    cumulative_pct = pca_dict['cumulative_variance'] * 100
+                    elbow_idx = 0
+                    for i, cum_var in enumerate(cumulative_pct):
+                        if cum_var >= 80:
+                            elbow_idx = i
+                            break
+
+                    # Fallback: if no elbow found, use last component
+                    if elbow_idx == 0 and cumulative_pct[-1] < 80:
+                        elbow_idx = len(cumulative_pct) - 1
+
+                    # Bounds check
+                    elbow_idx = min(elbow_idx, len(cumulative_pct) - 1)
+
+                    # Show key metrics
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric(
+                            "🎯 Elbow at PC",
+                            f"{elbow_idx + 1}",
+                            f"{cumulative_pct[elbow_idx]:.1f}% variance"
+                        )
+                    with col2:
+                        st.metric(
+                            "📊 Total Components",
+                            len(component_labels),
+                            f"{cumulative_pct[-1]:.1f}% variance"
+                        )
+                    with col3:
+                        st.metric(
+                            "💡 Recommended",
+                            f"{elbow_idx + 1}",
+                            "for reconstruction"
+                        )
+
+                    # Store suggested components
+                    st.session_state['suggested_components'] = elbow_idx + 1
+
+                    st.info("👉 Use recommended components for data reconstruction below")
+
         except Exception as e:
             st.error(f"❌ PCA computation failed: {str(e)}")
             st.exception(e)
-    
+
+    # === PCA RECONSTRUCTION: Fill NaN using PCA model ===
+    # Only show if PCA was computed AND data has missing values
+    if 'pca_results' in st.session_state and numeric_data.isnull().any().any():
+        pca_dict = st.session_state['pca_results']
+
+        if 'scores' in pca_dict and pca_dict is not None:
+            st.markdown("---")
+            st.markdown("### 🔧 Reconstruct Missing Values Using PCA Model")
+
+            # Get suggested components from Scree Plot (stored in session state)
+            suggested_components = st.session_state.get('suggested_components', 5)
+
+            st.info(f"""
+            **Based on the Scree Plot above:**
+            - **Suggested components**: {suggested_components} (≥80% cumulative variance)
+            - **Adjust slider** if you want more/fewer components
+            - **More components** = better reconstruction (may overfit)
+            - **Fewer components** = smoother estimates
+
+            **Formula**: X_reconstructed = Scores @ Loadings.T
+            """)
+
+            # User chooses how many components for reconstruction
+            col1, col2 = st.columns([3, 1])
+
+            with col1:
+                n_components_recon = st.slider(
+                    "🔢 Components for reconstruction:",
+                    min_value=1,
+                    max_value=pca_dict['n_components'],
+                    value=min(suggested_components, pca_dict['n_components']),
+                    help=f"Based on Scree Plot elbow point (suggested: {suggested_components})",
+                    key="n_comp_recon_slider"
+                )
+
+            with col2:
+                st.markdown("")
+                st.markdown("")
+                recon_button = st.button(
+                    "🔄 Reconstruct",
+                    use_container_width=True,
+                    key="recon_btn_main"
+                )
+
+            if recon_button:
+                try:
+                    with st.spinner("🔄 Reconstructing missing values using PCA..."):
+                        from pca_utils.missing_data_reconstruction import (
+                            reconstruct_missing_data,
+                            get_reconstruction_info
+                        )
+
+                        # Perform reconstruction
+                        X_reconstructed = reconstruct_missing_data(
+                            X=numeric_data,
+                            scores=pca_dict['scores'],
+                            loadings=pca_dict['loadings'],
+                            n_components=n_components_recon
+                        )
+
+                        # Get reconstruction statistics
+                        recon_info = get_reconstruction_info(numeric_data, X_reconstructed)
+
+                        # Display reconstruction summary
+                        st.markdown("#### 📊 Reconstruction Summary:")
+
+                        col1, col2, col3, col4 = st.columns(4)
+                        with col1:
+                            st.metric(
+                                "Missing Before",
+                                f"{recon_info['n_missing_before']:,}",
+                                delta=-recon_info['n_filled']
+                            )
+                        with col2:
+                            st.metric(
+                                "Missing After",
+                                f"{recon_info['n_missing_after']:,}"
+                            )
+                        with col3:
+                            st.metric(
+                                "Values Filled",
+                                f"{recon_info['n_filled']:,}"
+                            )
+                        with col4:
+                            fill_rate = (recon_info['n_filled'] / recon_info['n_missing_before'] * 100) if recon_info['n_missing_before'] > 0 else 0
+                            st.metric(
+                                "Fill Rate",
+                                f"{fill_rate:.1f}%"
+                            )
+
+                        # Statistics of reconstructed values
+                        st.markdown("#### 📈 Statistics of Reconstructed Values:")
+                        stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
+                        with stat_col1:
+                            st.metric(
+                                "Mean",
+                                f"{recon_info['filled_mean']:.4f}"
+                            )
+                        with stat_col2:
+                            st.metric(
+                                "Std Dev",
+                                f"{recon_info['filled_std']:.4f}"
+                            )
+                        with stat_col3:
+                            st.metric(
+                                "Min",
+                                f"{recon_info['filled_min']:.4f}"
+                            )
+                        with stat_col4:
+                            st.metric(
+                                "Max",
+                                f"{recon_info['filled_max']:.4f}"
+                            )
+
+                        # Download section
+                        st.markdown("#### 📥 Download Reconstructed Data:")
+
+                        # Create Excel file in memory
+                        from io import BytesIO
+
+                        buffer = BytesIO()
+                        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                            X_reconstructed.to_excel(
+                                writer,
+                                sheet_name='Data',
+                                index=True
+                            )
+
+                            # Add reconstruction info to second sheet
+                            info_df = pd.DataFrame({
+                                'Metric': [
+                                    'Missing Values (Before)',
+                                    'Missing Values (After)',
+                                    'Values Filled',
+                                    'Fill Rate (%)',
+                                    'Components Used',
+                                    'Reconstruction Date',
+                                    'Mean of Filled',
+                                    'Std Dev of Filled',
+                                    'Min of Filled',
+                                    'Max of Filled'
+                                ],
+                                'Value': [
+                                    recon_info['n_missing_before'],
+                                    recon_info['n_missing_after'],
+                                    recon_info['n_filled'],
+                                    f"{(recon_info['n_filled'] / recon_info['n_missing_before'] * 100) if recon_info['n_missing_before'] > 0 else 0:.2f}",
+                                    n_components_recon,
+                                    pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S'),
+                                    f"{recon_info['filled_mean']:.4f}",
+                                    f"{recon_info['filled_std']:.4f}",
+                                    f"{recon_info['filled_min']:.4f}",
+                                    f"{recon_info['filled_max']:.4f}"
+                                ]
+                            })
+                            info_df.to_excel(
+                                writer,
+                                sheet_name='Reconstruction Info',
+                                index=False
+                            )
+
+                        buffer.seek(0)
+
+                        st.download_button(
+                            label="📥 Download as Excel (.xlsx)",
+                            data=buffer.getvalue(),
+                            file_name=f"data_reconstructed_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True,
+                            key="download_recon_button"
+                        )
+
+                        # Preview section
+                        st.markdown("#### 👁️ Preview of Reconstructed Data:")
+
+                        # Show first few rows
+                        preview_rows = min(10, len(X_reconstructed))
+                        st.dataframe(
+                            X_reconstructed.head(preview_rows),
+                            use_container_width=True,
+                            height=300
+                        )
+
+                        # Success message
+                        st.success(
+                            f"✅ Reconstruction complete!\n\n"
+                            f"• {recon_info['n_filled']:,} missing values filled\n"
+                            f"• Using {n_components_recon} PCA components\n"
+                            f"• Download ready for analysis"
+                        )
+
+                except Exception as e:
+                    st.error(f"❌ Reconstruction failed: {str(e)}")
+                    st.info("💡 Try with fewer components or check data format")
+
     # === VARIMAX ROTATION (OPTIONAL) ===
     if 'pca_results' in st.session_state:
         st.markdown("---")
@@ -612,8 +882,9 @@ def _show_variance_plots_tab():
 
     elif plot_type == "🎯 Individual Variable Contribution":
         comp_label = "Factor" if is_varimax else "PC"
-        st.markdown(f"### 🎯 Variable Contribution Analysis")
-        st.markdown("*Based on significant components identified from Scree Plot*")
+        st.markdown(f"### 🎯 Variance of Each Variable Explained")
+        st.markdown("*Fraction of each variable's variance explained by selected components*")
+        st.markdown("*Equivalent to R chemometrics::pcaVarexpl()*")
 
         # Step 1: Select significant components
         st.markdown("#### Step 1: Select Number of Significant Components")
@@ -628,77 +899,101 @@ def _show_variance_plots_tab():
             help="Look at the Scree Plot to identify where the curve 'breaks' or levels off"
         )
 
-        # Step 2: Calculate weighted contributions
-        st.markdown(f"#### Step 2: Variable Contributions (first {n_significant} {comp_label.lower()}s)")
+        # Step 2: Calculate variance explained per variable
+        st.markdown(f"#### Step 2: Explained Variance by Variable")
 
-        # Use calculate_contributions from pca_utils.pca_statistics
-        contrib_df = calculate_contributions(
-            pca_results['loadings'],
-            pca_results['explained_variance_ratio'],
-            n_components=n_significant,
-            normalize=True
+        # Import from pca_utils.pca_statistics
+        from pca_utils.pca_statistics import calculate_variable_variance_explained
+
+        # Get the preprocessed data from PCA results
+        X_preprocessed = pca_results.get('X_preprocessed')
+
+        if X_preprocessed is None:
+            st.error("❌ Preprocessed data not available. Please recompute PCA model.")
+            return
+
+        # Get scores and loadings
+        scores = pca_results['scores']
+        loadings = pca_results['loadings']
+
+        # Calculate variance explained using EXACT R formula:
+        # varexpl = 1 - Σ(residuals²) / Σ(X²)
+        # where residuals = X - T[1:a] × P[1:a]ᵀ
+        var_expl_df = calculate_variable_variance_explained(
+            X_preprocessed=X_preprocessed,
+            scores=scores,
+            loadings=loadings,
+            n_components=n_significant
         )
 
-        # Extract data for plotting
-        contributions_pct = contrib_df['Contribution_%'].values
-        var_names = contrib_df['Variable'].values
-
-        # Sort for plot
-        sorted_idx = np.argsort(contributions_pct)[::-1]
-        sorted_vars = var_names[sorted_idx]
-        sorted_contributions = contributions_pct[sorted_idx]
-
-        # Create plot
+        # Create bar plot
         fig = go.Figure()
 
+        # Use ratio as-is (0-1.0 scale, matching R-CAT)
         fig.add_trace(go.Bar(
-            x=sorted_vars,
-            y=sorted_contributions,
-            name='Variable Contribution',
-            marker_color='darkgreen',
-            text=[f'{val:.1f}%' for val in sorted_contributions],
+            x=var_expl_df['Variable'],
+            y=var_expl_df['Variance_Explained_Ratio'],
+            name='Variance Explained',
+            marker=dict(
+                color=var_expl_df['Variance_Explained_Ratio'],
+                colorscale='Viridis',
+                showscale=True,
+                colorbar=dict(title="Variance Ratio")
+            ),
+            text=[f'{val:.3f}' for val in var_expl_df['Variance_Explained_Ratio']],
             textposition='outside'
         ))
 
-        total_var_explained = pca_results['explained_variance_ratio'][:n_significant].sum() * 100
-
         fig.update_layout(
-            title=f"Variable Contributions to Total Explained Variance<br>({n_significant} significant {comp_label.lower()}s: {total_var_explained:.1f}% total variance)",
+            title=f"Variance of Each Variable Explained by {n_significant} Significant {comp_label.lower()}s",
             xaxis_title="Variables",
-            yaxis_title="Contribution (%)",
+            yaxis_title="Variance Explained (0-1.0)",
             height=600,
-            xaxis={'tickangle': 45}
+            xaxis={'tickangle': 45},
+            showlegend=False,
+            yaxis=dict(range=[0, max(1.0, var_expl_df['Variance_Explained_Ratio'].max() * 1.1)])
         )
 
-        st.plotly_chart(fig, use_container_width=True, key="contribution_plot")
+        st.plotly_chart(fig, use_container_width=True, key="variable_variance_plot")
 
         # Step 3: Detailed table
-        st.markdown("#### Step 3: Detailed Contribution Table")
+        st.markdown("#### Step 3: Detailed Results Table")
 
-        # Sort contributions for display
-        contrib_df_sorted = contrib_df.sort_values('Contribution_%', ascending=False)
-
-        st.dataframe(contrib_df_sorted.round(2), use_container_width=True)
+        st.dataframe(
+            var_expl_df.round(2),
+            use_container_width=True,
+            hide_index=True
+        )
 
         # Interpretation
         st.markdown("#### 📋 Interpretation")
-        top_vars = contrib_df_sorted.head(3)['Variable'].tolist()
-        total_explained = pca_results['explained_variance_ratio'][:n_significant].sum() * 100
+
+        top_vars = var_expl_df.head(3)
+        # Convert ratio (0-1) to percentage (0-100)
+        avg_explained = var_expl_df['Variance_Explained_Ratio'].mean() * 100
 
         st.success(f"""
-        **Key Findings:**
-        - **{n_significant} significant components** explain **{total_explained:.1f}%** of total variance
-        - **Top 3 contributing variables**: {', '.join(top_vars)}
-        - **Top variable ({top_vars[0]})** contributes **{contrib_df_sorted.iloc[0]['Contribution_%']:.1f}%** to the explained variance
+        **Key Findings (using {n_significant} significant {comp_label.lower()}s):**
+
+        - **Average variance explained per variable**: {avg_explained:.1f}%
+        - **Top 3 best-explained variables**:
+          1. {top_vars.iloc[0]['Variable']}: {top_vars.iloc[0]['Variance_Explained_Ratio']*100:.1f}%
+          2. {top_vars.iloc[1]['Variable']}: {top_vars.iloc[1]['Variance_Explained_Ratio']*100:.1f}%
+          3. {top_vars.iloc[2]['Variable']}: {top_vars.iloc[2]['Variance_Explained_Ratio']*100:.1f}%
+
+        - **Variables are better represented when their variance is > 80%**
         """)
 
-        if n_significant >= 2:
-            pc_names = pca_results['loadings'].columns[:n_significant].tolist()
-            var_ratios = pca_results['explained_variance_ratio'][:n_significant]
-            st.info(f"""
-            **Contribution Breakdown:**
-            - {pc_names[0]} explains {var_ratios[0]*100:.1f}% of total variance
-            - {pc_names[1]} explains {var_ratios[1]*100:.1f}% of total variance
+        # Show variables with low representation
+        low_var_threshold = 0.50  # 50% as ratio (0-1)
+        low_explained = var_expl_df[var_expl_df['Variance_Explained_Ratio'] < low_var_threshold]
+
+        if len(low_explained) > 0:
+            st.warning(f"""
+            ⚠️ **Variables with low representation** (< {low_var_threshold*100:.0f}%):
+            {', '.join(map(str, low_explained['Variable'].tolist()))}
+
+            → Consider adding more components or these variables follow different patterns
             """)
 
 
@@ -743,35 +1038,68 @@ def _show_loadings_plots_tab():
     if loading_plot_type == "📊 Loading Scatter Plot":
         st.markdown(f"### 📊 Loading Scatter Plot{title_suffix}")
 
-        # Use plot_loadings from pca_utils.pca_plots
-        fig = plot_loadings(
-            loadings,
-            pc_x,
-            pc_y,
-            pca_results['explained_variance_ratio'],
-            is_varimax=is_varimax,
-            color_by_magnitude=is_varimax
+        # === NEW: ANTIDERIVATIVE OPTION ===
+        use_antiderivative = st.checkbox(
+            "📊 Show Antiderivative (for derivative-preprocessed data)",
+            value=False,
+            key="scatter_antideriv_checkbox",
+            help="Enable if data was preprocessed with row derivative transformation"
         )
 
-        st.plotly_chart(fig, use_container_width=True, key="loadings_scatter")
+        derivative_order = 1
+        if use_antiderivative:
+            derivative_order = st.radio(
+                "Derivative order:",
+                [1, 2],
+                horizontal=True,
+                key="scatter_deriv_order",
+                help="Select the order of derivative applied to original data"
+            )
 
-        if is_varimax:
-            st.info("💡 In Varimax rotation, variables should load highly on few factors (simple structure)")
+        if pc_x != pc_y:
+            if use_antiderivative:
+                # Plot antiderivative scatter
+                fig = plot_loadings_antiderivative(
+                    loadings,
+                    pc_x,
+                    pc_y,
+                    pca_results['explained_variance_ratio'],
+                    derivative_order=derivative_order,
+                    is_varimax=is_varimax,
+                    color_by_magnitude=is_varimax
+                )
+            else:
+                # Plot normal scatter
+                fig = plot_loadings(
+                    loadings,
+                    pc_x,
+                    pc_y,
+                    pca_results['explained_variance_ratio'],
+                    is_varimax=is_varimax,
+                    color_by_magnitude=is_varimax
+                )
 
-        # Display variance metrics
-        pc_x_idx = list(loadings.columns).index(pc_x)
-        pc_y_idx = list(loadings.columns).index(pc_y)
-        var_x = pca_results['explained_variance_ratio'][pc_x_idx] * 100
-        var_y = pca_results['explained_variance_ratio'][pc_y_idx] * 100
-        var_total = var_x + var_y
+            st.plotly_chart(fig, use_container_width=True, key="loadings_scatter")
 
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric(f"{pc_x} Variance", f"{var_x:.1f}%")
-        with col2:
-            st.metric(f"{pc_y} Variance", f"{var_y:.1f}%")
-        with col3:
-            st.metric("Combined Variance", f"{var_total:.1f}%")
+            if is_varimax:
+                st.info("💡 In Varimax rotation, variables should load highly on few factors (simple structure)")
+
+            # Display variance metrics
+            pc_x_idx = list(loadings.columns).index(pc_x)
+            pc_y_idx = list(loadings.columns).index(pc_y)
+            var_x = pca_results['explained_variance_ratio'][pc_x_idx] * 100
+            var_y = pca_results['explained_variance_ratio'][pc_y_idx] * 100
+            var_total = var_x + var_y
+
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric(f"{pc_x} Variance", f"{var_x:.1f}%")
+            with col2:
+                st.metric(f"{pc_y} Variance", f"{var_y:.1f}%")
+            with col3:
+                st.metric("Combined Variance", f"{var_total:.1f}%")
+        else:
+            st.warning("⚠️ X and Y axes must be different components")
 
     # === LOADING LINE PLOT ===
     elif loading_plot_type == "📈 Loading Line Plot":
@@ -784,13 +1112,38 @@ def _show_loadings_plots_tab():
             key="loading_line_components"
         )
 
-        if selected_comps:
-            # Use plot_loadings_line from pca_utils.pca_plots
-            fig = plot_loadings_line(
-                loadings,
-                selected_comps,
-                is_varimax=is_varimax
+        # === NEW: ANTIDERIVATIVE OPTION ===
+        use_antiderivative = st.checkbox(
+            "📊 Show Antiderivative (for derivative-preprocessed data)",
+            value=False,
+            help="Enable if data was preprocessed with row derivative transformation"
+        )
+
+        derivative_order = 1
+        if use_antiderivative:
+            derivative_order = st.radio(
+                "Derivative order:",
+                [1, 2],
+                horizontal=True,
+                help="Select the order of derivative applied to original data"
             )
+
+        if selected_comps:
+            if use_antiderivative:
+                # Plot antiderivative
+                fig = plot_loadings_line_antiderivative(
+                    loadings,
+                    selected_comps,
+                    derivative_order=derivative_order,
+                    is_varimax=is_varimax
+                )
+            else:
+                # Plot normal loadings
+                fig = plot_loadings_line(
+                    loadings,
+                    selected_comps,
+                    is_varimax=is_varimax
+                )
 
             st.plotly_chart(fig, use_container_width=True, key="loadings_line")
         else:
@@ -992,6 +1345,168 @@ def _show_score_plots_tab():
             show_convex_hull = False
             hull_opacity = 0.2
 
+        # === TIER 2: Trajectory Lines Strategy ===
+        st.markdown("---")
+        st.markdown("**🎯 Sample Trajectory Lines**")
+        st.caption("Connect samples in order to visualize temporal or sequential progression")
+
+        col_traj1, col_traj2, col_traj3 = st.columns(3)
+        with col_traj1:
+            trajectory_strategy = st.selectbox(
+                "Trajectory strategy:",
+                ["None", "Sequential", "Categorical"],
+                help="None: no lines | Sequential: one line through all samples | Categorical: separate lines per group"
+            )
+
+        with col_traj2:
+            trajectory_width = st.slider(
+                "Line width:",
+                min_value=1,
+                max_value=5,
+                value=2,
+                step=1,
+                key='trajectory_width_2d'
+            )
+
+        with col_traj3:
+            trajectory_opacity = st.slider(
+                "Line opacity:",
+                min_value=0.0,
+                max_value=1.0,
+                value=0.6,
+                step=0.05,
+                key='trajectory_opacity_2d'
+            )
+
+        # === Marker Size Control ===
+        st.markdown("---")
+        st.markdown("### ⚫ Marker Size")
+        marker_size = st.slider(
+            "Point size:",
+            min_value=1,
+            max_value=20,
+            value=5,
+            step=1,
+            key="marker_size_2d"
+        )
+
+        # If categorical strategy is selected, we'll use the color_by variable for grouping
+        trajectory_groupby_column = None
+        if trajectory_strategy == "Categorical" and color_by != "None" and color_by != "Index":
+            if data is not None and color_by in data.columns:
+                try:
+                    trajectory_groupby_column = data.loc[scores.index, color_by]
+                    st.info(f"ℹ️ Trajectory lines will be grouped by: {color_by}")
+                except:
+                    st.warning(f"⚠️ Could not use '{color_by}' for trajectory grouping")
+                    trajectory_strategy = "None"
+            else:
+                st.warning("⚠️ Categorical trajectory requires a valid categorical color variable")
+                trajectory_strategy = "None"
+        elif trajectory_strategy == "Categorical":
+            st.warning("⚠️ Please select a categorical color variable to use categorical trajectories")
+            trajectory_strategy = "None"
+
+        # === TIER 3: Line Coloring (NEW!) ===
+        # DEFAULT: Always use sequential index coloring (independent from point colors!)
+        trajectory_color_variable = None
+        trajectory_color_by_index = True  # ← FIXED: Default to True (sequential 1→N)
+        trajectory_color_vector = None
+
+        if trajectory_strategy != "None":
+            st.markdown("---")
+            st.markdown("**🎨 Trajectory Line Coloring**")
+            st.caption("Color lines by sample sequence or numeric variable (BLUE → PURPLE → RED gradient)")
+
+            # Get numeric columns for coloring options
+            numeric_cols = []
+            if data is not None:
+                numeric_cols = data.select_dtypes(include=[np.number]).columns.tolist()
+
+            # Color by selector
+            color_trajectory_by = st.selectbox(
+                "Color trajectory by:",
+                ["Sequential Index (default)"] + numeric_cols,
+                key="color_trajectory_by_2d",
+                help="Sequential Index: 1→N per batch (BLUE→RED) | Or select numeric variable"
+            )
+
+            # Determine coloring strategy
+            if color_trajectory_by == "Sequential Index (default)":
+                # Keep default: trajectory_color_by_index = True
+                # trajectory_color_variable = None (already set above)
+                st.info("💡 Lines colored by sample sequence: **1→N** (BLUE at start, RED at end)")
+            else:
+                # User selected a numeric variable to override sequential index
+                trajectory_color_variable = color_trajectory_by
+                trajectory_color_by_index = False  # Disable index, use variable instead
+                st.info(f"💡 Lines colored by **{color_trajectory_by}** values (BLUE=low, RED=high)")
+
+            # [NEW] Per-category custom coloring option (for both Sequential Index and numeric variables)
+            # CHANGED: Removed trajectory_color_variable check - now works for Sequential Index too!
+            if trajectory_strategy == "Categorical":
+                st.markdown("**🔧 Batch-Specific Coloring:**")
+
+                use_custom_color = st.checkbox(
+                    "Apply coloring to specific batch only",
+                    value=False,
+                    key="use_custom_trajectory_color_2d",
+                    help="Highlight one batch (BRIGHT) while dimming others (BACKGROUND)"
+                )
+
+                if use_custom_color and trajectory_groupby_column is not None:
+                    unique_categories = sorted(trajectory_groupby_column.dropna().unique())
+
+                    if len(unique_categories) > 0:
+                        selected_batch_for_color = st.selectbox(
+                            "Apply coloring to batch:",
+                            unique_categories,
+                            key="batch_for_color_2d"
+                        )
+
+                        # Handle Sequential Index mode
+                        if color_trajectory_by == "Sequential Index (default)":
+                            # Sequential Index with batch highlighting
+                            st.info(f"✨ **{selected_batch_for_color}** will be BRIGHT (full opacity)\nOther batches will be DIM (background)")
+
+                            # Create marker for dimming mode (no numeric variable needed)
+                            trajectory_color_vector = {
+                                'category': selected_batch_for_color,
+                                'variable': None,  # No numeric variable
+                                'mode': 'sequential_bright',  # Flag for dimming mode
+                                'values': None,
+                                'min': None,
+                                'max': None
+                            }
+
+                        else:
+                            # Numeric variable coloring (original behavior)
+                            try:
+                                batch_mask = trajectory_groupby_column == selected_batch_for_color
+                                batch_indices = scores.index[batch_mask]
+                                batch_color_values = data.loc[batch_indices, trajectory_color_variable].dropna()
+
+                                if len(batch_color_values) > 0:
+                                    min_val = batch_color_values.min()
+                                    max_val = batch_color_values.max()
+
+                                    st.success(f"✅ **{selected_batch_for_color}** color scale: 🔵 **{min_val:.2f}** → 🔴 **{max_val:.2f}**")
+                                    st.caption(f"Other batches will be DIM (gray background)")
+
+                                    # Create trajectory color vector for numeric coloring
+                                    trajectory_color_vector = {
+                                        'category': selected_batch_for_color,
+                                        'variable': trajectory_color_variable,
+                                        'mode': 'numeric_color',  # Flag for numeric coloring
+                                        'values': data.loc[batch_indices, trajectory_color_variable],
+                                        'min': min_val,
+                                        'max': max_val
+                                    }
+                                else:
+                                    st.warning(f"⚠️ No valid values found for {trajectory_color_variable} in {selected_batch_for_color}")
+                            except Exception as e:
+                                st.warning(f"⚠️ Error extracting color values: {str(e)}")
+
         # Prepare color data and text labels
         color_data = None
         if color_by != "None":
@@ -1101,6 +1616,55 @@ def _show_score_plots_tab():
             except Exception as e:
                 st.warning(f"⚠️ Could not add convex hulls: {str(e)}")
 
+        # Add sample trajectory lines with gradient coloring
+        # IMPORTANT: Lines use their own coloring (sequential index or variable)
+        # They are INDEPENDENT from point colors (color_discrete_map NOT passed)
+        if trajectory_strategy != "None" and PLOTS_AVAILABLE:
+            try:
+                fig = add_sample_trajectory_lines(
+                    fig=fig,
+                    scores=scores,
+                    pc_x=pc_x,
+                    pc_y=pc_y,
+                    line_strategy=trajectory_strategy.lower(),
+                    groupby_column=trajectory_groupby_column,
+                    # color_discrete_map NOT passed - lines are independent!
+                    line_width=trajectory_width,
+                    line_opacity=trajectory_opacity,
+                    color_by_index=trajectory_color_by_index,
+                    color_variable=trajectory_color_variable,
+                    original_data=data,
+                    trajectory_color_vector=trajectory_color_vector
+                )
+            except Exception as e:
+                st.warning(f"⚠️ Could not add trajectory lines: {str(e)}")
+
+        # Apply marker size to scatter points only (not trajectory lines)
+        fig.update_traces(marker=dict(size=marker_size), selector=dict(mode='markers'))
+
+        # [NEW] Selective batch highlighting: Dim non-selected batches
+        # If batch-specific coloring is active, make selected batch PROMINENT and dim others
+        if trajectory_color_vector and trajectory_groupby_column is not None:
+            selected_batch = trajectory_color_vector['category']
+
+            # Update opacity for each batch's scatter points
+            # Get unique batches from the groupby column
+            unique_batches = trajectory_groupby_column.dropna().unique()
+
+            for batch_name in unique_batches:
+                if batch_name != selected_batch:
+                    # Dim non-selected batches to 0.15 (very faint background)
+                    # This makes them almost invisible, highlighting the selected batch
+                    try:
+                        # Update traces that match this batch name
+                        # Note: Plotly scatter points have the category as their name
+                        fig.update_traces(
+                            opacity=0.15,
+                            selector=dict(name=str(batch_name))
+                        )
+                    except:
+                        pass  # Skip if selector doesn't match
+
         # Update text position
         if show_labels_from != "None":
             fig.update_traces(textposition="top center")
@@ -1115,14 +1679,58 @@ def _show_score_plots_tab():
         fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.7)
         fig.add_vline(x=0, line_dash="dash", line_color="gray", opacity=0.7)
 
-        # UPDATE LAYOUT with equal scale and lasso selection
+        # UPDATE LAYOUT with equal scale and lasso selection - COMPACT LEGEND NO BORDER
         fig.update_layout(
-            height=600,
-            width=600,  # FORCE SQUARE
+            # TITLE: centered and compact
+            title=dict(
+                text=fig.layout.title.text,  # Keep existing title
+                x=0.5,
+                xanchor='center',
+                y=0.98,
+                yanchor='top',
+                font=dict(size=13)
+            ),
+
+            # DIMENSIONS: compact height, full width
+            height=550,
+            width=None,  # Let it use container width
+
+            # MARGINS: reduce whitespace
+            margin=dict(l=60, r=120, t=70, b=60),
+
+            # TEMPLATE and INTERACTION
             template='plotly_white',
-            dragmode='lasso',  # Enable lasso selection by default
-            xaxis=dict(range=axis_range, scaleanchor="y", scaleratio=1, constrain="domain"),
-            yaxis=dict(range=axis_range, scaleanchor="x", scaleratio=1, constrain="domain")
+            dragmode='lasso',
+
+            # EQUAL ASPECT RATIO
+            xaxis=dict(
+                range=axis_range,
+                scaleanchor="y",
+                scaleratio=1,
+                constrain="domain",
+                title=dict(font=dict(size=11))
+            ),
+            yaxis=dict(
+                range=axis_range,
+                scaleanchor="x",
+                scaleratio=1,
+                constrain="domain",
+                title=dict(font=dict(size=11))
+            ),
+
+            # LEGEND: NO BORDER, closer to edges (ULTRA COMPACT!)
+            legend=dict(
+                x=0.99,           # Very close to right edge
+                y=0.99,           # Very close to top edge
+                xanchor='right',
+                yanchor='top',
+                bgcolor='rgba(255, 255, 255, 0.9)',  # Slightly opaque white
+                borderwidth=0,     # NO BORDER (removes border completely)
+                font=dict(size=10)
+            ),
+
+            # HOVER: compact mode
+            hovermode='closest'
         )
 
         # Display plot with selection enabled
@@ -1504,15 +2112,21 @@ def _show_score_plots_tab():
         # Update point size
         fig_3d.update_traces(marker=dict(size=point_size_3d))
 
-        # Update layout
+        # Update layout with centered title
         fig_3d.update_layout(
+            title=dict(
+                x=0.5,
+                xanchor='center',
+                font=dict(size=16)
+            ),
             height=700,
             template='plotly_white',
             scene=dict(
                 xaxis_title=f'{pc_x} ({var_x:.1f}%)',
                 yaxis_title=f'{pc_y} ({var_y:.1f}%)',
                 zaxis_title=f'{pc_z} ({var_z:.1f}%)'
-            )
+            ),
+            margin=dict(t=100)
         )
 
         st.plotly_chart(fig_3d, use_container_width=True, key="scores_3d")
@@ -1574,8 +2188,7 @@ def _show_score_plots_tab():
 
     if pc_selection:
         # Use dedicated function from pca_plots
-        from pca_utils.pca_plots import plot_line_scores
-
+        # Note: plot_line_scores is imported at module level (line 28)
         fig_line = plot_line_scores(
             scores=scores,
             pc_names=pc_selection,

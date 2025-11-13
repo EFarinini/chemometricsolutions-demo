@@ -239,26 +239,28 @@ def plot_scores(
             x=scores[pc_x],
             y=scores[pc_y],
             text=text_param,
-            title=f"Scores: {pc_x} vs {pc_y}{title_suffix}<br>Total Explained Variance: {var_total:.1f}%",
             labels={'x': f'{pc_x} ({var_x:.1f}%)', 'y': f'{pc_y} ({var_y:.1f}%)'}
         )
+        title_text = f"Scores: {pc_x} vs {pc_y}{title_suffix}<br>Total Explained Variance: {var_total:.1f}%"
     else:
         # Determine if color data is quantitative or categorical
         color_data = color_by if isinstance(color_by, pd.Series) else pd.Series(color_by, index=scores.index)
 
         if is_quantitative_variable(color_data):
             # Quantitative: use blue-to-red continuous scale
+            color_name = color_data.name if hasattr(color_data, 'name') and color_data.name else 'variable'
             fig = px.scatter(
                 x=scores[pc_x],
                 y=scores[pc_y],
                 color=color_data,
                 text=text_param,
-                title=f"Scores: {pc_x} vs {pc_y} (colored by variable){title_suffix}<br>Total Explained Variance: {var_total:.1f}%",
-                labels={'x': f'{pc_x} ({var_x:.1f}%)', 'y': f'{pc_y} ({var_y:.1f}%)', 'color': 'Value'},
-                color_continuous_scale=[(0, 'blue'), (1, 'red')]
+                color_continuous_scale=[(0.0, 'rgb(0, 0, 255)'), (0.5, 'rgb(128, 0, 128)'), (1.0, 'rgb(255, 0, 0)')],
+                labels={'x': f'{pc_x} ({var_x:.1f}%)', 'y': f'{pc_y} ({var_y:.1f}%)', 'color': color_name}
             )
+            title_text = f"Scores: {pc_x} vs {pc_y} (colored by {color_name}){title_suffix}<br>Total Explained Variance: {var_total:.1f}%"
         else:
             # Categorical: use discrete color map
+            color_name = color_data.name if hasattr(color_data, 'name') and color_data.name else 'group'
             unique_values = color_data.dropna().unique()
             color_discrete_map = create_categorical_color_map(unique_values)
 
@@ -267,10 +269,10 @@ def plot_scores(
                 y=scores[pc_y],
                 color=color_data,
                 text=text_param,
-                title=f"Scores: {pc_x} vs {pc_y} (colored by category){title_suffix}<br>Total Explained Variance: {var_total:.1f}%",
-                labels={'x': f'{pc_x} ({var_x:.1f}%)', 'y': f'{pc_y} ({var_y:.1f}%)', 'color': 'Category'},
-                color_discrete_map=color_discrete_map
+                color_discrete_map=color_discrete_map,
+                labels={'x': f'{pc_x} ({var_x:.1f}%)', 'y': f'{pc_y} ({var_y:.1f}%)', 'color': color_name}
             )
+            title_text = f"Scores: {pc_x} vs {pc_y} (colored by {color_name}){title_suffix}<br>Total Explained Variance: {var_total:.1f}%"
 
     # Add zero reference lines
     fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.7)
@@ -284,14 +286,32 @@ def plot_scores(
         except Exception:
             pass  # Silently skip if convex hull fails
 
-    # Configure text labels
+    # Configure text labels with optimized rendering
     if show_labels:
-        fig.update_traces(textposition="top center")
+        # Convert labels to simple integers if they are numeric indices
+        text_param_vals = [str(int(float(t))) if str(t).replace('.', '').isdigit() else str(t)
+                          for t in text_param]
 
-    # Set equal aspect ratio
+        # Update traces with optimized text display
+        fig.update_traces(
+            text=text_param_vals,
+            textposition='middle center',      # Center on points
+            textfont=dict(
+                size=9,                        # Smaller, less intrusive
+                color='rgba(0, 0, 0, 0.6)'    # Slightly transparent
+            )
+        )
+
+    # Set equal aspect ratio with centered title and compact layout
     fig.update_layout(
+        title=dict(
+            text=title_text,
+            x=0.5,                          # Center horizontally
+            xanchor='center',
+            font=dict(size=14, color='#333')  # Slightly smaller, darker
+        ),
         height=600,
-        width=600,
+        width=900,                          # Wider for better use of space
         xaxis=dict(
             range=axis_range,
             scaleanchor="y",
@@ -301,7 +321,21 @@ def plot_scores(
         yaxis=dict(
             range=axis_range,
             constrain="domain"
-        )
+        ),
+        # Compact margins
+        margin=dict(l=60, r=60, t=80, b=60),
+        # Legend inside plot, top-right corner - NO BORDER
+        legend=dict(
+            x=0.99,           # Very close to right edge
+            y=0.99,           # Very close to top edge
+            xanchor='right',
+            yanchor='top',
+            bgcolor='rgba(255, 255, 255, 0.9)',  # Slightly opaque white
+            borderwidth=0,     # NO BORDER (removes border completely)
+            font=dict(size=10)
+        ),
+        hovermode='closest',
+        template='plotly_white'
     )
 
     return fig
@@ -423,6 +457,7 @@ def plot_loadings_line(
     ----------
     loadings : pd.DataFrame
         DataFrame containing PCA loadings.
+        Index should contain variable names.
     selected_components : List[str]
         List of component names to plot (e.g., ['PC1', 'PC2']).
     is_varimax : bool, optional
@@ -435,34 +470,285 @@ def plot_loadings_line(
 
     Examples
     --------
-    >>> loadings_df = pd.DataFrame({'PC1': [0.1, 0.2, 0.8], 'PC2': [0.9, 0.1, 0.1]})
+    >>> loadings_df = pd.DataFrame(
+    ...     {'PC1': [0.1, 0.2, 0.8], 'PC2': [0.9, 0.1, 0.1]},
+    ...     index=['Var1', 'Var2', 'Var3']
+    ... )
     >>> fig = plot_loadings_line(loadings_df, ['PC1', 'PC2'])
     """
     title_suffix = " (Varimax)" if is_varimax else ""
 
     fig = go.Figure()
 
+    # Create x-axis with variable indices for positioning
+    x_indices = list(range(len(loadings.index)))
+    variable_names = list(loadings.index)
+
     for comp in selected_components:
         if comp in loadings.columns:
             fig.add_trace(go.Scatter(
-                x=list(range(len(loadings.index))),
+                x=x_indices,
                 y=loadings[comp],
                 mode='lines+markers',
                 name=comp,
-                text=loadings.index,
+                text=variable_names,
                 hovertemplate='Variable: %{text}<br>Loading: %{y:.3f}<extra></extra>'
             ))
 
     fig.update_layout(
         title=f"Loading Line Plot{title_suffix}",
-        xaxis_title="Variable Index",
+        xaxis_title="Variable Name",
         yaxis_title="Loading Value",
         height=500,
         hovermode='x unified'
     )
 
+    # Replace x-axis tick labels with variable names
+    # Show every nth label to avoid crowding (depends on number of variables)
+    n_vars = len(loadings.index)
+    if n_vars > 0:
+        # Calculate tick spacing: show ~10-15 labels max
+        tick_spacing = max(1, n_vars // 15) if n_vars > 15 else 1
+        tick_positions = list(range(0, n_vars, tick_spacing))
+        tick_labels = [variable_names[i] for i in tick_positions]
+
+        fig.update_xaxes(
+            tickmode='array',
+            tickvals=tick_positions,
+            ticktext=tick_labels,
+            tickangle=-45
+        )
+
     # Add zero reference line
     fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
+
+    return fig
+
+
+def plot_loadings_line_antiderivative(
+    loadings: pd.DataFrame,
+    selected_components: List[str],
+    derivative_order: int = 1,
+    is_varimax: bool = False
+) -> go.Figure:
+    """
+    Line plot of antiderivative loadings (recovered spectral shape from derivatives).
+
+    Parameters
+    ----------
+    loadings : pd.DataFrame
+        Loading matrix from derivative-preprocessed data.
+        Index should contain variable names.
+    selected_components : List[str]
+        Component names to plot (e.g., ['PC1', 'PC2']).
+    derivative_order : int, optional
+        Order of derivative applied to original data (1 or 2). Default is 1.
+    is_varimax : bool, optional
+        Varimax rotated factors. Default is False.
+
+    Returns
+    -------
+    go.Figure
+        Plotly line plot with antiderivative loadings.
+    """
+    from pca_utils.pca_calculations import calculate_antiderivative_loadings
+
+    title_suffix = " (Varimax)" if is_varimax else ""
+
+    # Get component indices
+    comp_indices = [list(loadings.columns).index(comp) for comp in selected_components]
+
+    # Calculate antiderivatives using existing function
+    antiderivatives = calculate_antiderivative_loadings(
+        loadings.values, comp_indices, derivative_order=derivative_order
+    )
+
+    fig = go.Figure()
+
+    # Original variable names from loadings index
+    original_variable_names = list(loadings.index)
+
+    # After n integrations, first n elements are lost
+    # So create adjusted variable names list
+    n_lost = derivative_order
+    adjusted_variable_names = original_variable_names[n_lost:] if len(original_variable_names) > n_lost else original_variable_names
+
+    # Add trace for each component
+    for i, comp in enumerate(selected_components):
+        antideriv_data = antiderivatives[f'antideriv_{comp_indices[i]}']
+        x_indices = list(range(len(antideriv_data)))
+
+        # Use adjusted variable names (accounting for integration)
+        var_names_for_plot = adjusted_variable_names[:len(antideriv_data)]
+
+        fig.add_trace(go.Scatter(
+            x=x_indices,
+            y=antideriv_data,
+            mode='lines+markers',
+            name=comp,
+            text=var_names_for_plot,
+            hovertemplate='Variable: %{text}<br>Antideriv: %{y:.3f}<extra></extra>'
+        ))
+
+    fig.update_layout(
+        title=f"Loading Line Plot (Antiderivative - Order {derivative_order}){title_suffix}",
+        xaxis_title="Variable Name",
+        yaxis_title="Antiderivative Value",
+        height=500,
+        hovermode='x unified'
+    )
+
+    # Replace x-axis tick labels with variable names
+    n_points = len(antideriv_data)
+    if n_points > 0:
+        # Calculate tick spacing: show ~10-15 labels max
+        tick_spacing = max(1, n_points // 15) if n_points > 15 else 1
+        tick_positions = list(range(0, n_points, tick_spacing))
+        tick_labels = [adjusted_variable_names[i] if i < len(adjusted_variable_names) else f"Pt{i}"
+                      for i in tick_positions]
+
+        fig.update_xaxes(
+            tickmode='array',
+            tickvals=tick_positions,
+            ticktext=tick_labels,
+            tickangle=-45
+        )
+
+    # Add zero reference line
+    fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
+
+    return fig
+
+
+def plot_loadings_antiderivative(
+    loadings: pd.DataFrame,
+    pc_x: str,
+    pc_y: str,
+    explained_variance_ratio: np.ndarray,
+    derivative_order: int = 1,
+    is_varimax: bool = False,
+    color_by_magnitude: bool = False
+) -> go.Figure:
+    """
+    Create loadings scatter plot with antiderivative values.
+
+    Recovers spectral shape from derivative loadings using trapezoidal integration.
+    Displays antiderivative coordinates on 2D scatter plot.
+
+    Parameters
+    ----------
+    loadings : pd.DataFrame
+        Loading matrix from derivative-preprocessed data.
+        Index should be variable names.
+    pc_x : str
+        Column name for X-axis component (e.g., 'PC1').
+    pc_y : str
+        Column name for Y-axis component (e.g., 'PC2').
+    explained_variance_ratio : np.ndarray
+        Array of variance explained ratios.
+    derivative_order : int, optional
+        Order of derivative applied to original data (1 or 2). Default is 1.
+    is_varimax : bool, optional
+        Whether this is for Varimax factors. Default is False.
+    color_by_magnitude : bool, optional
+        Whether to color points by magnitude. Default is False.
+
+    Returns
+    -------
+    go.Figure
+        Plotly scatter plot with antiderivative loadings.
+    """
+    from pca_utils.pca_calculations import calculate_antiderivative_loadings
+
+    # Get component indices
+    pc_cols = loadings.columns.tolist()
+    pc_x_idx = pc_cols.index(pc_x)
+    pc_y_idx = pc_cols.index(pc_y)
+
+    # Calculate antiderivatives
+    antiderivatives = calculate_antiderivative_loadings(
+        loadings.values, [pc_x_idx, pc_y_idx], derivative_order=derivative_order
+    )
+
+    antideriv_x = antiderivatives[f'antideriv_{pc_x_idx}']
+    antideriv_y = antiderivatives[f'antideriv_{pc_y_idx}']
+
+    # Use minimum length (due to integration reducing dimensions)
+    min_len = min(len(antideriv_x), len(antideriv_y))
+    antideriv_x = antideriv_x[:min_len]
+    antideriv_y = antideriv_y[:min_len]
+
+    # Get variance info
+    var_x = explained_variance_ratio[pc_x_idx] * 100
+    var_y = explained_variance_ratio[pc_y_idx] * 100
+    var_total = var_x + var_y
+
+    title_suffix = " (Varimax Factors)" if is_varimax else ""
+    deriv_note = f"(Antiderivative - Order {derivative_order})"
+
+    # Prepare variable names (adjusted for integration loss)
+    original_variable_names = list(loadings.index)
+    n_lost = derivative_order
+    adjusted_variable_names = original_variable_names[n_lost:] if len(original_variable_names) > n_lost else original_variable_names
+    point_labels = adjusted_variable_names[:min_len]
+
+    # CRITICAL: Synchronize lengths - trim antiderivatives if labels are shorter
+    if len(point_labels) < len(antideriv_x):
+        antideriv_x = antideriv_x[:len(point_labels)]
+        antideriv_y = antideriv_y[:len(point_labels)]
+
+    # Create scatter plot with labels
+    fig = px.scatter(
+        x=antideriv_x,
+        y=antideriv_y,
+        text=point_labels,
+        title=f"Loadings Plot: {pc_x} vs {pc_y} {deriv_note}{title_suffix}<br>Total Explained Variance: {var_total:.1f}%",
+        labels={
+            'x': f'{pc_x} Antiderivative ({var_x:.1f}%)',
+            'y': f'{pc_y} Antiderivative ({var_y:.1f}%)'
+        }
+    )
+
+    # Calculate symmetric axis range
+    x_range = [min(antideriv_x), max(antideriv_x)]
+    y_range = [min(antideriv_y), max(antideriv_y)]
+    max_abs_range = max(abs(min(x_range + y_range)), abs(max(x_range + y_range)))
+    axis_range = [-max_abs_range * 1.1, max_abs_range * 1.1]
+
+    # Add zero reference lines
+    fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.7)
+    fig.add_vline(x=0, line_dash="dash", line_color="gray", opacity=0.7)
+
+    # Color by magnitude if requested
+    if color_by_magnitude:
+        magnitude = np.sqrt(antideriv_x**2 + antideriv_y**2)
+        fig.update_traces(
+            marker=dict(
+                color=magnitude,
+                colorscale='viridis',
+                showscale=True,
+                colorbar=dict(title="Antideriv Magnitude")
+            ),
+            textposition="top center"
+        )
+    else:
+        fig.update_traces(marker=dict(size=8, opacity=0.6), textposition="top center")
+
+    # Set equal aspect ratio
+    fig.update_layout(
+        height=600,
+        width=600,
+        xaxis=dict(
+            range=axis_range,
+            scaleanchor="y",
+            scaleratio=1,
+            constrain="domain"
+        ),
+        yaxis=dict(
+            range=axis_range,
+            constrain="domain"
+        )
+    )
 
     return fig
 
@@ -688,6 +974,310 @@ def add_convex_hulls(
         pass
 
     return fig
+
+
+def get_continuous_color_for_value(value: float, min_val: float, max_val: float) -> str:
+    """
+    Convert a numeric value to a color on the BLUE→RED gradient scale.
+
+    Parameters
+    ----------
+    value : float
+        The value to convert to color
+    min_val : float
+        Minimum value in the range (maps to BLUE)
+    max_val : float
+        Maximum value in the range (maps to RED)
+
+    Returns
+    -------
+    str
+        RGB color string in format 'rgb(R, G, B)'
+
+    Examples
+    --------
+    >>> get_continuous_color_for_value(0, 0, 1)  # Minimum value
+    'rgb(0, 0, 255)'
+    >>> get_continuous_color_for_value(1, 0, 1)  # Maximum value
+    'rgb(255, 0, 0)'
+    >>> get_continuous_color_for_value(0.5, 0, 1)  # Middle value
+    'rgb(128, 0, 128)'
+    """
+    # Normalize value to 0-1 range
+    if max_val == min_val:
+        normalized = 0.5  # If all values are the same, use middle color
+    else:
+        normalized = (value - min_val) / (max_val - min_val)
+        normalized = max(0.0, min(1.0, normalized))  # Clamp to [0, 1]
+
+    # Blue → Purple → Red gradient
+    # Blue (0, 0, 255) at normalized=0
+    # Purple (128, 0, 128) at normalized=0.5
+    # Red (255, 0, 0) at normalized=1
+
+    if normalized <= 0.5:
+        # Blue to Purple
+        t = normalized * 2  # Scale to 0-1
+        r = int(0 + t * 128)
+        g = 0
+        b = int(255 - t * 127)
+    else:
+        # Purple to Red
+        t = (normalized - 0.5) * 2  # Scale to 0-1
+        r = int(128 + t * 127)
+        g = 0
+        b = int(128 - t * 128)
+
+    return f'rgb({r}, {g}, {b})'
+
+
+def add_sample_trajectory_lines(
+    fig: go.Figure,
+    scores: pd.DataFrame,
+    pc_x: str,
+    pc_y: str,
+    line_strategy: str = "none",
+    groupby_column: Optional[pd.Series] = None,
+    line_width: int = 2,
+    line_opacity: float = 0.6,
+    color_by_index: bool = True,  # DEFAULT: Use sequential index (1→N)
+    color_variable: Optional[str] = None,
+    original_data: Optional[pd.DataFrame] = None,
+    trajectory_color_vector: Optional[Dict[str, Any]] = None,
+    color_discrete_map: Optional[Dict[Any, str]] = None  # DEPRECATED: Not used
+) -> go.Figure:
+    """
+    Add sample trajectory lines to a score plot with gradient coloring.
+
+    Visualizes the progression of samples through PCA space using different
+    connection strategies and coloring options (sequential index or numeric variable).
+
+    Parameters
+    ----------
+    fig : go.Figure
+        Existing Plotly figure with scatter plot.
+    scores : pd.DataFrame
+        DataFrame containing PCA scores.
+        Index represents sample order (0, 1, 2, ...).
+        Columns contain PC scores (PC1, PC2, ...).
+    pc_x : str
+        Column name for X-axis principal component (e.g., 'PC1').
+    pc_y : str
+        Column name for Y-axis principal component (e.g., 'PC2').
+    line_strategy : str, optional
+        Line drawing strategy. Default is 'none'.
+        Options:
+        - 'none': No lines drawn (returns fig unchanged)
+        - 'sequential': Single line connecting all points in dataset order
+        - 'categorical': Separate trajectory lines per category (requires groupby_column)
+    groupby_column : pd.Series, optional
+        Categorical data for grouping (required if line_strategy='categorical').
+        Index should align with scores.index.
+    color_discrete_map : dict, optional
+        Color mapping for categories {category: 'rgb(...)'}.
+        Generated by create_categorical_color_map() if needed.
+    line_width : int, optional
+        Thickness of trajectory lines. Default is 2.
+    line_opacity : float, optional
+        Opacity of trajectory lines (0.0 to 1.0). Default is 0.6.
+    color_by_index : bool, optional
+        If True, color by sequential index (1, 2, 3, ..., N) per category. Default is False.
+    color_variable : str, optional
+        Name of numeric variable to color by (instead of index). Default is None.
+    original_data : pd.DataFrame, optional
+        Original data containing the color_variable column. Default is None.
+    trajectory_color_vector : dict, optional
+        Dict with keys: 'category', 'variable', 'values', 'min', 'max'
+        When provided, applies custom coloring to specific batch. Default is None.
+
+    Returns
+    -------
+    go.Figure
+        Modified figure with trajectory lines added.
+
+    Raises
+    ------
+    ValueError
+        If line_strategy='categorical' but groupby_column is None.
+
+    Notes
+    -----
+    - Lines are drawn as multiple segments to create gradient effects
+    - Categories with fewer than 2 points are skipped
+    - Default coloring: BLUE (start) → PURPLE (middle) → RED (end)
+    - Trajectory direction is determined by sample order in scores DataFrame
+
+    Examples
+    --------
+    >>> scores_df = pd.DataFrame(
+    ...     {'PC1': [1, 2, 3], 'PC2': [4, 5, 6]},
+    ...     index=[0, 1, 2]
+    ... )
+    >>> var_ratio = np.array([0.4, 0.3, 0.2])
+    >>> fig = plot_scores(scores_df, 'PC1', 'PC2', var_ratio)
+    >>> fig = add_sample_trajectory_lines(
+    ...     fig, scores_df, 'PC1', 'PC2',
+    ...     line_strategy='sequential',
+    ...     color_by_index=True
+    ... )
+    """
+    try:
+        # === CASE 0: No lines ===
+        if line_strategy.lower() == "none":
+            return fig
+
+        # === CASE 1: Sequential line (all points in order) ===
+        if line_strategy.lower() == "sequential":
+            x_vals = scores[pc_x].values
+            y_vals = scores[pc_y].values
+
+            # Determine coloring strategy
+            if color_by_index:
+                # Use sequential index: 1 to N
+                n = len(x_vals)
+                indices = np.arange(1, n + 1)
+                colors = [get_continuous_color_for_value(idx, 1, n) for idx in indices]
+            elif color_variable is not None and original_data is not None and color_variable in original_data.columns:
+                # Use variable values
+                variable_vals = original_data.loc[scores.index, color_variable].values
+                min_val = np.nanmin(variable_vals)
+                max_val = np.nanmax(variable_vals)
+                colors = [get_continuous_color_for_value(v, min_val, max_val) for v in variable_vals]
+            else:
+                # Default gray
+                colors = ['rgba(128, 128, 128, 0.7)'] * len(x_vals)
+
+            # Draw line segments with gradient
+            for i in range(len(x_vals) - 1):
+                line_trace = go.Scatter(
+                    x=[x_vals[i], x_vals[i+1]],
+                    y=[y_vals[i], y_vals[i+1]],
+                    mode='lines',
+                    line=dict(color=colors[i], width=line_width),
+                    opacity=line_opacity,
+                    name='Trajectory' if i == 0 else None,
+                    showlegend=(i == 0),
+                    hoverinfo='skip',
+                    legendgroup='trajectory'
+                )
+                fig.add_trace(line_trace)
+
+            return fig
+
+        # === CASE 2: Categorical trajectories (one line per group) ===
+        if line_strategy.lower() == "categorical":
+            # Validation
+            if groupby_column is None:
+                raise ValueError(
+                    "line_strategy='categorical' requires groupby_column parameter. "
+                    "Please select a metadata column for grouping."
+                )
+
+            # Prepare groupby data
+            if isinstance(groupby_column, pd.Series):
+                group_series = groupby_column.copy()
+            else:
+                group_series = pd.Series(groupby_column, index=scores.index)
+
+            # Align with scores index
+            group_series = group_series.reindex(scores.index)
+
+            # Get unique categories
+            unique_categories = group_series.dropna().unique()
+
+            if len(unique_categories) == 0:
+                # No valid categories found
+                return fig
+
+            # NOTE: color_discrete_map is DEPRECATED and not used
+            # Lines always use sequential index or variable coloring (independent from points)
+
+            # Draw line for each category
+            for category in unique_categories:
+                # Get mask for this category
+                category_mask = group_series == category
+                n_points_in_category = category_mask.sum()
+
+                # Skip categories with fewer than 2 points (can't make a line)
+                if n_points_in_category < 2:
+                    continue
+
+                # Get indices for this category
+                category_indices = scores.index[category_mask]
+
+                # Extract coordinates for this category
+                x_vals = scores.loc[category_mask, pc_x].values
+                y_vals = scores.loc[category_mask, pc_y].values
+
+                # Handle any NaN values
+                valid_mask = ~(np.isnan(x_vals) | np.isnan(y_vals))
+                x_vals = x_vals[valid_mask]
+                y_vals = y_vals[valid_mask]
+                category_indices = category_indices[valid_mask]
+
+                # Skip if not enough valid points
+                if len(x_vals) < 2:
+                    continue
+
+                # [NEW] Determine if this is the selected batch
+                is_selected_batch = (trajectory_color_vector and
+                                    trajectory_color_vector.get('category') == category)
+
+                # [NEW] Set opacity: Full for selected batch, dim for others
+                # Selected batch: use user-controlled line_opacity (default 0.6)
+                # Other batches: use fixed 0.15 (very dim, almost invisible)
+                current_opacity = line_opacity if is_selected_batch else 0.15
+
+                # Determine coloring for this category
+                if is_selected_batch and trajectory_color_vector.get('mode') == 'numeric_color':
+                    # Selected batch with numeric variable coloring (BRIGHT & PROMINENT)
+                    color_vals = trajectory_color_vector['values'].reindex(category_indices).values
+                    min_val = trajectory_color_vector['min']
+                    max_val = trajectory_color_vector['max']
+                    colors = [get_continuous_color_for_value(v, min_val, max_val) for v in color_vals]
+
+                elif is_selected_batch and trajectory_color_vector.get('mode') == 'sequential_bright':
+                    # [NEW] Selected batch with sequential index (BRIGHT)
+                    # Use sequential coloring: 1→N within this batch
+                    n = len(x_vals)
+                    colors = [get_continuous_color_for_value(idx, 1, n) for idx in range(1, n + 1)]
+
+                elif color_by_index:
+                    # Other batches: Use gray background (DIM & BACKGROUND)
+                    colors = ['rgb(200, 200, 200)'] * len(x_vals)
+
+                elif color_variable is not None and original_data is not None and color_variable in original_data.columns:
+                    # Other batches with variable coloring: Still use gray for consistency
+                    colors = ['rgb(200, 200, 200)'] * len(x_vals)
+
+                else:
+                    # Fallback: use gray (dim background)
+                    colors = ['rgb(200, 200, 200)'] * len(x_vals)
+
+                # Draw line segments with appropriate opacity
+                for i in range(len(x_vals) - 1):
+                    line_trace = go.Scatter(
+                        x=[x_vals[i], x_vals[i+1]],
+                        y=[y_vals[i], y_vals[i+1]],
+                        mode='lines',
+                        line=dict(color=colors[i], width=line_width),
+                        opacity=current_opacity,  # ← [CHANGED] Dimmed or full opacity
+                        name=str(category) if i == 0 else None,
+                        showlegend=(i == 0),
+                        hoverinfo='skip',
+                        legendgroup=f'trajectory_{category}'
+                    )
+                    fig.add_trace(line_trace)
+
+            return fig
+
+        # Unknown strategy
+        return fig
+
+    except Exception as e:
+        # Log error and return original figure
+        print(f"Error in add_sample_trajectory_lines: {str(e)}")
+        return fig
 
 
 def plot_varimax_component_selector(

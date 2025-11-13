@@ -67,6 +67,12 @@ try:
 except ImportError:
     CALIBRATION_AVAILABLE = False
 
+try:
+    import univariate_page
+    UNIVARIATE_AVAILABLE = True
+except ImportError:
+    UNIVARIATE_AVAILABLE = False
+
 def show_home():
     """Show the main homepage"""
     
@@ -256,6 +262,26 @@ def show_home():
                 st.rerun()
         else:
             st.info("🚧 Classification coming soon")
+
+    with col_trans3:
+        st.markdown("""
+        ### 📊 Univariate Analysis
+        *Comprehensive statistical analysis*
+
+        **Features:**
+        - Descriptive statistics
+        - Dispersion & robust measures
+        - Row profile analysis
+        - Multiple visualization types
+        - Export capabilities
+        """)
+
+        if UNIVARIATE_AVAILABLE:
+            if st.button("🚀 Launch Univariate Analysis", key="launch_univariate"):
+                st.session_state.current_page = "Univariate Analysis"
+                st.rerun()
+        else:
+            st.info("🚧 Univariate Analysis coming soon")
 
     with col_trans5:
         st.markdown("""
@@ -467,6 +493,14 @@ def main():
         st.sidebar.button("⚗️ PLS Calibration", disabled=True, use_container_width=True, key="nav_calibration_disabled")
         st.sidebar.caption("Module not found")
 
+    if UNIVARIATE_AVAILABLE:
+        if st.sidebar.button("📊 Univariate Analysis", use_container_width=True, key="nav_univariate"):
+            st.session_state.current_page = "Univariate Analysis"
+            st.rerun()
+    else:
+        st.sidebar.button("📊 Univariate Analysis", disabled=True, use_container_width=True, key="nav_univariate_disabled")
+        st.sidebar.caption("Module not found")
+
     st.sidebar.markdown("---")
     
     # Current dataset info in sidebar with selector
@@ -558,6 +592,8 @@ def main():
         classification_page.show()
     elif st.session_state.current_page == "PLS Calibration" and CALIBRATION_AVAILABLE:
         calibration_page.show()
+    elif st.session_state.current_page == "Univariate Analysis" and UNIVARIATE_AVAILABLE:
+        univariate_page.show()
     else:
         st.error(f"Page '{st.session_state.current_page}' not found or module not available")
         st.session_state.current_page = "Home"

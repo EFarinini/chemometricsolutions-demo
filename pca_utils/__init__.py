@@ -46,7 +46,8 @@ from .config import (
 from .pca_calculations import (
     compute_pca,
     varimax_rotation,
-    calculate_variance_metrics  # Fixed: was calculate_explained_variance
+    calculate_variance_metrics,  # Fixed: was calculate_explained_variance
+    calculate_antiderivative_loadings
 )
 
 # Import plotting functions
@@ -55,7 +56,9 @@ from .pca_plots import (
     plot_cumulative_variance,
     plot_scores,
     plot_loadings,
+    plot_loadings_antiderivative,
     plot_loadings_line,
+    plot_loadings_line_antiderivative,
     plot_biplot,
     add_convex_hulls
 )
@@ -66,7 +69,8 @@ from .pca_statistics import (
     calculate_q_residuals,
     calculate_contributions,
     calculate_leverage,
-    cross_validate_pca
+    cross_validate_pca,
+    calculate_variable_variance_explained
 )
 
 # Import workspace management functions
@@ -91,13 +95,16 @@ __all__ = [
     'compute_pca',
     'varimax_rotation',
     'calculate_variance_metrics',  # Fixed: was calculate_explained_variance
+    'calculate_antiderivative_loadings',
 
     # Plotting functions
     'plot_scree',
     'plot_cumulative_variance',
     'plot_scores',
     'plot_loadings',
+    'plot_loadings_antiderivative',
     'plot_loadings_line',
+    'plot_loadings_line_antiderivative',
     'plot_biplot',
     'add_convex_hulls',
 
@@ -107,6 +114,7 @@ __all__ = [
     'calculate_contributions',
     'calculate_leverage',
     'cross_validate_pca',
+    'calculate_variable_variance_explained',
 
     # Workspace management functions
     'save_workspace_to_file',
