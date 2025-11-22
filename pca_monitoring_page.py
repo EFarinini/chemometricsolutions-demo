@@ -28,23 +28,58 @@ from workspace_utils import display_workspace_dataset_selector
 # ============================================================================
 
 def create_score_plot(test_scores, explained_variance, timestamps=None,
-                      pca_params=None, start_sample_num=1, show_trajectory=True,
-                      color_data=None, labels_data=None):
+                      pca_params=None, start_sample_num=1,
+                      show_trajectory=True, trajectory_style="simple",
+                      trajectory_colors=None, color_data=None, labels_data=None):
     """
-    Create PCA score plot with confidence ellipses (same as process_monitoring.py).
+    Create PCA score plot with confidence ellipses and color support.
 
     Parameters:
     -----------
-    show_trajectory : bool, default True
-        Whether to show the trajectory line connecting samples
+    test_scores : pd.DataFrame or np.ndarray
+        DataFrame or array with PC1, PC2 columns/values
+    explained_variance : array-like
+        Explained variance percentages for each PC
+    timestamps : list, optional
+        Timestamps for samples
+    pca_params : dict, optional
+        Dictionary with 'n_samples_train', 'n_features'
+    start_sample_num : int
+        Starting sample number for labeling
+    show_trajectory : bool
+        Whether to connect points with lines (default True)
+    trajectory_style : str
+        "simple" for light gray uniform line (default)
+        "gradient" for blue→red gradient with cyan star on last point
+    trajectory_colors : list, optional
+        DEPRECATED - now controlled by trajectory_style parameter
     color_data : array-like, optional
-        Data to use for coloring points
-    labels_data : array-like, optional
-        Data to use for labeling points
+        Data for coloring points (categorical or quantitative)
+    labels_data : list, optional
+        Sample labels to display on points
+
+    Returns:
+    --------
+    go.Figure
+        Plotly figure with score plot
     """
     import numpy as np
+    import pandas as pd
     import plotly.graph_objects as go
     import plotly.express as px
+
+    # Try to import color utilities
+    try:
+        from color_utils import (
+            get_unified_color_schemes,
+            create_categorical_color_map,
+            is_quantitative_variable,
+            get_trajectory_colors,
+            get_sample_order_colors
+        )
+        COLORS_AVAILABLE = True
+    except ImportError:
+        COLORS_AVAILABLE = False
 
     fig = go.Figure()
 
@@ -66,92 +101,217 @@ def create_score_plot(test_scores, explained_variance, timestamps=None,
         hover_template = 'Sample: %{text}<br>PC1: %{x:.2f}<br>PC2: %{y:.2f}<extra></extra>'
         custom_data = None
 
-    # Data points visualization
+    # Prepare data for plotting
     n_points = len(test_scores)
 
-    # Determine if we should use color_data
-    use_color_data = color_data is not None and len(color_data) == len(test_scores)
+    # Extract x, y data
+    if isinstance(test_scores, pd.DataFrame):
+        x_data = test_scores.iloc[:, 0].values
+        y_data = test_scores.iloc[:, 1].values
+    else:
+        x_data = test_scores[:, 0]
+        y_data = test_scores[:, 1]
 
-    if show_trajectory and n_points > 1:
-        # Create line segments with color gradient (trajectory mode)
-        for i in range(n_points - 1):
-            # Use color_data if provided, otherwise use gradient
-            if use_color_data:
-                # Use the color value for this specific point
-                marker_color = color_data[i]
-                line_color = color_data[i]
-            else:
-                # Gradient from dark blue to red
-                ratio = i / max(1, n_points - 2)
-                r = int(255 * ratio)
-                g = 0
-                b = int(255 * (1 - ratio))
-                line_color = f'rgb({r},{g},{b})'
-                marker_color = f'rgb({r},{g},{b})'
+    # Create scatter plot with unified color support
+    if color_data is not None and len(color_data) == len(test_scores) and COLORS_AVAILABLE:
+        color_series = pd.Series(color_data)
 
-            # Increase thickness toward the end
-            line_width = 1.5 + (ratio * 1.5) if not use_color_data else 2.0
-            marker_size = 3 + (ratio * 3) if not use_color_data else 6
+        # Check if quantitative or categorical
+        if is_quantitative_variable(color_series):
+            # QUANTITATIVE: Use continuous blue-to-red scale
+            mode = 'markers+text' if labels_data is not None else 'markers'
 
-            # Line segment + marker
-            fig.add_trace(go.Scatter(
-                x=test_scores[i:i+2, 0],
-                y=test_scores[i:i+2, 1],
-                mode='lines+markers',
-                name='Test Trajectory' if i == 0 else '',
-                line=dict(color=line_color, width=line_width),
-                marker=dict(color=marker_color, size=marker_size, opacity=0.8),
+            fig_scatter = px.scatter(
+                x=x_data,
+                y=y_data,
+                color=color_data,
+                text=text_labels if labels_data is not None else None,
+                labels={'x': 'PC1', 'y': 'PC2'},
+                color_continuous_scale=[(0.0, 'rgb(0, 0, 255)'),
+                                       (0.5, 'rgb(128, 0, 128)'),
+                                       (1.0, 'rgb(255, 0, 0)')]
+            )
+            fig_scatter.update_traces(
+                marker=dict(size=8),
+                mode=mode,
+                textposition='top center',
                 hovertemplate=hover_template,
-                customdata=[custom_data[i]] if custom_data is not None else None,
-                text=[text_labels[i]],
-                showlegend=(i == 0),
-                legendgroup='trajectory'
-            ))
-    elif show_trajectory and n_points == 1:
-        # Single point with trajectory enabled
-        marker_color = color_data[0] if use_color_data else 'darkblue'
-        fig.add_trace(go.Scatter(
-            x=test_scores[:, 0],
-            y=test_scores[:, 1],
-            mode='markers',
-            name='Test Trajectory',
-            marker=dict(color=marker_color, size=4),
-            hovertemplate=hover_template,
-            customdata=custom_data,
-            text=text_labels
-        ))
-    elif not show_trajectory and n_points > 0:
-        # Show all points without trajectory (simple scatter)
-        marker_colors = color_data if use_color_data else 'steelblue'
-        fig.add_trace(go.Scatter(
-            x=test_scores[:, 0],
-            y=test_scores[:, 1],
-            mode='markers+text' if labels_data is not None else 'markers',
-            name='Test Samples',
-            marker=dict(color=marker_colors, size=8),
-            text=text_labels,
-            textposition='top center',
-            hovertemplate=hover_template,
-            customdata=custom_data
-        ))
+                customdata=custom_data
+            )
 
-    # Highlight last point (only if show_trajectory is True)
-    if show_trajectory and len(test_scores) > 0:
-        last_sample_num = start_sample_num + len(test_scores) - 1
-        if timestamps is not None and len(timestamps) == len(test_scores):
-            last_time = timestamps[-1].strftime('%Y-%m-%d %H:%M') if hasattr(timestamps[-1], 'strftime') else str(timestamps[-1])
-            current_hover = f'Last Sample {last_sample_num}<br>PC1: %{{x:.2f}}<br>PC2: %{{y:.2f}}<br>📅 {last_time}<extra></extra>'
+            # Transfer traces to main fig
+            for trace in fig_scatter.data:
+                fig.add_trace(trace)
         else:
-            current_hover = f'Last Sample {last_sample_num}<br>PC1: %{{x:.2f}}<br>PC2: %{{y:.2f}}<extra></extra>'
+            # CATEGORICAL: Use discrete color map
+            unique_values = color_series.dropna().unique()
+            color_discrete_map = create_categorical_color_map(unique_values)
+            mode = 'markers+text' if labels_data is not None else 'markers'
 
-        fig.add_trace(go.Scatter(
-            x=[test_scores[-1, 0]],
-            y=[test_scores[-1, 1]],
-            mode='markers',
-            name='Last Point',
-            marker=dict(color='cyan', size=10, symbol='star'),
-            hovertemplate=current_hover
-        ))
+            fig_scatter = px.scatter(
+                x=x_data,
+                y=y_data,
+                color=color_data,
+                text=text_labels if labels_data is not None else None,
+                labels={'x': 'PC1', 'y': 'PC2'},
+                color_discrete_map=color_discrete_map
+            )
+            fig_scatter.update_traces(
+                marker=dict(size=8),
+                mode=mode,
+                textposition='top center',
+                hovertemplate=hover_template,
+                customdata=custom_data
+            )
+
+            # Transfer traces to main fig
+            for trace in fig_scatter.data:
+                fig.add_trace(trace)
+
+        # Add trajectory line if requested (for colored plots)
+        if show_trajectory and n_points > 1:
+            fig.add_trace(go.Scatter(
+                x=x_data,
+                y=y_data,
+                mode='lines',
+                name='Trajectory',
+                line=dict(color='lightgray', width=1, dash='dot'),
+                showlegend=True,
+                hoverinfo='skip'
+            ))
+    else:
+        # No color data - use default styling or trajectory visualization
+        if not show_trajectory:
+            # No trajectory - just markers with blue-to-red gradient
+            if COLORS_AVAILABLE:
+                point_colors = get_sample_order_colors(n_points, colorscale='blue_to_red')
+            else:
+                point_colors = 'steelblue'  # Fallback
+
+            mode = 'markers+text' if labels_data else 'markers'
+            fig.add_trace(go.Scatter(
+                x=x_data,
+                y=y_data,
+                mode=mode,
+                name='Samples',
+                text=text_labels if labels_data else None,
+                marker=dict(size=4, color=point_colors, opacity=0.7),
+                textposition='top center',
+                hovertemplate=hover_template,
+                customdata=custom_data
+            ))
+        else:
+            # Show trajectory - use new trajectory color system
+            if n_points > 1 and COLORS_AVAILABLE:
+                # Get trajectory colors based on style
+                traj_colors = get_trajectory_colors(
+                    n_points=n_points,
+                    style=trajectory_style,
+                    last_point_marker=(trajectory_style == 'gradient')
+                )
+
+                # FOR SIMPLE STYLE: First add all data points as small colored scatter
+                if trajectory_style == 'simple':
+                    # Generate blue-to-red gradient colors based on sample order
+                    point_colors = get_sample_order_colors(n_points, colorscale='blue_to_red')
+
+                    fig.add_trace(go.Scatter(
+                        x=x_data,
+                        y=y_data,
+                        mode='markers',
+                        name='Test Samples',
+                        marker=dict(color=point_colors, size=4, opacity=0.7),
+                        hovertemplate=hover_template,
+                        customdata=custom_data,
+                        text=text_labels,
+                        showlegend=True
+                    ))
+
+                # Draw trajectory segments
+                for i in range(n_points - 1):
+                    line_color = traj_colors['line_colors'][i]
+                    line_width = traj_colors['line_widths'][i]
+                    marker_color = traj_colors['marker_colors'][i]
+                    marker_size = traj_colors['marker_sizes'][i]
+
+                    # For simple style: only draw lines (no markers on segments)
+                    # For gradient style: draw lines with markers
+                    if trajectory_style == 'simple':
+                        mode = 'lines'
+                        marker_dict = None
+                    else:
+                        mode = 'lines+markers'
+                        marker_dict = dict(color=marker_color, size=marker_size, opacity=0.8)
+
+                    fig.add_trace(go.Scatter(
+                        x=x_data[i:i+2],
+                        y=y_data[i:i+2],
+                        mode=mode,
+                        name='Test Trajectory' if i == 0 else '',
+                        line=dict(color=line_color, width=line_width),
+                        marker=marker_dict,
+                        hoverinfo='skip',  # Skip hover for trajectory lines
+                        showlegend=(i == 0),
+                        legendgroup='trajectory'
+                    ))
+
+                # Add last point marker (only for gradient style)
+                if trajectory_style == 'gradient' and traj_colors['last_point_style'] is not None:
+                    last_style = traj_colors['last_point_style']
+                    last_sample_num = start_sample_num + n_points - 1
+
+                    if timestamps is not None and len(timestamps) == n_points:
+                        last_time = timestamps[-1].strftime('%Y-%m-%d %H:%M') if hasattr(timestamps[-1], 'strftime') else str(timestamps[-1])
+                        last_hover = f'Last Sample {last_sample_num}<br>PC1: %{{x:.2f}}<br>PC2: %{{y:.2f}}<br>📅 {last_time}<extra></extra>'
+                    else:
+                        last_hover = f'Last Sample {last_sample_num}<br>PC1: %{{x:.2f}}<br>PC2: %{{y:.2f}}<extra></extra>'
+
+                    fig.add_trace(go.Scatter(
+                        x=[x_data[-1]],
+                        y=[y_data[-1]],
+                        mode='markers',
+                        name='Last Point',
+                        marker=dict(
+                            color=last_style['color'],
+                            size=last_style['size'],
+                            symbol=last_style['symbol']
+                        ),
+                        hovertemplate=last_hover
+                    ))
+
+            elif n_points == 1:
+                # Single point - use blue color
+                if COLORS_AVAILABLE:
+                    point_colors = get_sample_order_colors(1, colorscale='blue_to_red')
+                    marker_color = point_colors[0]
+                else:
+                    marker_color = 'steelblue'
+
+                fig.add_trace(go.Scatter(
+                    x=x_data,
+                    y=y_data,
+                    mode='markers',
+                    name='Test Sample',
+                    marker=dict(color=marker_color, size=4),
+                    hovertemplate=hover_template,
+                    customdata=custom_data,
+                    text=text_labels
+                ))
+            else:
+                # Fallback if COLORS_AVAILABLE is False
+                mode = 'markers+lines+text' if labels_data else 'markers+lines'
+                fig.add_trace(go.Scatter(
+                    x=x_data,
+                    y=y_data,
+                    mode=mode,
+                    name='Samples',
+                    text=text_labels if labels_data else None,
+                    marker=dict(size=8, color='steelblue'),
+                    line=dict(color='lightgray', width=1),
+                    textposition='top center',
+                    hovertemplate=hover_template,
+                    customdata=custom_data
+                ))
 
     # Add confidence ellipses if pca_params provided
     if pca_params is not None:
@@ -229,19 +389,56 @@ def create_score_plot(test_scores, explained_variance, timestamps=None,
 
 
 def create_t2_q_plot(t2_values, q_values, t2_limits, q_limits, timestamps=None, start_sample_num=1, show_trajectory=True,
-                     color_data=None, labels_data=None):
+                     trajectory_style="simple", color_data=None, labels_data=None):
     """
-    Create T²-Q plot for fault detection (same as process_monitoring.py).
+    Create T²-Q influence plot with control limits and color support.
 
     Parameters:
     -----------
-    show_trajectory : bool, default True
-        Whether to show the trajectory line connecting samples
+    t2_values : array-like
+        T² statistic values
+    q_values : array-like
+        Q residual values
+    t2_limits : list
+        T² control limits [95%, 99%, 99.9%]
+    q_limits : list
+        Q control limits [95%, 99%, 99.9%]
+    timestamps : list, optional
+        Timestamps for samples
+    start_sample_num : int
+        Starting sample number for labeling
+    show_trajectory : bool
+        Whether to connect points with lines (default True)
+    trajectory_style : str
+        "simple" for light gray uniform line (default)
+        "gradient" for blue→red gradient with cyan star on last point
     color_data : array-like, optional
-        Data to use for coloring points
-    labels_data : array-like, optional
-        Data to use for labeling points
+        Data for coloring points (categorical or quantitative)
+    labels_data : list, optional
+        Sample labels to display on points
+
+    Returns:
+    --------
+    go.Figure
+        Plotly figure with T²-Q plot
     """
+    import numpy as np
+    import pandas as pd
+    import plotly.express as px
+
+    # Try to import color utilities
+    try:
+        from color_utils import (
+            get_unified_color_schemes,
+            create_categorical_color_map,
+            is_quantitative_variable,
+            get_trajectory_colors,
+            get_sample_order_colors
+        )
+        COLORS_AVAILABLE = True
+    except ImportError:
+        COLORS_AVAILABLE = False
+
     fig = go.Figure()
 
     # Correct sample numbering
@@ -262,87 +459,208 @@ def create_t2_q_plot(t2_values, q_values, t2_limits, q_limits, timestamps=None, 
         hover_template = 'Sample: %{text}<br>T²: %{x:.2f}<br>Q: %{y:.2f}<extra></extra>'
         custom_data = None
 
-    # Data points visualization
+    # Prepare data for plotting
     n_points = len(t2_values)
 
-    # Determine if we should use color_data
-    use_color_data = color_data is not None and len(color_data) == len(t2_values)
+    # Create scatter with unified color support
+    if color_data is not None and len(color_data) == len(t2_values) and COLORS_AVAILABLE:
+        color_series = pd.Series(color_data)
 
-    if show_trajectory and n_points > 1:
-        for i in range(n_points - 1):
-            # Use color_data if provided, otherwise use gradient
-            if use_color_data:
-                marker_color = color_data[i]
-                line_color = color_data[i]
-            else:
-                ratio = i / max(1, n_points - 2)
-                r = int(255 * ratio)
-                g = 0
-                b = int(255 * (1 - ratio))
-                line_color = f'rgb({r},{g},{b})'
-                marker_color = f'rgb({r},{g},{b})'
+        if is_quantitative_variable(color_series):
+            # Quantitative: Use blue-to-red continuous scale
+            mode = 'markers+text' if labels_data is not None else 'markers'
 
-            line_width = 1.5 + (ratio * 1.5) if not use_color_data else 2.0
-            marker_size = 3 + (ratio * 3) if not use_color_data else 6
-
-            fig.add_trace(go.Scatter(
-                x=t2_values[i:i+2],
-                y=q_values[i:i+2],
-                mode='lines+markers',
-                name='T²-Q Trajectory' if i == 0 else '',
-                line=dict(color=line_color, width=line_width),
-                marker=dict(color=marker_color, size=marker_size, opacity=0.8),
+            fig_scatter = px.scatter(
+                x=t2_values,
+                y=q_values,
+                color=color_data,
+                text=text_labels if labels_data is not None else None,
+                labels={'x': 'T² Statistic', 'y': 'Q Residual'},
+                color_continuous_scale=[(0.0, 'rgb(0, 0, 255)'),
+                                       (0.5, 'rgb(128, 0, 128)'),
+                                       (1.0, 'rgb(255, 0, 0)')]
+            )
+            fig_scatter.update_traces(
+                marker=dict(size=8),
+                mode=mode,
+                textposition='top center',
                 hovertemplate=hover_template,
-                customdata=[custom_data[i]] if custom_data is not None else None,
-                text=[text_labels[i]],
-                showlegend=(i == 0),
-                legendgroup='trajectory_t2q'
-            ))
-    elif show_trajectory and n_points == 1:
-        # Single point with trajectory enabled
-        marker_color = color_data[0] if use_color_data else 'darkblue'
-        fig.add_trace(go.Scatter(
-            x=t2_values,
-            y=q_values,
-            mode='markers',
-            name='T²-Q Trajectory',
-            marker=dict(color=marker_color, size=4),
-            hovertemplate=hover_template,
-            customdata=custom_data,
-            text=text_labels
-        ))
-    elif not show_trajectory and n_points > 0:
-        # Show all points without trajectory (simple scatter)
-        marker_colors = color_data if use_color_data else 'steelblue'
-        fig.add_trace(go.Scatter(
-            x=t2_values,
-            y=q_values,
-            mode='markers+text' if labels_data is not None else 'markers',
-            name='T²-Q Points',
-            marker=dict(color=marker_colors, size=8),
-            text=text_labels,
-            textposition='top center',
-            hovertemplate=hover_template,
-            customdata=custom_data
-        ))
+                customdata=custom_data
+            )
 
-    # Highlight last point (only if show_trajectory is True)
-    if show_trajectory and len(t2_values) > 0:
-        last_sample_num = start_sample_num + len(t2_values) - 1
-        if timestamps is not None and len(timestamps) == len(t2_values):
-            last_time = timestamps[-1].strftime('%Y-%m-%d %H:%M') if hasattr(timestamps[-1], 'strftime') else str(timestamps[-1])
-            current_hover = f'Last Sample {last_sample_num}<br>T²: %{{x:.2f}}<br>Q: %{{y:.2f}}<br>📅 {last_time}<extra></extra>'
+            # Transfer traces to main fig
+            for trace in fig_scatter.data:
+                fig.add_trace(trace)
         else:
-            current_hover = f'Last Sample {last_sample_num}<br>T²: %{{x:.2f}}<br>Q: %{{y:.2f}}<extra></extra>'
+            # Categorical: Use discrete color map
+            unique_values = color_series.dropna().unique()
+            color_discrete_map = create_categorical_color_map(unique_values)
+            mode = 'markers+text' if labels_data is not None else 'markers'
 
-        fig.add_trace(go.Scatter(
-            x=[t2_values[-1]],
-            y=[q_values[-1]],
-            mode='markers',
-            name='Last Point',
-            marker=dict(color='cyan', size=10, symbol='star'),
-            hovertemplate=current_hover
-        ))
+            fig_scatter = px.scatter(
+                x=t2_values,
+                y=q_values,
+                color=color_data,
+                text=text_labels if labels_data is not None else None,
+                labels={'x': 'T² Statistic', 'y': 'Q Residual'},
+                color_discrete_map=color_discrete_map
+            )
+            fig_scatter.update_traces(
+                marker=dict(size=8),
+                mode=mode,
+                textposition='top center',
+                hovertemplate=hover_template,
+                customdata=custom_data
+            )
+
+            # Transfer traces to main fig
+            for trace in fig_scatter.data:
+                fig.add_trace(trace)
+
+        # Add trajectory if needed
+        if show_trajectory and n_points > 1:
+            fig.add_trace(go.Scatter(
+                x=t2_values,
+                y=q_values,
+                mode='lines',
+                name='Trajectory',
+                line=dict(color='lightgray', width=1, dash='dot'),
+                showlegend=True,
+                hoverinfo='skip'
+            ))
+    else:
+        # No color data - use default styling or trajectory visualization
+        if not show_trajectory:
+            # No trajectory - just markers with blue-to-red gradient
+            if COLORS_AVAILABLE:
+                point_colors = get_sample_order_colors(n_points, colorscale='blue_to_red')
+            else:
+                point_colors = 'steelblue'  # Fallback
+
+            mode = 'markers+text' if labels_data else 'markers'
+            fig.add_trace(go.Scatter(
+                x=t2_values,
+                y=q_values,
+                mode=mode,
+                name='T²-Q Points',
+                text=text_labels if labels_data else None,
+                marker=dict(size=4, color=point_colors, opacity=0.7),
+                textposition='top center',
+                hovertemplate=hover_template,
+                customdata=custom_data
+            ))
+        else:
+            # Show trajectory - use new trajectory color system
+            if n_points > 1 and COLORS_AVAILABLE:
+                # Get trajectory colors based on style
+                traj_colors = get_trajectory_colors(
+                    n_points=n_points,
+                    style=trajectory_style,
+                    last_point_marker=(trajectory_style == 'gradient')
+                )
+
+                # FOR SIMPLE STYLE: First add all data points as small colored scatter
+                if trajectory_style == 'simple':
+                    # Generate blue-to-red gradient colors based on sample order
+                    point_colors = get_sample_order_colors(n_points, colorscale='blue_to_red')
+
+                    fig.add_trace(go.Scatter(
+                        x=t2_values,
+                        y=q_values,
+                        mode='markers',
+                        name='T²-Q Points',
+                        marker=dict(color=point_colors, size=4, opacity=0.7),
+                        hovertemplate=hover_template,
+                        customdata=custom_data,
+                        text=text_labels,
+                        showlegend=True
+                    ))
+
+                # Draw trajectory segments
+                for i in range(n_points - 1):
+                    line_color = traj_colors['line_colors'][i]
+                    line_width = traj_colors['line_widths'][i]
+                    marker_color = traj_colors['marker_colors'][i]
+                    marker_size = traj_colors['marker_sizes'][i]
+
+                    # For simple style: only draw lines (no markers on segments)
+                    # For gradient style: draw lines with markers
+                    if trajectory_style == 'simple':
+                        mode = 'lines'
+                        marker_dict = None
+                    else:
+                        mode = 'lines+markers'
+                        marker_dict = dict(color=marker_color, size=marker_size, opacity=0.8)
+
+                    fig.add_trace(go.Scatter(
+                        x=t2_values[i:i+2],
+                        y=q_values[i:i+2],
+                        mode=mode,
+                        name='T²-Q Trajectory' if i == 0 else '',
+                        line=dict(color=line_color, width=line_width),
+                        marker=marker_dict,
+                        hoverinfo='skip',  # Skip hover for trajectory lines
+                        showlegend=(i == 0),
+                        legendgroup='trajectory_t2q'
+                    ))
+
+                # Add last point marker (only for gradient style)
+                if trajectory_style == 'gradient' and traj_colors['last_point_style'] is not None:
+                    last_style = traj_colors['last_point_style']
+                    last_sample_num = start_sample_num + n_points - 1
+
+                    if timestamps is not None and len(timestamps) == n_points:
+                        last_time = timestamps[-1].strftime('%Y-%m-%d %H:%M') if hasattr(timestamps[-1], 'strftime') else str(timestamps[-1])
+                        last_hover = f'Last Sample {last_sample_num}<br>T²: %{{x:.2f}}<br>Q: %{{y:.2f}}<br>📅 {last_time}<extra></extra>'
+                    else:
+                        last_hover = f'Last Sample {last_sample_num}<br>T²: %{{x:.2f}}<br>Q: %{{y:.2f}}<extra></extra>'
+
+                    fig.add_trace(go.Scatter(
+                        x=[t2_values[-1]],
+                        y=[q_values[-1]],
+                        mode='markers',
+                        name='Last Point',
+                        marker=dict(
+                            color=last_style['color'],
+                            size=last_style['size'],
+                            symbol=last_style['symbol']
+                        ),
+                        hovertemplate=last_hover
+                    ))
+
+            elif n_points == 1:
+                # Single point - use blue color
+                if COLORS_AVAILABLE:
+                    point_colors = get_sample_order_colors(1, colorscale='blue_to_red')
+                    marker_color = point_colors[0]
+                else:
+                    marker_color = 'steelblue'
+
+                fig.add_trace(go.Scatter(
+                    x=t2_values,
+                    y=q_values,
+                    mode='markers',
+                    name='T²-Q Point',
+                    marker=dict(color=marker_color, size=4),
+                    hovertemplate=hover_template,
+                    customdata=custom_data,
+                    text=text_labels
+                ))
+            else:
+                # Fallback if COLORS_AVAILABLE is False
+                mode = 'markers+lines+text' if labels_data else 'markers+lines'
+                fig.add_trace(go.Scatter(
+                    x=t2_values,
+                    y=q_values,
+                    mode=mode,
+                    name='Samples',
+                    text=text_labels if labels_data else None,
+                    marker=dict(size=8, color='steelblue'),
+                    line=dict(color='lightgray', width=1),
+                    textposition='top center',
+                    hovertemplate=hover_template,
+                    customdata=custom_data
+                ))
 
     # Calculate adaptive range
     if len(t2_values) > 0 and len(q_values) > 0:
@@ -1215,6 +1533,44 @@ def show():
                     # Create plots side by side (automatically, no button)
                     st.markdown("### 📊 Score Plot & T²-Q Influence Plot")
 
+                    # Trajectory style controls
+                    st.markdown("**Trajectory Visualization Options**")
+                    traj_col1, traj_col2 = st.columns(2)
+
+                    with traj_col1:
+                        show_trajectory_score = st.checkbox("Show Trajectory", value=True, key="show_trajectory_score_tab2")
+                        if show_trajectory_score:
+                            trajectory_style_score = st.radio(
+                                "Score Plot Trajectory Style",
+                                options=['simple', 'gradient'],
+                                format_func=lambda x: {
+                                    'simple': 'Simple (Light Gray)',
+                                    'gradient': 'Gradient (Blue→Red with Star)'
+                                }[x],
+                                index=0,
+                                horizontal=True,
+                                key="trajectory_style_score_tab2"
+                            )
+                        else:
+                            trajectory_style_score = 'simple'
+
+                    with traj_col2:
+                        show_trajectory_t2q = st.checkbox("Show Trajectory", value=True, key="show_trajectory_t2q_tab2")
+                        if show_trajectory_t2q:
+                            trajectory_style_t2q = st.radio(
+                                "T²-Q Plot Trajectory Style",
+                                options=['simple', 'gradient'],
+                                format_func=lambda x: {
+                                    'simple': 'Simple (Light Gray)',
+                                    'gradient': 'Gradient (Blue→Red with Star)'
+                                }[x],
+                                index=0,
+                                horizontal=True,
+                                key="trajectory_style_t2q_tab2"
+                            )
+                        else:
+                            trajectory_style_t2q = 'simple'
+
                     plot_col1, plot_col2 = st.columns(2)
 
                     with plot_col1:
@@ -1224,7 +1580,9 @@ def show():
                             explained_variance_pct,
                             timestamps=timestamps,
                             pca_params=pca_params_plot,
-                            start_sample_num=1
+                            start_sample_num=1,
+                            show_trajectory=show_trajectory_score,
+                            trajectory_style=trajectory_style_score
                         )
                         st.plotly_chart(fig_score, use_container_width=True)
 
@@ -1236,7 +1594,9 @@ def show():
                             t2_limits,
                             q_limits,
                             timestamps=timestamps,
-                            start_sample_num=1
+                            start_sample_num=1,
+                            show_trajectory=show_trajectory_t2q,
+                            trajectory_style=trajectory_style_t2q
                         )
                         st.plotly_chart(fig_t2q, use_container_width=True)
 
@@ -1450,6 +1810,155 @@ def show():
                         'X_scaled': X_plot_scaled
                     }
 
+                    # ========== EXPORT SECTION - TRAINING DATA ==========
+                    st.markdown("---")
+                    st.markdown("## 📥 Export Training Data Diagnostics")
+                    st.markdown("*Export T², Q values, limits, and outlier diagnostics for training dataset*")
+
+                    export_col1, export_col2, export_col3 = st.columns(3)
+
+                    with export_col1:
+                        st.markdown("### 📊 Basic Data Export")
+
+                        # Prepare basic data export for training data
+                        basic_export_df = pd.DataFrame({
+                            'Sample': [f"Train_Sample_{i+1}" for i in range(len(t2_values))],
+                            'T2': t2_values,
+                            'Q': q_values,
+                            'T2_Limit_97.5%': [t2_limits[0]] * len(t2_values),
+                            'T2_Limit_99.5%': [t2_limits[1]] * len(t2_values),
+                            'T2_Limit_99.95%': [t2_limits[2]] * len(t2_values),
+                            'Q_Limit_97.5%': [q_limits[0]] * len(q_values),
+                            'Q_Limit_99.5%': [q_limits[1]] * len(q_values),
+                            'Q_Limit_99.95%': [q_limits[2]] * len(q_values)
+                        })
+
+                        # Convert to CSV
+                        csv_basic = basic_export_df.to_csv(index=False)
+
+                        st.download_button(
+                            label="📥 Download T²-Q Values (CSV)",
+                            data=csv_basic,
+                            file_name=f"training_t2_q_values_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                            mime="text/csv",
+                            help="Download training data T² and Q values with all critical limits"
+                        )
+
+                    with export_col2:
+                        st.markdown("### 🔍 Independent Diagnostics")
+                        st.markdown("*T² and Q evaluated independently*")
+
+                        # Import monitoring functions
+                        from pca_utils.pca_monitoring import export_monitoring_data_to_excel
+
+                        # Prepare sample labels for training data
+                        sample_labels_export = [f"Train_Sample_{i+1}" for i in range(len(t2_values))]
+
+                        # Create Excel file with independent diagnostics
+                        if st.button("📊 Generate Independent Report", key="btn_independent_tab2"):
+                            with st.spinner("Generating independent diagnostics report..."):
+                                excel_independent = export_monitoring_data_to_excel(
+                                    t2_values=t2_values,
+                                    q_values=q_values,
+                                    t2_limits=t2_limits,
+                                    q_limits=q_limits,
+                                    sample_labels=sample_labels_export,
+                                    approach='independent'
+                                )
+
+                                st.download_button(
+                                    label="📥 Download Independent Report (Excel)",
+                                    data=excel_independent,
+                                    file_name=f"training_monitoring_independent_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    help="Excel file with training data T² and Q outliers classified independently",
+                                    key="download_independent_tab2"
+                                )
+
+                    with export_col3:
+                        st.markdown("### 🎯 Joint Diagnostics")
+                        st.markdown("*Hierarchical outlier classification*")
+
+                        # Create Excel file with joint diagnostics
+                        if st.button("📊 Generate Joint Report", key="btn_joint_tab2"):
+                            with st.spinner("Generating joint diagnostics report..."):
+                                excel_joint = export_monitoring_data_to_excel(
+                                    t2_values=t2_values,
+                                    q_values=q_values,
+                                    t2_limits=t2_limits,
+                                    q_limits=q_limits,
+                                    sample_labels=sample_labels_export,
+                                    approach='joint'
+                                )
+
+                                st.download_button(
+                                    label="📥 Download Joint Report (Excel)",
+                                    data=excel_joint,
+                                    file_name=f"training_monitoring_joint_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    help="Excel file with hierarchical outlier classification"
+                                )
+
+                    # Complete report with both approaches
+                    st.markdown("---")
+                    complete_col1, complete_col2 = st.columns([2, 1])
+
+                    with complete_col1:
+                        st.markdown("### 📦 Complete Training Data Report")
+                        st.markdown("*Includes both independent and joint diagnostics for training data*")
+
+                    with complete_col2:
+                        if st.button("📊 Generate Complete Report", key="btn_complete_tab2", type="primary"):
+                            with st.spinner("Generating complete monitoring report..."):
+                                excel_complete = export_monitoring_data_to_excel(
+                                    t2_values=t2_values,
+                                    q_values=q_values,
+                                    t2_limits=t2_limits,
+                                    q_limits=q_limits,
+                                    sample_labels=sample_labels_export,
+                                    approach='both'
+                                )
+
+                                st.download_button(
+                                    label="📥 Download Complete Report (Excel)",
+                                    data=excel_complete,
+                                    file_name=f"training_monitoring_complete_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    help="Comprehensive Excel file with all training data diagnostics",
+                                    key="download_complete_tab2"
+                                )
+
+                    # Info about report contents
+                    with st.expander("📋 What's included in the reports?", expanded=False):
+                        st.markdown("""
+                        **Basic Data Export (CSV)**:
+                        - T² and Q values for all samples
+                        - Critical limits at all confidence levels (97.5%, 99.5%, 99.95%)
+
+                        **Independent Diagnostics Report (Excel)**:
+                        - Sheet 1: T² and Q values with limits
+                        - Sheet 2: Occurrences summary (count of outliers per threshold)
+                        - Sheet 3: T² outliers (samples exceeding T² limits)
+                        - Sheet 4: Q outliers (samples exceeding Q limits)
+                        - Sheet 5: Combined outliers (samples exceeding T² OR Q)
+
+                        **Joint Diagnostics Report (Excel)**:
+                        - Sheet 1: T² and Q values with limits
+                        - Sheet 2: Occurrences summary (count per threshold level)
+                        - Sheet 3: Hierarchical outlier classification
+                          - *** (99.95%): Most severe outliers
+                          - ** (99.5%): Moderate outliers
+                          - * (97.5%): Mild outliers
+
+                        **Complete Report (Excel)**:
+                        - All sheets from both Independent and Joint diagnostics
+                        - 7 sheets total with comprehensive outlier analysis
+
+                        **Diagnostic Approaches**:
+                        - **Independent**: T² and Q evaluated separately. A sample can be counted as outlier in both.
+                        - **Joint**: Hierarchical classification. Each sample assigned to highest exceeded threshold only.
+                        """)
+
                 except Exception as e:
                     st.error(f"❌ Error generating plots: {str(e)}")
                     import traceback
@@ -1609,13 +2118,26 @@ def show():
                                 # ===== IMPORT CORRECT FUNCTIONS =====
                                 from pca_utils.pca_statistics import calculate_hotelling_t2, calculate_q_residuals
                                 from scipy.stats import f, chi2
+                                from pca_utils.pca_statistics import calculate_hotelling_t2_matricial
 
                                 # Get eigenvalues for the selected components
                                 eigenvalues_diag = pca_results['eigenvalues'][:n_components_use]
 
                                 # ===== CALCULATE T² FOR TEST SAMPLES =====
-                                # Use correct formula: T² = Σ(score_k² / λ_k)
-                                t2_values = np.sum((scores_test ** 2) / eigenvalues_diag[np.newaxis, :], axis=1)
+                                # Use R/CAT matricial formula for test data projection
+                                # This correctly handles centering/scaling with training statistics
+                                X_train_mean = pca_results['means']
+                                X_train_std = pca_results['stds'] if st.session_state.pca_monitor_scale else None
+
+                                # Calculate T² using matricial method (matches R/CAT exactly)
+                                t2_values, _ = calculate_hotelling_t2_matricial(
+                                    X_test=X_test.values,
+                                    loadings=loadings,
+                                    eigenvalues=eigenvalues_diag,
+                                    X_train_mean=X_train_mean,
+                                    X_train_std=X_train_std,
+                                    n_train=n_samples_train
+                                )
 
                                 # ===== CALCULATE Q FOR TEST SAMPLES =====
                                 # Correct formula: Q = ||residuals||² = ||X - X_reconstructed||²
@@ -1759,6 +2281,44 @@ def show():
                         st.markdown("### 📊 Test Data Projection on Training Model")
                         st.info(f"Displaying **{X_test_plot.shape[0]} test samples** projected onto training model using **{test_results['n_components_use']} components**")
 
+                        # Trajectory style controls for test data
+                        st.markdown("**Trajectory Visualization Options**")
+                        test_traj_col1, test_traj_col2 = st.columns(2)
+
+                        with test_traj_col1:
+                            show_trajectory_score_test = st.checkbox("Show Trajectory", value=True, key="show_trajectory_score_test")
+                            if show_trajectory_score_test:
+                                trajectory_style_score_test = st.radio(
+                                    "Score Plot Trajectory Style",
+                                    options=['simple', 'gradient'],
+                                    format_func=lambda x: {
+                                        'simple': 'Simple (Light Gray)',
+                                        'gradient': 'Gradient (Blue→Red with Star)'
+                                    }[x],
+                                    index=0,
+                                    horizontal=True,
+                                    key="trajectory_style_score_test"
+                                )
+                            else:
+                                trajectory_style_score_test = 'simple'
+
+                        with test_traj_col2:
+                            show_trajectory_t2q_test = st.checkbox("Show Trajectory", value=True, key="show_trajectory_t2q_test")
+                            if show_trajectory_t2q_test:
+                                trajectory_style_t2q_test = st.radio(
+                                    "T²-Q Plot Trajectory Style",
+                                    options=['simple', 'gradient'],
+                                    format_func=lambda x: {
+                                        'simple': 'Simple (Light Gray)',
+                                        'gradient': 'Gradient (Blue→Red with Star)'
+                                    }[x],
+                                    index=0,
+                                    horizontal=True,
+                                    key="trajectory_style_t2q_test"
+                                )
+                            else:
+                                trajectory_style_t2q_test = 'simple'
+
                         test_plot_col1, test_plot_col2 = st.columns(2)
 
                         with test_plot_col1:
@@ -1768,7 +2328,9 @@ def show():
                                 explained_variance_pct_plot,
                                 timestamps=timestamps_plot,
                                 pca_params=pca_params_test_plot,
-                                start_sample_num=1
+                                start_sample_num=1,
+                                show_trajectory=show_trajectory_score_test,
+                                trajectory_style=trajectory_style_score_test
                             )
                             st.plotly_chart(fig_score_test, use_container_width=True)
 
@@ -1780,7 +2342,9 @@ def show():
                                 t2_limits_plot,
                                 q_limits_plot,
                                 timestamps=timestamps_plot,
-                                start_sample_num=1
+                                start_sample_num=1,
+                                show_trajectory=show_trajectory_t2q_test,
+                                trajectory_style=trajectory_style_t2q_test
                             )
                             st.plotly_chart(fig_t2q_test, use_container_width=True)
 
@@ -2069,12 +2633,312 @@ def show():
 
                             st.plotly_chart(fig_corr_scatter_test, use_container_width=True)
 
-    # ===== TAB 4: MODEL MANAGEMENT =====
-    # (Keep the existing management tab from the original code - truncated here for brevity)
+                            # ========== EXPORT SECTION - TEST DATA ==========
+                            st.markdown("---")
+                            st.markdown("## 📥 Export Test Data Monitoring Results")
+                            st.markdown("*Export T², Q values, limits, and outlier diagnostics for test dataset*")
+
+                            export_test_col1, export_test_col2, export_test_col3 = st.columns(3)
+
+                            with export_test_col1:
+                                st.markdown("### 📊 Basic Data Export")
+
+                                # Prepare basic data export for test
+                                basic_export_df_test = pd.DataFrame({
+                                    'Sample': [f"Test_Sample_{i+1}" for i in range(len(t2_values))],
+                                    'T2': t2_values,
+                                    'Q': q_values,
+                                    'T2_Limit_97.5%': [t2_limits[0]] * len(t2_values),
+                                    'T2_Limit_99.5%': [t2_limits[1]] * len(t2_values),
+                                    'T2_Limit_99.95%': [t2_limits[2]] * len(t2_values),
+                                    'Q_Limit_97.5%': [q_limits[0]] * len(q_values),
+                                    'Q_Limit_99.5%': [q_limits[1]] * len(q_values),
+                                    'Q_Limit_99.95%': [q_limits[2]] * len(q_values)
+                                })
+
+                                # Add timestamps if available
+                                if timestamps is not None and len(timestamps) == len(t2_values):
+                                    basic_export_df_test.insert(1, 'Timestamp', timestamps)
+
+                                # Convert to CSV
+                                csv_basic_test = basic_export_df_test.to_csv(index=False)
+
+                                st.download_button(
+                                    label="📥 Download T²-Q Values (CSV)",
+                                    data=csv_basic_test,
+                                    file_name=f"test_t2_q_values_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                                    mime="text/csv",
+                                    help="Download test data T² and Q values with all critical limits"
+                                )
+
+                            with export_test_col2:
+                                st.markdown("### 🔍 Independent Diagnostics")
+                                st.markdown("*T² and Q evaluated independently*")
+
+                                # Prepare sample labels for test
+                                sample_labels_test_export = [f"Test_Sample_{i+1}" for i in range(len(t2_values))]
+
+                                # Create Excel file with independent diagnostics
+                                if st.button("📊 Generate Independent Report", key="btn_independent_test"):
+                                    with st.spinner("Generating independent diagnostics report for test data..."):
+                                        try:
+                                            from pca_utils.pca_monitoring import export_monitoring_data_to_excel
+
+                                            excel_independent_test = export_monitoring_data_to_excel(
+                                                t2_values=t2_values,
+                                                q_values=q_values,
+                                                t2_limits=t2_limits,
+                                                q_limits=q_limits,
+                                                sample_labels=sample_labels_test_export,
+                                                approach='independent'
+                                            )
+
+                                            st.download_button(
+                                                label="📥 Download Independent Report (Excel)",
+                                                data=excel_independent_test,
+                                                file_name=f"test_monitoring_independent_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                                help="Excel file with test data T² and Q outliers classified independently",
+                                                key="download_independent_test"
+                                            )
+                                            st.success("✅ Independent report generated!")
+                                        except Exception as e:
+                                            st.error(f"❌ Error: {str(e)}")
+
+                            with export_test_col3:
+                                st.markdown("### 🎯 Joint Diagnostics")
+                                st.markdown("*Hierarchical outlier classification*")
+
+                                # Create Excel file with joint diagnostics
+                                if st.button("📊 Generate Joint Report", key="btn_joint_test"):
+                                    with st.spinner("Generating joint diagnostics report for test data..."):
+                                        try:
+                                            from pca_utils.pca_monitoring import export_monitoring_data_to_excel
+
+                                            excel_joint_test = export_monitoring_data_to_excel(
+                                                t2_values=t2_values,
+                                                q_values=q_values,
+                                                t2_limits=t2_limits,
+                                                q_limits=q_limits,
+                                                sample_labels=sample_labels_test_export,
+                                                approach='joint'
+                                            )
+
+                                            st.download_button(
+                                                label="📥 Download Joint Report (Excel)",
+                                                data=excel_joint_test,
+                                                file_name=f"test_monitoring_joint_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                                help="Excel file with hierarchical outlier classification for test data",
+                                                key="download_joint_test"
+                                            )
+                                            st.success("✅ Joint report generated!")
+                                        except Exception as e:
+                                            st.error(f"❌ Error: {str(e)}")
+
+                            # Complete report with both approaches
+                            st.markdown("---")
+                            complete_test_col1, complete_test_col2 = st.columns([2, 1])
+
+                            with complete_test_col1:
+                                st.markdown("### 📦 Complete Test Monitoring Report")
+                                st.markdown("*Includes both independent and joint diagnostics for test data*")
+
+                            with complete_test_col2:
+                                if st.button("📊 Generate Complete Report", key="btn_complete_test", type="primary"):
+                                    with st.spinner("Generating complete monitoring report for test data..."):
+                                        try:
+                                            from pca_utils.pca_monitoring import export_monitoring_data_to_excel
+
+                                            excel_complete_test = export_monitoring_data_to_excel(
+                                                t2_values=t2_values,
+                                                q_values=q_values,
+                                                t2_limits=t2_limits,
+                                                q_limits=q_limits,
+                                                sample_labels=sample_labels_test_export,
+                                                approach='both'
+                                            )
+
+                                            st.download_button(
+                                                label="📥 Download Complete Report (Excel)",
+                                                data=excel_complete_test,
+                                                file_name=f"test_monitoring_complete_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                                help="Comprehensive Excel file with all diagnostics for test data",
+                                                key="download_complete_test"
+                                            )
+                                            st.success("✅ Complete report generated!")
+                                        except Exception as e:
+                                            st.error(f"❌ Error: {str(e)}")
+
+                            # Info about report contents
+                            with st.expander("📋 What's included in the test reports?", expanded=False):
+                                st.markdown("""
+                                **Basic Data Export (CSV)**:
+                                - T² and Q values for all test samples
+                                - Critical limits at all confidence levels (97.5%, 99.5%, 99.95%)
+                                - Timestamps (if available)
+
+                                **Independent Diagnostics Report (Excel)**:
+                                - Sheet 1: T² and Q values with limits
+                                - Sheet 2: Occurrences summary (count of outliers per threshold)
+                                - Sheet 3: T² outliers (samples exceeding T² limits)
+                                - Sheet 4: Q outliers (samples exceeding Q limits)
+                                - Sheet 5: Combined outliers (samples exceeding T² OR Q)
+
+                                **Joint Diagnostics Report (Excel)**:
+                                - Sheet 1: T² and Q values with limits
+                                - Sheet 2: Occurrences summary (count per threshold level)
+                                - Sheet 3: Hierarchical outlier classification
+                                  - *** (99.95%): Most severe outliers
+                                  - ** (99.5%): Moderate outliers
+                                  - * (97.5%): Mild outliers
+
+                                **Complete Report (Excel)**:
+                                - All sheets from both Independent and Joint diagnostics
+                                - 7 sheets total with comprehensive outlier analysis
+                                """)
+
+    # ===== TAB 4: MODEL MANAGEMENT & COMPREHENSIVE EXPORT =====
     with tab4:
-        st.markdown("## 💾 Model Management")
-        st.markdown("*Save and load monitoring models*")
-        st.info("Model save/load functionality to be implemented")
+        st.markdown("## 💾 Model Management & Comprehensive Export")
+        st.markdown("*Export complete monitoring analysis and manage models*")
+
+        # Check if model is trained
+        if 'pca_monitor_trained' not in st.session_state or not st.session_state.pca_monitor_trained:
+            st.warning("⚠️ **No model trained yet.** Please train a model in the **Model Training** tab first.")
+        else:
+            st.success("✅ **Model loaded and ready for comprehensive export**")
+
+            # Section 1: Training Data Export
+            st.markdown("### 📊 Training Data Export")
+
+            if 'pca_monitor_plot_results' in st.session_state:
+                training_results = st.session_state.pca_monitor_plot_results
+
+                train_export_col1, train_export_col2 = st.columns(2)
+
+                with train_export_col1:
+                    st.markdown("**Training Dataset Diagnostics**")
+
+                    # Basic CSV
+                    basic_train_df = pd.DataFrame({
+                        'Sample': [f"Train_Sample_{i+1}" for i in range(len(training_results['t2']))],
+                        'T2': training_results['t2'],
+                        'Q': training_results['q'],
+                        'T2_Limit_97.5%': [training_results['t2_limits'][0]] * len(training_results['t2']),
+                        'T2_Limit_99.5%': [training_results['t2_limits'][1]] * len(training_results['t2']),
+                        'T2_Limit_99.95%': [training_results['t2_limits'][2]] * len(training_results['t2']),
+                        'Q_Limit_97.5%': [training_results['q_limits'][0]] * len(training_results['q']),
+                        'Q_Limit_99.5%': [training_results['q_limits'][1]] * len(training_results['q']),
+                        'Q_Limit_99.95%': [training_results['q_limits'][2]] * len(training_results['q'])
+                    })
+
+                    csv_train = basic_train_df.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Training Data (CSV)",
+                        data=csv_train,
+                        file_name=f"training_data_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv"
+                    )
+
+                with train_export_col2:
+                    if st.button("📊 Generate Training Report (Excel)", key="btn_train_report_tab4"):
+                        with st.spinner("Generating training report..."):
+                            try:
+                                from pca_utils.pca_monitoring import export_monitoring_data_to_excel
+
+                                sample_labels_train = [f"Train_Sample_{i+1}" for i in range(len(training_results['t2']))]
+
+                                excel_train = export_monitoring_data_to_excel(
+                                    t2_values=training_results['t2'],
+                                    q_values=training_results['q'],
+                                    t2_limits=training_results['t2_limits'],
+                                    q_limits=training_results['q_limits'],
+                                    sample_labels=sample_labels_train,
+                                    approach='both'
+                                )
+
+                                st.download_button(
+                                    label="📥 Download Training Report (Excel)",
+                                    data=excel_train,
+                                    file_name=f"training_complete_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    key="download_train_report_tab4"
+                                )
+                                st.success("✅ Training report generated!")
+                            except Exception as e:
+                                st.error(f"❌ Error: {str(e)}")
+
+            st.markdown("---")
+
+            # Section 2: Test Data Export (if available)
+            st.markdown("### 🔬 Test Data Export")
+
+            if 'pca_monitor_test_results' in st.session_state:
+                test_results = st.session_state.pca_monitor_test_results
+
+                test_export_col1, test_export_col2 = st.columns(2)
+
+                with test_export_col1:
+                    st.markdown("**Test Dataset Monitoring Results**")
+
+                    # Basic CSV
+                    basic_test_df = pd.DataFrame({
+                        'Sample': [f"Test_Sample_{i+1}" for i in range(len(test_results['t2_values']))],
+                        'T2': test_results['t2_values'],
+                        'Q': test_results['q_values'],
+                        'T2_Limit_97.5%': [test_results['t2_limits'][0]] * len(test_results['t2_values']),
+                        'T2_Limit_99.5%': [test_results['t2_limits'][1]] * len(test_results['t2_values']),
+                        'T2_Limit_99.95%': [test_results['t2_limits'][2]] * len(test_results['t2_values']),
+                        'Q_Limit_97.5%': [test_results['q_limits'][0]] * len(test_results['q_values']),
+                        'Q_Limit_99.5%': [test_results['q_limits'][1]] * len(test_results['q_values']),
+                        'Q_Limit_99.95%': [test_results['q_limits'][2]] * len(test_results['q_values'])
+                    })
+
+                    csv_test = basic_test_df.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Test Data (CSV)",
+                        data=csv_test,
+                        file_name=f"test_data_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv"
+                    )
+
+                with test_export_col2:
+                    if st.button("📊 Generate Test Report (Excel)", key="btn_test_report_tab4"):
+                        with st.spinner("Generating test report..."):
+                            try:
+                                from pca_utils.pca_monitoring import export_monitoring_data_to_excel
+
+                                sample_labels_test = [f"Test_Sample_{i+1}" for i in range(len(test_results['t2_values']))]
+
+                                excel_test = export_monitoring_data_to_excel(
+                                    t2_values=test_results['t2_values'],
+                                    q_values=test_results['q_values'],
+                                    t2_limits=test_results['t2_limits'],
+                                    q_limits=test_results['q_limits'],
+                                    sample_labels=sample_labels_test,
+                                    approach='both'
+                                )
+
+                                st.download_button(
+                                    label="📥 Download Test Report (Excel)",
+                                    data=excel_test,
+                                    file_name=f"test_complete_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    key="download_test_report_tab4"
+                                )
+                                st.success("✅ Test report generated!")
+                            except Exception as e:
+                                st.error(f"❌ Error: {str(e)}")
+            else:
+                st.info("ℹ️ No test data available. Run monitoring in **Testing & Monitoring** tab first.")
+
+            st.markdown("---")
+
+            # Section 3: Model Save/Load (placeholder)
+            st.markdown("### 💾 Model Save/Load")
+            st.info("🚧 Model save/load functionality to be implemented")
 
 
 if __name__ == "__main__":

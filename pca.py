@@ -581,21 +581,23 @@ def _show_model_computation_tab(data: pd.DataFrame):
 
             if recon_button:
                 try:
-                    with st.spinner("🔄 Reconstructing missing values using PCA..."):
+                    with st.spinner("🔄 Reconstructing missing values using NIPALS algorithm..."):
                         from pca_utils.missing_data_reconstruction import (
                             reconstruct_missing_data,
                             get_reconstruction_info
                         )
 
-                        # Perform reconstruction
-                        X_reconstructed = reconstruct_missing_data(
+                        # Perform NIPALS reconstruction
+                        X_reconstructed, recon_info_dict = reconstruct_missing_data(
                             X=numeric_data,
-                            scores=pca_dict['scores'],
-                            loadings=pca_dict['loadings'],
-                            n_components=n_components_recon
+                            n_components=n_components_recon,
+                            max_iter=1000,
+                            tol=1e-6,
+                            center=pca_dict.get('centering', True),
+                            scale=pca_dict.get('scaling', False)
                         )
 
-                        # Get reconstruction statistics
+                        # Get additional reconstruction statistics
                         recon_info = get_reconstruction_info(numeric_data, X_reconstructed)
 
                         # Display reconstruction summary
@@ -649,10 +651,55 @@ def _show_model_computation_tab(data: pd.DataFrame):
                                 f"{recon_info['filled_max']:.4f}"
                             )
 
+                        # NIPALS Algorithm Results
+                        st.markdown("#### 🔬 NIPALS Algorithm Results:")
+                        nipals_col1, nipals_col2, nipals_col3 = st.columns(3)
+                        with nipals_col1:
+                            st.metric(
+                                "Variance Explained",
+                                f"{recon_info_dict['total_variance_explained']:.1f}%"
+                            )
+                        with nipals_col2:
+                            converged_status = "✅ Yes" if recon_info_dict['converged'] else "⚠️ No"
+                            st.metric(
+                                "Converged",
+                                converged_status
+                            )
+                        with nipals_col3:
+                            st.metric(
+                                "Iterations",
+                                recon_info_dict['n_iterations']
+                            )
+
+                        # Show convergence warning if needed
+                        if not recon_info_dict['converged']:
+                            st.warning("⚠️ NIPALS did not fully converge. Consider increasing max iterations or reducing components.")
+
+                        # === FIX #1: PRESERVE METADATA COLUMNS ===
+                        # Check if original data has non-numeric columns (metadata)
+                        original_data = st.session_state.current_data
+                        numeric_cols_list = original_data.select_dtypes(include=[np.number]).columns.tolist()
+                        non_numeric_cols_list = [col for col in original_data.columns if col not in numeric_cols_list]
+
+                        # If metadata exists, add it back to reconstructed data
+                        if non_numeric_cols_list:
+                            X_recon_with_meta = X_reconstructed.copy()
+
+                            for col in non_numeric_cols_list:
+                                if col in original_data.columns:
+                                    X_recon_with_meta[col] = original_data[col].values
+
+                            # Reorder: metadata first, then numeric
+                            cols_order = non_numeric_cols_list + numeric_cols_list
+                            X_recon_final = X_recon_with_meta[cols_order]
+
+                            # Update X_reconstructed with metadata
+                            X_reconstructed = X_recon_final
+
                         # Download section
                         st.markdown("#### 📥 Download Reconstructed Data:")
 
-                        # Create Excel file in memory
+                        # Create Excel file in memory (AFTER metadata preservation)
                         from io import BytesIO
 
                         buffer = BytesIO()
@@ -666,28 +713,42 @@ def _show_model_computation_tab(data: pd.DataFrame):
                             # Add reconstruction info to second sheet
                             info_df = pd.DataFrame({
                                 'Metric': [
+                                    'Algorithm',
                                     'Missing Values (Before)',
                                     'Missing Values (After)',
                                     'Values Filled',
                                     'Fill Rate (%)',
                                     'Components Used',
+                                    'Variance Explained (%)',
+                                    'NIPALS Converged',
+                                    'NIPALS Iterations',
+                                    'Centering Applied',
+                                    'Scaling Applied',
                                     'Reconstruction Date',
                                     'Mean of Filled',
                                     'Std Dev of Filled',
                                     'Min of Filled',
-                                    'Max of Filled'
+                                    'Max of Filled',
+                                    'Metadata Columns Preserved'
                                 ],
                                 'Value': [
+                                    'NIPALS (Nonlinear Iterative Partial Least Squares)',
                                     recon_info['n_missing_before'],
                                     recon_info['n_missing_after'],
                                     recon_info['n_filled'],
                                     f"{(recon_info['n_filled'] / recon_info['n_missing_before'] * 100) if recon_info['n_missing_before'] > 0 else 0:.2f}",
                                     n_components_recon,
+                                    f"{recon_info_dict['total_variance_explained']:.2f}",
+                                    'Yes' if recon_info_dict['converged'] else 'No',
+                                    recon_info_dict['n_iterations'],
+                                    'Yes' if recon_info_dict['center'] else 'No',
+                                    'Yes' if recon_info_dict['scale'] else 'No',
                                     pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S'),
                                     f"{recon_info['filled_mean']:.4f}",
                                     f"{recon_info['filled_std']:.4f}",
                                     f"{recon_info['filled_min']:.4f}",
-                                    f"{recon_info['filled_max']:.4f}"
+                                    f"{recon_info['filled_max']:.4f}",
+                                    ', '.join(non_numeric_cols_list) if non_numeric_cols_list else 'None'
                                 ]
                             })
                             info_df.to_excel(
@@ -704,26 +765,93 @@ def _show_model_computation_tab(data: pd.DataFrame):
                             file_name=f"data_reconstructed_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             use_container_width=True,
+                            help="Download reconstructed data as Excel file (WITH metadata columns)",
                             key="download_recon_button"
                         )
 
-                        # Preview section
-                        st.markdown("#### 👁️ Preview of Reconstructed Data:")
+                        st.divider()
 
-                        # Show first few rows
-                        preview_rows = min(10, len(X_reconstructed))
-                        st.dataframe(
-                            X_reconstructed.head(preview_rows),
+                        # === FIX #2: LOAD TO WORKSPACE BUTTON ===
+                        st.markdown("#### 📂 Load Reconstructed Data to Workspace")
+                        st.markdown("*Make reconstructed data available for other analyses*")
+
+                        if st.button(
+                            "📥 Load to Workspace",
+                            key="load_reconstructed_workspace_tab1",
                             use_container_width=True,
-                            height=300
+                            type="primary"
+                        ):
+                            try:
+                                if 'split_datasets' not in st.session_state:
+                                    st.session_state.split_datasets = {}
+
+                                # Create workspace entry
+                                workspace_name = f"{st.session_state.get('dataset_name', 'data')}_reconstructed_{pd.Timestamp.now().strftime('%H%M%S')}"
+
+                                st.session_state.split_datasets[workspace_name] = {
+                                    'data': X_reconstructed,
+                                    'type': 'Reconstructed',
+                                    'parent': st.session_state.get('dataset_name', 'Original'),
+                                    'n_samples': len(X_reconstructed),
+                                    'creation_time': pd.Timestamp.now(),
+                                    'description': f'Missing data reconstructed - {recon_info["n_filled"]} values filled'
+                                }
+
+                                st.success(f"✅ Data loaded to workspace as: **{workspace_name}**")
+                                st.info("🔄 You can now use this dataset in other analyses")
+
+                            except Exception as e:
+                                st.error(f"❌ Failed to load: {str(e)}")
+                                import traceback
+                                with st.expander("🔍 Debug Info"):
+                                    st.code(traceback.format_exc())
+
+                        st.divider()
+
+                        # === FIX #3: ENHANCED PREVIEW WITH METADATA INFO ===
+                        st.markdown("#### 👁️ Data Preview")
+
+                        # Show metadata info if it exists
+                        if non_numeric_cols_list:
+                            st.markdown(f"**Showing reconstructed data with {len(non_numeric_cols_list)} metadata column(s)**")
+                            st.caption(f"Metadata: {', '.join(non_numeric_cols_list)}")
+                        else:
+                            st.markdown("**Showing reconstructed data**")
+
+                        preview_option = st.radio(
+                            "Select data to preview:",
+                            ["Reconstructed Data", "Original Data (with NaN)", "Comparison"],
+                            horizontal=True,
+                            key="preview_option_missing_tab1"
                         )
+
+                        if preview_option == "Reconstructed Data":
+                            st.dataframe(X_reconstructed, use_container_width=True, height=300)
+                            st.caption(f"Rows: {len(X_reconstructed)} | Columns: {len(X_reconstructed.columns)}")
+
+                        elif preview_option == "Original Data (with NaN)":
+                            st.dataframe(original_data, use_container_width=True, height=300)
+                            st.caption(f"Rows: {len(original_data)} | Columns: {len(original_data.columns)}")
+
+                        else:  # Comparison
+                            st.markdown("**Numeric columns comparison (first 10 rows)**")
+                            col_a, col_b = st.columns(2)
+
+                            with col_a:
+                                st.markdown("*Original (with NaN)*")
+                                st.dataframe(original_data[numeric_cols_list].head(10), use_container_width=True)
+
+                            with col_b:
+                                st.markdown("*Reconstructed*")
+                                st.dataframe(X_reconstructed[numeric_cols_list].head(10), use_container_width=True)
 
                         # Success message
                         st.success(
                             f"✅ Reconstruction complete!\n\n"
                             f"• {recon_info['n_filled']:,} missing values filled\n"
                             f"• Using {n_components_recon} PCA components\n"
-                            f"• Download ready for analysis"
+                            f"• Metadata columns preserved: {len(non_numeric_cols_list)}\n"
+                            f"• Ready for workspace or download"
                         )
 
                 except Exception as e:
@@ -2242,6 +2370,170 @@ def _show_interpretation_tab():
 # TAB 6: ADVANCED DIAGNOSTICS
 # ============================================================================
 
+def _create_diagnostic_t2_q_plot(t2_values, q_values, t2_limit, q_limit,
+                                   sample_names=None, show_labels=False,
+                                   color_data=None, color_variable=None,
+                                   show_trajectory=False,
+                                   trajectory_style="Line",
+                                   trajectory_colors=None):
+    """
+    Create T² vs Q diagnostic scatter plot with trajectory options.
+
+    Args:
+        t2_values: Array of T² statistics
+        q_values: Array of Q residuals
+        t2_limit: T² control limit
+        q_limit: Q control limit
+        sample_names: Optional sample identifiers
+        show_labels: Whether to show sample labels on points
+        color_data: Optional data for point coloring
+        color_variable: Name of the color variable
+        show_trajectory: Whether to connect points in sequence
+        trajectory_style: "Line" for simple gray line, "Gradient (Blue→Red)" for color gradient
+        trajectory_colors: List of RGB color strings for gradient trajectory
+
+    Returns:
+        plotly.graph_objects.Figure
+    """
+    import plotly.express as px
+    import plotly.graph_objects as go
+
+    # Get unified color scheme
+    if COLORS_AVAILABLE:
+        from color_utils import get_unified_color_schemes, create_categorical_color_map, is_quantitative_variable
+        colors = get_unified_color_schemes()
+    else:
+        colors = {'background': 'white', 'paper': 'white', 'text': 'black',
+                  'grid': '#e6e6e6', 'point_color': 'blue', 'control_colors': ['green', 'orange', 'red']}
+
+    # Prepare hover text
+    if sample_names is None:
+        hover_text = [f"Sample_{i+1}" for i in range(len(t2_values))]
+    else:
+        hover_text = sample_names
+
+    # Prepare text labels for display
+    text_labels = hover_text if show_labels else None
+
+    # Create figure based on color data type
+    if color_data is not None and COLORS_AVAILABLE:
+        color_series = pd.Series(color_data)
+
+        if is_quantitative_variable(color_series):
+            # QUANTITATIVE: Use continuous blue-to-red scale
+            color_scale = [(0.0, 'rgb(0, 0, 255)'), (0.5, 'rgb(128, 0, 128)'), (1.0, 'rgb(255, 0, 0)')]
+
+            fig = px.scatter(
+                x=t2_values,
+                y=q_values,
+                color=color_data,
+                text=text_labels,
+                title=f"T² vs Q Diagnostic Plot" + (f" (colored by {color_variable})" if color_variable else ""),
+                labels={'x': 'T² Statistic', 'y': 'Q Residual', 'color': color_variable},
+                color_continuous_scale=color_scale
+            )
+        else:
+            # CATEGORICAL: Use discrete color map
+            unique_values = color_series.dropna().unique()
+            color_discrete_map = create_categorical_color_map(unique_values)
+
+            fig = px.scatter(
+                x=t2_values,
+                y=q_values,
+                color=color_data,
+                text=text_labels,
+                title=f"T² vs Q Diagnostic Plot" + (f" (colored by {color_variable})" if color_variable else ""),
+                labels={'x': 'T² Statistic', 'y': 'Q Residual', 'color': color_variable},
+                color_discrete_map=color_discrete_map
+            )
+
+        # Update traces for better appearance
+        fig.update_traces(
+            marker=dict(size=8, opacity=0.7),
+            textposition="top center"
+        )
+    else:
+        # No color variable - use default
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=t2_values,
+            y=q_values,
+            mode='markers+text' if show_labels else 'markers',
+            name='Samples',
+            text=text_labels,
+            hovertext=hover_text,
+            hovertemplate='<b>%{hovertext}</b><br>T²: %{x:.2f}<br>Q: %{y:.2f}<extra></extra>',
+            marker=dict(size=8, color=colors['point_color'], opacity=0.7),
+            textposition="top center"
+        ))
+
+    # Add trajectory if requested
+    if show_trajectory:
+        if trajectory_style == "Gradient (Blue→Red)" and trajectory_colors is not None:
+            # GRADIENT TRAJECTORY: colored segments
+            for i in range(len(t2_values) - 1):
+                fig.add_trace(go.Scatter(
+                    x=[t2_values[i], t2_values[i+1]],
+                    y=[q_values[i], q_values[i+1]],
+                    mode='lines',
+                    line=dict(color=trajectory_colors[i], width=2),
+                    showlegend=False,
+                    hoverinfo='skip'
+                ))
+
+            # Add legend entry for gradient
+            fig.add_trace(go.Scatter(
+                x=[None], y=[None],
+                mode='lines',
+                name='Trajectory (Blue→Red)',
+                line=dict(color='purple', width=2),
+                showlegend=True
+            ))
+        else:
+            # SIMPLE LINE: gray dotted
+            fig.add_trace(go.Scatter(
+                x=t2_values,
+                y=q_values,
+                mode='lines',
+                name='Trajectory',
+                line=dict(color='lightgray', width=1, dash='dot'),
+                showlegend=True,
+                hoverinfo='skip'
+            ))
+
+    # Add control limit lines
+    fig.add_vline(x=t2_limit, line_dash="dash", line_color="red",
+                  annotation_text=f"T² limit", annotation_position="top right")
+    fig.add_hline(y=q_limit, line_dash="dash", line_color="red",
+                  annotation_text=f"Q limit", annotation_position="right")
+
+    # Add acceptance box (green region)
+    fig.add_shape(
+        type="rect",
+        x0=0, x1=t2_limit,
+        y0=0, y1=q_limit,
+        fillcolor="green",
+        opacity=0.1,
+        layer="below",
+        line_width=0
+    )
+
+    # Update layout with unified styling
+    fig.update_layout(
+        xaxis_title="T² Statistic",
+        yaxis_title="Q Residual",
+        height=600,
+        hovermode='closest',
+        plot_bgcolor=colors['background'],
+        paper_bgcolor=colors['paper'],
+        font=dict(color=colors['text']),
+        xaxis=dict(gridcolor=colors['grid']),
+        yaxis=dict(gridcolor=colors['grid'])
+    )
+
+    return fig
+
+
 def _show_advanced_diagnostics_tab():
     """Display advanced diagnostics (T², Q residuals, outliers)."""
     st.markdown("## 🔬 Advanced Diagnostics")
@@ -2257,6 +2549,20 @@ def _show_advanced_diagnostics_tab():
     loadings = pca_results['loadings']
     n_components = pca_results['n_components']
 
+    # === VALIDATION ===
+    # Get the number of samples from PCA results (source of truth)
+    n_samples_pca = len(scores)
+
+    # Validate minimum samples
+    if n_samples_pca < 10:
+        st.error(f"❌ Insufficient samples for diagnostics: {n_samples_pca} samples found. Need at least 10.")
+        return
+
+    # Validate n_components vs n_samples
+    if n_components >= n_samples_pca:
+        st.error(f"❌ Too many components: {n_components} components for {n_samples_pca} samples. Reduce components in Model Computation.")
+        return
+
     # Get original data
     data = st.session_state.get('current_data', None)
     if data is None:
@@ -2271,16 +2577,24 @@ def _show_advanced_diagnostics_tab():
 
     st.divider()
 
+    # === CRITICAL FIX: Get n_samples from PCA results ===
+    # When PCA is computed on a subset of rows, we must use that subset
+    # Otherwise we get shape mismatches (e.g., 125 scores vs 141 data rows)
+    n_samples = len(pca_results['scores'])  # Number of samples in PCA model
+
     # Get numeric variables used in PCA
     selected_vars = pca_results.get('selected_vars', data.select_dtypes(include=[np.number]).columns.tolist())
-    X_data = data[selected_vars]
-    n_samples = len(X_data)
+
+    # Get ONLY the rows that were used in PCA (match scores index)
+    pca_indices = pca_results['scores'].index
+    X_data = data.loc[pca_indices, selected_vars]
+
     n_variables = len(selected_vars)
 
     # === SECTION 1 - CONFIGURATION ===
     st.markdown("### ⚙️ Diagnostic Configuration")
 
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2 = st.columns(2)
 
     with col1:
         # Handle case when n_components < 2
@@ -2313,23 +2627,7 @@ def _show_advanced_diagnostics_tab():
             "Control Limit Approach:",
             ["Independent (95/99/99.9%)", "Joint (97.5/99.5/99.95%)"],
             key="diag_approach",
-            help="Independent: each statistic separately; Joint: combined box regions"
-        )
-
-    with col3:
-        # Color by options
-        available_cols = ["None"] + list(data.columns) + ["Index"]
-        color_by_diag = st.selectbox(
-            "Color Points By:",
-            available_cols,
-            key="diag_color"
-        )
-
-    with col4:
-        show_sample_names_diag = st.checkbox(
-            "Show Sample Labels",
-            value=False,
-            key="diag_labels"
+            help="Independent: separate thresholds | Joint: hierarchical classification"
         )
 
     # === SECTION 2 - CALCULATE STATISTICS (CORRECTED) ===
@@ -2445,7 +2743,7 @@ def _show_advanced_diagnostics_tab():
 
         # Calculate T² limits for all confidence levels using F-distribution
         # Using same formula as calculate_hotelling_t2 function
-        n_samples = len(X_centered)
+        # Note: n_samples is already defined above from pca_results['scores']
         t2_limits = {}
         for alpha, label in zip(conf_levels, conf_labels):
             f_val = f.ppf(alpha, n_comp_diag, n_samples - n_comp_diag)
@@ -2498,34 +2796,176 @@ def _show_advanced_diagnostics_tab():
                 else:
                     fault_types.append("Normal")
 
-        # === SECTION 3 - PREPARE COLOR DATA ===
-        color_data_diag = None
-        if color_by_diag != "None":
-            if color_by_diag == "Index":
-                color_data_diag = list(range(len(scores)))
+        # === SECTION 3 - DIAGNOSTIC PLOTS ===
+        st.divider()
+        st.markdown("### 📊 Diagnostic Plots")
+        st.markdown("*Visualize PCA scores with T² ellipses and influence plots*")
+
+        # Get original dataset for coloring options
+        original_data = st.session_state.current_data
+
+        # Get custom variables if available
+        custom_vars = []
+        if 'custom_variables' in st.session_state:
+            custom_vars = list(st.session_state.custom_variables.keys())
+
+        # Get available color variables (exclude PCA variables)
+        available_color_vars = [col for col in original_data.columns if col not in selected_vars]
+
+        # Trajectory Visualization Options
+        st.divider()
+        st.markdown("**Trajectory Visualization Options**")
+
+        traj_col1, traj_col2 = st.columns(2)
+
+        with traj_col1:
+            show_trajectory_score = st.checkbox(
+                "Show Trajectory",
+                value=True,
+                key="show_trajectory_score_adv_diag"
+            )
+            if show_trajectory_score:
+                trajectory_style_score = st.radio(
+                    "Score Plot Trajectory Style",
+                    options=['simple', 'gradient'],
+                    format_func=lambda x: {
+                        'simple': 'Simple (Light Gray)',
+                        'gradient': 'Gradient (Blue→Red with Star)'
+                    }[x],
+                    index=0,
+                    horizontal=True,
+                    key="trajectory_style_score_adv_diag"
+                )
             else:
-                try:
-                    color_data_diag = data[color_by_diag].values
-                except:
-                    color_data_diag = None
+                trajectory_style_score = 'simple'
 
-        # === SECTION 4 - CREATE PLOTS (SIDE-BY-SIDE) ===
+        with traj_col2:
+            show_trajectory_t2q = st.checkbox(
+                "Show Trajectory",
+                value=True,
+                key="show_trajectory_t2q_adv_diag"
+            )
+            if show_trajectory_t2q:
+                trajectory_style_t2q = st.radio(
+                    "T²-Q Plot Trajectory Style",
+                    options=['simple', 'gradient'],
+                    format_func=lambda x: {
+                        'simple': 'Simple (Light Gray)',
+                        'gradient': 'Gradient (Blue→Red with Star)'
+                    }[x],
+                    index=0,
+                    horizontal=True,
+                    key="trajectory_style_t2q_adv_diag"
+                )
+            else:
+                trajectory_style_t2q = 'simple'
+
+        st.divider()
+
+        # Color and label controls
+        col_plot1, col_plot2 = st.columns(2)
+
+        with col_plot1:
+            all_color_options = ["None", "Row Index"] + available_color_vars + custom_vars
+            color_by_diag = st.selectbox(
+                "Color Points By:",
+                all_color_options,
+                key="diag_color_points",
+                help="Select variable to color the diagnostic points"
+            )
+
+        with col_plot2:
+            show_sample_names_diag = st.checkbox(
+                "Show Sample Labels",
+                value=False,
+                key="diag_show_labels",
+                help="Display sample IDs on the plots"
+            )
+
+        # Prepare color data using unified color system
+        from color_utils import is_quantitative_variable
+
+        color_data_diag = None
+        color_variable_diag = None
+
+        if color_by_diag != "None":
+            color_variable_diag = color_by_diag
+
+            if color_by_diag == "Row Index":
+                # Use row index as categorical
+                color_data_diag = [str(i) for i in range(len(scores))]
+
+            elif color_by_diag in custom_vars:
+                # Custom variable from session state
+                if 'custom_variables' in st.session_state:
+                    custom_data = st.session_state.custom_variables.get(color_by_diag)
+                    if custom_data is not None and len(custom_data) == len(scores):
+                        color_data_diag = custom_data
+                    else:
+                        st.warning(f"⚠️ Custom variable '{color_by_diag}' length mismatch")
+                        color_by_diag = "None"
+                        color_variable_diag = None
+
+            else:
+                # Regular column from original data
+                if color_by_diag in original_data.columns:
+                    color_series = original_data[color_by_diag]
+
+                    # Check if quantitative or categorical
+                    if is_quantitative_variable(color_series):
+                        # Quantitative: use continuous color scale (handled in plotting function)
+                        color_data_diag = color_series.values
+                        st.info(f"📊 Using continuous color scale for **{color_by_diag}** (quantitative)")
+                    else:
+                        # Categorical: convert to categorical color mapping
+                        color_data_diag = color_series.astype(str).values
+                        unique_count = len(pd.Series(color_data_diag).unique())
+                        st.info(f"🎨 Using categorical colors for **{color_by_diag}** ({unique_count} categories)")
+                else:
+                    st.warning(f"⚠️ Column '{color_by_diag}' not found")
+                    color_by_diag = "None"
+                    color_variable_diag = None
+
+        # Prepare trajectory color gradients for both plots
+        trajectory_colors_score = None
+        trajectory_colors_t2q = None
+
+        if show_trajectory_score and trajectory_style_score == "gradient":
+            # Create gradient from blue to red based on sample order
+            n_samples_plot = len(scores_diag)
+            # RGB gradient: blue (0,0,255) → purple (128,0,128) → red (255,0,0)
+            trajectory_colors_score = []
+            for i in range(n_samples_plot):
+                t = i / max(n_samples_plot - 1, 1)  # Normalized position 0→1
+                r = int(255 * t)
+                g = 0
+                b = int(255 * (1 - t))
+                trajectory_colors_score.append(f'rgb({r},{g},{b})')
+
+        if show_trajectory_t2q and trajectory_style_t2q == "gradient":
+            # Create gradient for T²-Q plot
+            n_samples_plot = len(scores_diag)
+            trajectory_colors_t2q = []
+            for i in range(n_samples_plot):
+                t = i / max(n_samples_plot - 1, 1)  # Normalized position 0→1
+                r = int(255 * t)
+                g = 0
+                b = int(255 * (1 - t))
+                trajectory_colors_t2q.append(f'rgb({r},{g},{b})')
+
+        # === CREATE PLOTS (SIDE-BY-SIDE) ===
         st.markdown("---")
+        st.markdown("### 📈 Diagnostic Plots Display")
 
-        col1, col2 = st.columns([3, 1])
-
-        with col1:
-            st.markdown("### 📊 Diagnostic Plots")
-
-        with col2:
-            show_trajectory = st.checkbox("Show trajectory", value=True, key="show_traj_diag")
-
-        st.markdown("Boxes define acceptancy regions at 97.5%, 99.5%, 99.95% limits")
+        # Prepare labels for plots
+        labels_data_diag = None
+        if show_sample_names_diag:
+            labels_data_diag = data.index.tolist()
 
         col_left, col_right = st.columns(2)
 
-        # Import plotting functions
-        from pca_monitoring_page import create_score_plot, create_t2_q_plot
+        # Import score plot function (T² vs Q uses new function above)
+        from pca_monitoring_page import create_score_plot
 
         with col_left:
             st.subheader("Score Plot with T² Ellipses")
@@ -2536,37 +2976,180 @@ def _show_advanced_diagnostics_tab():
                 'n_features': n_variables
             }
 
-            # PASS show_trajectory parameter to create_score_plot
+            # Call with trajectory, color_data and labels_data
             fig_score = create_score_plot(
                 scores_diag,
                 pca_results['explained_variance_ratio'][:n_comp_diag] * 100,
                 timestamps=None,
                 pca_params=pca_params_plot,
                 start_sample_num=1,
-                show_trajectory=show_trajectory
+                show_trajectory=show_trajectory_score,
+                trajectory_style=trajectory_style_score,
+                trajectory_colors=trajectory_colors_score,
+                color_data=color_data_diag,
+                labels_data=labels_data_diag
             )
 
             st.plotly_chart(fig_score, use_container_width=True, key="diag_score_plot")
 
         with col_right:
             if not has_missing_values:
-                st.subheader("T² vs Q Influence Plot")
+                # === CREATE T² vs Q INFLUENCE PLOT WITH 3 NESTED BOXES ===
+                try:
+                    st.subheader("T² vs Q Influence Plot")
 
-                # Convert limits to list format for plot
-                t2_limits_list = [t2_limits[label] for label in conf_labels]
-                q_limits_list = [q_limits[label] for label in conf_labels]
+                    # Parse approach to get confidence levels
+                    if "Independent" in approach:
+                        alpha_levels = [0.95, 0.99, 0.999]
+                        confidence_labels_plot = ['95%', '99%', '99.9%']
+                    else:  # Joint
+                        alpha_levels = [0.975, 0.995, 0.9995]
+                        confidence_labels_plot = ['97.5%', '99.5%', '99.95%']
 
-                fig_t2q = create_t2_q_plot(
-                    t2_values,
-                    q_values,
-                    t2_limits_list,
-                    q_limits_list,
-                    timestamps=None,
-                    start_sample_num=1,
-                    show_trajectory=show_trajectory
-                )
+                    st.caption(f"Boxes define acceptancy regions at {', '.join(confidence_labels_plot)} limits")
 
-                st.plotly_chart(fig_t2q, use_container_width=True, key="diag_t2q_plot")
+                    # Create figure
+                    fig_t2q = go.Figure()
+
+                    # Determine which samples exceed each level
+                    t2_exceed = [t2_values > t2_limits[conf_labels[i]] for i in range(3)]
+                    q_exceed = [q_values > q_limits[conf_labels[i]] for i in range(3)]
+
+                    # Color points based on which level they exceed (highest level takes priority)
+                    point_colors = []
+                    hover_texts = []
+
+                    for i in range(len(t2_values)):
+                        sample_id = data.index[i] if i < len(data.index) else f"Sample {i+1}"
+
+                        # Check which levels are exceeded (highest level takes priority)
+                        if t2_exceed[2][i] or q_exceed[2][i]:
+                            color = 'red'
+                            status = f'⚠️ EXCEEDS {confidence_labels_plot[2]} (SEVERE)'
+                        elif t2_exceed[1][i] or q_exceed[1][i]:
+                            color = 'orange'
+                            status = f'⚠️ EXCEEDS {confidence_labels_plot[1]} (WARNING)'
+                        elif t2_exceed[0][i] or q_exceed[0][i]:
+                            color = 'gold'
+                            status = f'⚠️ EXCEEDS {confidence_labels_plot[0]} (MILD)'
+                        else:
+                            color = 'blue'
+                            status = '✅ WITHIN LIMITS'
+
+                        point_colors.append(color)
+                        hover_texts.append(f"{sample_id}<br>T²: {t2_values[i]:.2f}<br>Q: {q_values[i]:.2f}<br>{status}")
+
+                    # Add scatter points
+                    text_labels = data.index.tolist() if show_sample_names_diag else None
+                    fig_t2q.add_trace(go.Scatter(
+                        x=t2_values,
+                        y=q_values,
+                        mode='markers+text' if show_sample_names_diag else 'markers',
+                        text=text_labels,
+                        marker=dict(
+                            size=8,
+                            color=point_colors,
+                            opacity=0.7,
+                            line=dict(width=1, color='darkgray')
+                        ),
+                        hovertext=hover_texts,
+                        hovertemplate='%{hovertext}<extra></extra>',
+                        name='Samples',
+                        textposition="top center"
+                    ))
+
+                    # Add trajectory if requested
+                    if show_trajectory_t2q:
+                        if trajectory_style_t2q == "gradient" and trajectory_colors_t2q is not None:
+                            # GRADIENT TRAJECTORY: colored segments
+                            for i in range(len(t2_values) - 1):
+                                fig_t2q.add_trace(go.Scatter(
+                                    x=[t2_values[i], t2_values[i+1]],
+                                    y=[q_values[i], q_values[i+1]],
+                                    mode='lines',
+                                    line=dict(color=trajectory_colors_t2q[i], width=2),
+                                    showlegend=False,
+                                    hoverinfo='skip'
+                                ))
+
+                            # Add star at the end
+                            fig_t2q.add_trace(go.Scatter(
+                                x=[t2_values[-1]],
+                                y=[q_values[-1]],
+                                mode='markers',
+                                marker=dict(symbol='star', size=15, color='red'),
+                                name='Latest Sample',
+                                hoverinfo='skip'
+                            ))
+                        else:
+                            # SIMPLE LINE: gray dotted
+                            fig_t2q.add_trace(go.Scatter(
+                                x=t2_values,
+                                y=q_values,
+                                mode='lines',
+                                name='Trajectory',
+                                line=dict(color='lightgray', width=1, dash='dot'),
+                                showlegend=True,
+                                hoverinfo='skip'
+                            ))
+
+                    # Add 3 nested boxes (green, orange, red) with different line styles
+                    line_styles = ['solid', 'dash', 'dot']
+                    box_colors = ['green', 'orange', 'red']
+
+                    for level in range(3):
+                        t2_lim = t2_limits[conf_labels[level]]
+                        q_lim = q_limits[conf_labels[level]]
+
+                        # Vertical line for T²
+                        fig_t2q.add_vline(
+                            x=t2_lim,
+                            line_dash=line_styles[level],
+                            line_color=box_colors[level],
+                            line_width=2,
+                            annotation_text=f"T² {confidence_labels_plot[level]}",
+                            annotation_position="top right"
+                        )
+
+                        # Horizontal line for Q
+                        fig_t2q.add_hline(
+                            y=q_lim,
+                            line_dash=line_styles[level],
+                            line_color=box_colors[level],
+                            line_width=2,
+                            annotation_text=f"Q {confidence_labels_plot[level]}",
+                            annotation_position="bottom right"
+                        )
+
+                        # Add acceptance boxes (lightest green for first level)
+                        if level == 0:
+                            fig_t2q.add_shape(
+                                type="rect",
+                                x0=0, x1=t2_lim,
+                                y0=0, y1=q_lim,
+                                fillcolor="green",
+                                opacity=0.1,
+                                layer="below",
+                                line_width=0
+                            )
+
+                    fig_t2q.update_layout(
+                        title=f"T² vs Q Influence Plot ({approach.split('(')[0].strip()} Approach)",
+                        xaxis_title="Hotelling T²",
+                        yaxis_title="Q-Residuals",
+                        width=700,
+                        height=500,
+                        template='plotly_white',
+                        hovermode='closest'
+                    )
+
+                    st.plotly_chart(fig_t2q, use_container_width=True, key="diag_t2q_plot")
+
+                except Exception as e:
+                    st.error(f"❌ Error creating influence plot: {str(e)}")
+                    import traceback
+                    with st.expander("🔍 Debug Info"):
+                        st.code(traceback.format_exc())
             else:
                 st.info("ℹ️ Q statistic requires complete data (no missing values)")
 
@@ -3096,163 +3679,314 @@ def _show_export_tab():
 # ============================================================================
 
 def _show_missing_data_reconstruction_tab():
-    """Display the Missing Data Reconstruction tab using PCA."""
-    st.markdown("## 🔄 Missing Data Reconstruction using PCA")
-    st.info("Reconstruct missing values using PCA scores and loadings")
+    """Display the Missing Data Reconstruction tab using NIPALS PCA."""
+    st.markdown("## 🔄 Missing Data Reconstruction using NIPALS PCA")
+    st.info("Reconstruct missing values using NIPALS algorithm - handles missing data natively during PCA decomposition")
 
     if not MISSING_DATA_AVAILABLE:
         st.warning("⚠️ Missing data reconstruction module not available")
-        st.info("Please ensure missing_data_reconstruction.py is in the project directory")
+        st.info("Please ensure missing_data_reconstruction.py is in the pca_utils directory")
         return
 
     # STEP 1: Check if data has missing values
     if 'current_data' not in st.session_state:
-        st.warning("No data loaded")
+        st.warning("⚠️ No data loaded. Please load data first.")
         return
 
     data = st.session_state.current_data
-    n_missing, n_total, pct_missing = count_missing_values(data)
 
+    # Select only numeric columns
+    numeric_cols = data.select_dtypes(include=[np.number]).columns.tolist()
+    if len(numeric_cols) == 0:
+        st.error("❌ No numeric columns found in dataset")
+        return
+
+    data_numeric = data[numeric_cols]
+
+    # Count missing values
+    n_missing, n_total, pct_missing = count_missing_values(data_numeric)
+
+    # Display missing data statistics
+    st.markdown("### 📊 Missing Data Statistics")
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("🔍 Missing Values", n_missing)
+        st.metric("🔍 Missing Values", f"{n_missing:,}")
     with col2:
-        st.metric("📊 Total Cells", n_total)
+        st.metric("📊 Total Cells", f"{n_total:,}")
     with col3:
-        st.metric("📈 Percentage", f"{pct_missing:.2f}%")
+        st.metric("📈 Missing Percentage", f"{pct_missing:.2f}%")
 
     if n_missing == 0:
-        st.success("✅ No missing values - reconstruction not needed")
-    else:
+        st.success("✅ No missing values detected - reconstruction not needed")
+        st.info("💡 This tab is used when your dataset contains missing values (NaN)")
+        return
+
+    st.divider()
+
+    # STEP 2: Configuration for NIPALS reconstruction
+    st.markdown("### ⚙️ NIPALS Configuration")
+    st.markdown("*Configure the NIPALS algorithm for missing data reconstruction*")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        n_comp_reconstruction = st.slider(
+            "Number of Components:",
+            min_value=1,
+            max_value=min(20, len(numeric_cols), data_numeric.shape[0] - 1),
+            value=min(5, len(numeric_cols), data_numeric.shape[0] - 1),
+            key="n_comp_nipals",
+            help="Number of principal components to use for reconstruction. More components = better reconstruction but possible overfitting."
+        )
+
+    with col2:
+        center_nipals = st.checkbox(
+            "Center data",
+            value=True,
+            key="center_nipals",
+            help="Subtract column means before PCA (recommended)"
+        )
+        scale_nipals = st.checkbox(
+            "Scale data (unit variance)",
+            value=False,
+            key="scale_nipals",
+            help="Divide by column standard deviation (use if variables have different scales)"
+        )
+
+    st.divider()
+
+    # STEP 3: Reconstruct missing data using NIPALS
+    st.markdown("### 🚀 Run Reconstruction")
+
+    if st.button("✨ Reconstruct Missing Values", key="run_nipals_reconstruction", use_container_width=True):
+        with st.spinner("Running NIPALS algorithm to reconstruct missing values..."):
+            try:
+                # Call NIPALS reconstruction function
+                X_reconstructed, info = reconstruct_missing_data(
+                    X=data_numeric,
+                    n_components=n_comp_reconstruction,
+                    max_iter=1000,
+                    tol=1e-6,
+                    center=center_nipals,
+                    scale=scale_nipals
+                )
+
+                # Store results in session state
+                st.session_state.X_reconstructed = X_reconstructed
+                st.session_state.reconstruction_info = info
+
+                st.success("✅ Reconstruction completed successfully!")
+
+            except Exception as e:
+                st.error(f"❌ Reconstruction failed: {str(e)}")
+                import traceback
+                with st.expander("🔍 Error Details"):
+                    st.code(traceback.format_exc())
+                return
+
+    # STEP 4: Display reconstruction results
+    if 'X_reconstructed' in st.session_state and 'reconstruction_info' in st.session_state:
         st.divider()
+        st.markdown("### 📈 Reconstruction Results")
 
-        # STEP 2: PCA Configuration for reconstruction
-        st.markdown("### 🎯 PCA Configuration")
+        info = st.session_state.reconstruction_info
+        X_recon = st.session_state.X_reconstructed
 
-        col1, col2 = st.columns(2)
+        # === FIX: PRESERVE METADATA COLUMNS ===
+        # Check if original data has non-numeric columns
+        original_data = st.session_state.current_data
+        numeric_cols = original_data.select_dtypes(include=[np.number]).columns.tolist()
+        non_numeric_cols = [col for col in original_data.columns if col not in numeric_cols]
+
+        # If metadata exists, add it back to reconstructed data
+        if non_numeric_cols:
+            # X_recon only has numeric columns
+            # Add back the metadata columns from original data
+            X_recon_with_meta = X_recon.copy()
+
+            for col in non_numeric_cols:
+                if col in original_data.columns:
+                    X_recon_with_meta[col] = original_data[col].values
+
+            # Reorder columns: metadata first, then numeric
+            cols_order = non_numeric_cols + numeric_cols
+            X_recon_final = X_recon_with_meta[cols_order]
+
+            # Store the corrected version
+            st.session_state.X_reconstructed = X_recon_final
+            X_recon = X_recon_final
+
+        # Display key statistics
+        col1, col2, col3, col4 = st.columns(4)
+
         with col1:
-            n_comp_reconstruction = st.slider(
-                "Number of components for reconstruction:",
-                min_value=2,
-                max_value=min(10, data.shape[1]),
-                value=min(5, data.shape[1]),
-                key="n_comp_missing"
+            st.metric(
+                "✅ Values Filled",
+                f"{info['n_missing_before']:,}",
+                help="Number of missing values that were reconstructed"
             )
 
         with col2:
-            center_missing = st.checkbox("Center data", value=True, key="center_missing")
-            scale_missing = st.checkbox("Scale data", value=False, key="scale_missing")
+            variance_explained = info['total_variance_explained']
+            st.metric(
+                "📊 Variance Explained",
+                f"{variance_explained:.1f}%",
+                help=f"Total variance captured by {n_comp_reconstruction} components"
+            )
+
+        with col3:
+            converged_status = "✅ Yes" if info['converged'] else "⚠️ No"
+            st.metric(
+                "🔄 Converged",
+                converged_status,
+                help="Whether NIPALS algorithm converged successfully"
+            )
+
+        with col4:
+            st.metric(
+                "🔢 Iterations",
+                info['n_iterations'],
+                help="Total iterations across all components"
+            )
+
+        # Display variance explained per component
+        with st.expander("📊 Variance Explained by Component"):
+            variance_df = pd.DataFrame({
+                'Component': [f'PC{i+1}' for i in range(len(info['explained_variance']))],
+                'Variance %': [f"{v:.2f}%" for v in info['explained_variance']]
+            })
+            st.dataframe(variance_df, use_container_width=True, hide_index=True)
+
+        # Display convergence warning if needed
+        if not info['converged']:
+            st.warning("⚠️ NIPALS did not fully converge. Consider increasing max_iter or reducing n_components.")
 
         st.divider()
 
-        # STEP 3: Run PCA on data with missing values (NIPALS handles NaN)
-        if st.button("🚀 Run PCA for Reconstruction", key="run_pca_missing"):
-            with st.spinner("Computing PCA..."):
-                from pca_utils.pca_calculations import RnipalsPca_exact
+        # STEP 5: Export options
+        st.markdown("### 💾 Export Reconstructed Data")
 
-                # Compute PCA (NIPALS handles missing values)
-                pca_results = RnipalsPca_exact(
-                    data,
-                    nPcs=n_comp_reconstruction,
-                    center=center_missing,
-                    scale=scale_missing
+        base_name = st.session_state.get('dataset_name', 'dataset')
+        export_name = st.text_input(
+            "Export filename (without extension):",
+            value=f"{base_name}_reconstructed",
+            key="export_name_nipals",
+            help="Name for exported file"
+        )
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            # Export to Excel
+            try:
+                from io import BytesIO
+                excel_buffer = BytesIO()
+                X_recon.to_excel(excel_buffer, index=True, sheet_name='Reconstructed Data')
+                excel_buffer.seek(0)
+
+                st.download_button(
+                    "📥 Download Excel",
+                    excel_buffer.getvalue(),
+                    f"{export_name}.xlsx",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="download_excel_nipals",
+                    use_container_width=True,
+                    help="Download reconstructed data as Excel file (WITH metadata columns)"
                 )
+            except ImportError:
+                st.warning("⚠️ openpyxl not installed - Excel export not available")
 
-                st.session_state.pca_missing = pca_results
-                st.success(f"✅ PCA computed with {n_comp_reconstruction} components")
+        with col2:
+            # Export to CSV
+            csv_buffer = X_recon.to_csv()
+            st.download_button(
+                "📥 Download CSV",
+                csv_buffer,
+                f"{export_name}.csv",
+                "text/csv",
+                key="download_csv_nipals",
+                use_container_width=True,
+                help="Download reconstructed data as CSV file (WITH metadata columns)"
+            )
 
         st.divider()
 
-        # STEP 4: Reconstruct missing data
-        if 'pca_missing' in st.session_state:
-            st.markdown("### 🔄 Reconstruct Missing Values")
+        # STEP 6: Load to Workspace
+        st.markdown("### 📂 Load to Workspace")
+        st.markdown("*Make reconstructed data available for other analyses*")
 
-            pca_res = st.session_state.pca_missing
-            scores = pca_res['scores']
-            loadings = pca_res['loadings']
+        col_load1, col_load2 = st.columns([3, 1])
 
-            if st.button("✨ Reconstruct Missing Data"):
-                with st.spinner("Reconstructing..."):
-                    # Reconstruct
-                    X_reconstructed = reconstruct_missing_data(
-                        data,
-                        scores,
-                        loadings,
-                        n_components=n_comp_reconstruction
-                    )
+        with col_load2:
+            if st.button("📥 Load to Workspace", key="load_workspace_nipals", use_container_width=True, type="primary"):
+                try:
+                    # Get the reconstructed data (with metadata preserved)
+                    X_final = st.session_state.X_reconstructed
 
-                    # Get stats
-                    info = get_reconstruction_info(data, X_reconstructed)
+                    # Save to workspace split_datasets
+                    if 'split_datasets' not in st.session_state:
+                        st.session_state.split_datasets = {}
 
-                    st.session_state.X_reconstructed = X_reconstructed
+                    workspace_name = export_name
+                    st.session_state.split_datasets[workspace_name] = {
+                        'data': X_final,
+                        'type': 'Reconstructed',
+                        'parent': st.session_state.get('dataset_name', 'Original'),
+                        'n_samples': len(X_final),
+                        'creation_time': pd.Timestamp.now(),
+                        'description': f'Missing data reconstructed using {info["n_components_used"]} PCA components'
+                    }
 
-                    # Display reconstruction stats
-                    st.markdown("### 📊 Reconstruction Statistics")
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("✅ Values Filled", info['n_filled'])
-                    with col2:
-                        st.metric("📈 Mean Filled", f"{info['filled_mean']:.3f}")
-                    with col3:
-                        st.metric("📉 Std Filled", f"{info['filled_std']:.3f}")
+                    st.success(f"✅ Data loaded to workspace as: **{workspace_name}**")
+                    st.info("🔄 You can now use this dataset in other analyses")
 
-                    st.success("✅ Reconstruction complete!")
+                except Exception as e:
+                    st.error(f"❌ Failed to load data to workspace: {str(e)}")
+                    import traceback
+                    with st.expander("🔍 Debug Info"):
+                        st.code(traceback.format_exc())
 
-            st.divider()
+        # STEP 7: Data preview
+        st.divider()
+        st.markdown("### 👁️ Data Preview")
+        if non_numeric_cols:
+            st.markdown(f"**Showing reconstructed data with {len(non_numeric_cols)} metadata column(s)**")
+        else:
+            st.markdown("**Showing reconstructed data (numeric columns only)**")
 
-            # STEP 5: Export & Load to Workspace
-            if 'X_reconstructed' in st.session_state:
-                st.markdown("### 💾 Export Reconstructed Data")
+        preview_option = st.radio(
+            "Select data to preview:",
+            ["Reconstructed Data", "Original Data (with NaN)", "Comparison"],
+            horizontal=True,
+            key="preview_option_nipals"
+        )
 
-                X_recon = st.session_state.X_reconstructed
+        if preview_option == "Reconstructed Data":
+            # Show all columns (including metadata)
+            st.dataframe(X_recon, use_container_width=True)
 
-                # Name for export
-                base_name = st.session_state.get('dataset_name', 'dataset')
-                export_name = st.text_input(
-                    "Export name:",
-                    value=f"{base_name}_reconstructed",
-                    key="export_name_missing"
-                )
+            # Show summary
+            st.caption(f"Rows: {len(X_recon)} | Columns: {len(X_recon.columns)}")
+            if non_numeric_cols:
+                st.caption(f"Metadata columns: {', '.join(non_numeric_cols)}")
 
-                col1, col2 = st.columns(2)
+        elif preview_option == "Original Data (with NaN)":
+            st.dataframe(original_data, use_container_width=True)
+            st.caption(f"Rows: {len(original_data)} | Columns: {len(original_data.columns)}")
 
-                with col1:
-                    if st.button("📥 Load to Workspace", key="load_workspace_missing"):
-                        try:
-                            from pca_utils.data_workspace import save_original_to_history
-                            workspace_available = True
-                        except ImportError:
-                            workspace_available = False
+        else:  # Comparison
+            st.markdown("**Side-by-side comparison (numeric columns only)**")
+            col_a, col_b = st.columns(2)
 
-                        # Save to workspace
-                        workspace_path = Path('data') / f"{export_name}.xlsx"
-                        workspace_path.parent.mkdir(parents=True, exist_ok=True)
-                        X_recon.to_excel(workspace_path, index=True, sheet_name='reconstructed')
+            with col_a:
+                st.markdown("*Original (with NaN) - Numeric only*")
+                orig_numeric = original_data[numeric_cols].head(10)
+                st.dataframe(orig_numeric, use_container_width=True)
 
-                        # UPDATE session state
-                        st.session_state.current_data = X_recon
-                        st.session_state.dataset_name = export_name
-
-                        # SAVE to transformation history (data_workspace)
-                        if workspace_available:
-                            save_original_to_history(X_recon, export_name)
-
-                        st.success(f"✅ Loaded to workspace: {export_name}")
-                        st.rerun()
-
-                with col2:
-                    # Download Excel
-                    excel_bytes = io.BytesIO()
-                    X_recon.to_excel(excel_bytes, index=True, sheet_name='reconstructed')
-                    excel_bytes.seek(0)
-
-                    st.download_button(
-                        "📥 Download Excel",
-                        excel_bytes,
-                        f"{export_name}.xlsx",
-                        "application/vnd.ms-excel",
-                        key="download_missing_excel"
-                    )
+            with col_b:
+                st.markdown("*Reconstructed - Numeric only*")
+                recon_numeric = X_recon[numeric_cols].head(10)
+                st.dataframe(recon_numeric, use_container_width=True)
 
 
 # ============================================================================

@@ -442,3 +442,156 @@ def show_response_surface_ui(model_results, x_vars, y_var):
             import traceback
             with st.expander("🐛 Error details"):
                 st.code(traceback.format_exc())
+
+
+# ============================================================================
+# BATCH PROCESSING FUNCTIONS (for Multi-DOE)
+# ============================================================================
+
+def calculate_response_surface_batch(models_dict, x_vars, v1_idx, v2_idx,
+                                     fixed_values, n_steps, value_range):
+    """
+    Calculate response surfaces for multiple models at once
+
+    Args:
+        models_dict: {y_var: model_result}
+        x_vars: list of X variable names
+        v1_idx, v2_idx: indices of variables for surface
+        fixed_values: dict of fixed values for other variables
+        n_steps: grid resolution
+        value_range: (min, max) tuple
+
+    Returns:
+        dict: {y_var: (x_grid, y_grid, response_grid, grid_df)}
+    """
+    surfaces = {}
+
+    for y_var, model in models_dict.items():
+        if 'error' in model:
+            continue
+
+        try:
+            x_grid, y_grid, z_grid, grid_df = calculate_response_surface(
+                model_results=model,
+                x_vars=x_vars,
+                y_var=y_var,
+                v1_idx=v1_idx,
+                v2_idx=v2_idx,
+                fixed_values=fixed_values,
+                n_steps=n_steps,
+                value_range=value_range
+            )
+            surfaces[y_var] = (x_grid, y_grid, z_grid, grid_df)
+        except Exception as e:
+            print(f"Warning: Error calculating surface for {y_var}: {str(e)}")
+            continue
+
+    return surfaces
+
+
+def calculate_ci_surface_batch(models_dict, x_vars, v1_idx, v2_idx,
+                               fixed_values, s_dict, dof_dict, n_steps, value_range):
+    """
+    Calculate CI surfaces for multiple models at once
+
+    Args:
+        models_dict: {y_var: model_result}
+        x_vars: list of X variable names
+        v1_idx, v2_idx: indices of variables for surface
+        fixed_values: dict of fixed values for other variables
+        s_dict: {y_var: s_value}
+        dof_dict: {y_var: dof_value}
+        n_steps: grid resolution
+        value_range: (min, max) tuple
+
+    Returns:
+        dict: {y_var: (x_grid, y_grid, ci_grid, grid_df)}
+    """
+    # Import calculate_ci_surface from surface_analysis
+    from .surface_analysis import calculate_ci_surface
+
+    ci_surfaces = {}
+
+    for y_var, model in models_dict.items():
+        if 'error' in model:
+            continue
+
+        s = s_dict.get(y_var)
+        dof = dof_dict.get(y_var)
+
+        if s is None or dof is None or dof <= 0:
+            continue
+
+        try:
+            x_grid, y_grid, ci_grid, grid_df = calculate_ci_surface(
+                model_results=model,
+                x_vars=x_vars,
+                v1_idx=v1_idx,
+                v2_idx=v2_idx,
+                fixed_values=fixed_values,
+                s=s,
+                dof=dof,
+                n_steps=n_steps,
+                value_range=value_range
+            )
+            ci_surfaces[y_var] = (x_grid, y_grid, ci_grid, grid_df)
+        except Exception as e:
+            print(f"Warning: Error calculating CI for {y_var}: {str(e)}")
+            continue
+
+    return ci_surfaces
+
+
+def apply_optimization_surface(response_surface, ci_surface, optimization_objective):
+    """
+    Modify response surface based on optimization objective
+
+    Args:
+        response_surface: numpy array of response values
+        ci_surface: numpy array of CI semiamplitudes
+        optimization_objective: str ("None", "Maximize", "Minimize", "Threshold_Above", "Threshold_Below")
+
+    Logic:
+        - "Maximize" or "Threshold_Above" → response_surface - ci_surface (conservative lower bound)
+        - "Minimize" or "Threshold_Below" → response_surface + ci_surface (conservative upper bound)
+        - Else → response_surface unchanged
+
+    Returns:
+        modified response_surface (numpy array)
+    """
+    if optimization_objective in ["Maximize", "Threshold_Above"]:
+        # Conservative lower bound (you'll exceed this 95% of the time)
+        return response_surface - ci_surface
+
+    elif optimization_objective in ["Minimize", "Threshold_Below"]:
+        # Conservative upper bound (you'll stay below this 95% of the time)
+        return response_surface + ci_surface
+
+    else:
+        # No transformation (None or Target)
+        return response_surface.copy()
+
+
+def extract_surface_bounds(response_surface, ci_surface=None):
+    """
+    Extract min/max bounds from surface
+
+    Args:
+        response_surface: numpy array of response values
+        ci_surface: optional numpy array of CI values
+
+    Returns:
+        dict: {min, max, range, has_ci, ci_min, ci_max}
+    """
+    bounds = {
+        'min': float(response_surface.min()),
+        'max': float(response_surface.max()),
+        'range': float(response_surface.max() - response_surface.min()),
+        'has_ci': ci_surface is not None
+    }
+
+    if ci_surface is not None:
+        bounds['ci_min'] = float(ci_surface.min())
+        bounds['ci_max'] = float(ci_surface.max())
+
+    return bounds

@@ -23,11 +23,14 @@ from mlr_utils.model_diagnostics import (
     check_model_saturated,
     show_model_diagnostics_ui
 )
-from mlr_utils.response_surface import show_response_surface_ui
-from mlr_utils.confidence_intervals import show_confidence_intervals_ui
+from mlr_utils.surface_analysis import show_surface_analysis_ui
+# Backward compatibility (deprecated - now unified in surface_analysis):
+# from mlr_utils.response_surface import show_response_surface_ui
+# from mlr_utils.confidence_intervals import show_confidence_intervals_ui
 from mlr_utils.predictions import show_predictions_ui
 from mlr_utils.candidate_points import show_candidate_points_ui
 from mlr_utils.export import show_export_ui
+from mlr_utils.pareto_ui import show_pareto_ui
 
 
 # ============================================================================
@@ -157,15 +160,15 @@ def show():
     data_loaded = 'current_data' in st.session_state and st.session_state.current_data is not None
     data = st.session_state.current_data if data_loaded else None
 
-    # Create 7 tabs (always show tabs, even without data)
+    # Create 7 tabs (merged Response Surface + Confidence Intervals into Surface Analysis)
     tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
         "Model Computation",
         "Model Diagnostics",
-        "Response Surface",
-        "Confidence Intervals",
-        "Predictions",
-        "Generate Matrix",
-        "Extract & Export"
+        "Surface Analysis",          # Merged tab (was Response Surface + Confidence Intervals)
+        "Predictions",               # Tab 4
+        "Multi-Criteria Decision",   # NEW TAB 5 - Pareto Optimization
+        "Generate Matrix",           # Shifted from tab5 to tab6
+        "Extract & Export"           # Shifted from tab6 to tab7
     ])
 
     # ========================================================================
@@ -382,14 +385,14 @@ def show():
             )
 
     # ========================================================================
-    # TAB 3: RESPONSE SURFACE
+    # TAB 3: SURFACE ANALYSIS (Merged Response Surface + Confidence Intervals)
     # ========================================================================
     with tab3:
         if not data_loaded:
             st.warning("⚠️ **No data loaded**")
             st.info("💡 Load data in **Data Handling** or create a design in **Generate Matrix**")
         elif st.session_state.get('mlr_model'):
-            show_response_surface_ui(
+            show_surface_analysis_ui(
                 st.session_state.mlr_model,
                 st.session_state.mlr_x_vars,
                 st.session_state.mlr_y_var
@@ -399,26 +402,9 @@ def show():
             st.info("💡 Go to **Model Computation** tab to fit a model first")
 
     # ========================================================================
-    # TAB 4: CONFIDENCE INTERVALS
+    # TAB 4: PREDICTIONS (shifted from tab5)
     # ========================================================================
     with tab4:
-        if not data_loaded:
-            st.warning("⚠️ **No data loaded**")
-            st.info("💡 Load data in **Data Handling** or create a design in **Generate Matrix**")
-        elif st.session_state.get('mlr_model'):
-            show_confidence_intervals_ui(
-                st.session_state.mlr_model,
-                st.session_state.mlr_x_vars,
-                st.session_state.mlr_y_var
-            )
-        else:
-            st.warning("⚠️ **No MLR model fitted**")
-            st.info("💡 Go to **Model Computation** tab to fit a model first")
-
-    # ========================================================================
-    # TAB 5: PREDICTIONS
-    # ========================================================================
-    with tab5:
         if not data_loaded:
             st.warning("⚠️ **No data loaded**")
             st.info("💡 Load data in **Data Handling** or create a design in **Generate Matrix**")
@@ -434,16 +420,39 @@ def show():
             st.info("💡 Go to **Model Computation** tab to fit a model first")
 
     # ========================================================================
-    # TAB 6: GENERATE MATRIX - STANDALONE (no model dependency)
+    # TAB 5: MULTI-CRITERIA DECISION MAKING (Pareto Optimization) - NEW
+    # ========================================================================
+    with tab5:
+        if not data_loaded:
+            st.warning("⚠️ **No data loaded**")
+            st.info("💡 Load data in **Data Handling** or create a design in **Generate Matrix**")
+        elif st.session_state.get('mlr_model'):
+            show_pareto_ui(
+                st.session_state.mlr_model,
+                st.session_state.mlr_x_vars,
+                st.session_state.mlr_y_var
+            )
+        else:
+            st.warning("⚠️ **No MLR model fitted**")
+            st.info("💡 Go to **Model Computation** tab to fit a model first")
+
+    # ========================================================================
+    # TAB 6: GENERATE MATRIX - STANDALONE (shifted from tab5)
     # ========================================================================
     with tab6:
         st.markdown("## Experimental Design Matrix Generator")
         st.markdown("*Standalone tool - works independently of loaded data or fitted models*")
         st.info("Create custom experimental designs without needing to load data first")
-        show_candidate_points_ui()
+        try:
+            show_candidate_points_ui()
+        except Exception as e:
+            st.error(f"❌ Error in Generate Matrix tab: {str(e)}")
+            import traceback
+            with st.expander("🐛 Error Details"):
+                st.code(traceback.format_exc())
 
     # ========================================================================
-    # TAB 7: EXPORT
+    # TAB 7: EXPORT (shifted from tab6)
     # ========================================================================
     with tab7:
         if not data_loaded:
@@ -453,7 +462,13 @@ def show():
             st.warning("⚠️ **No MLR model fitted**")
             st.info("💡 Go to **Model Computation** tab to fit a model first")
         else:
-            show_export_ui(
-                st.session_state.mlr_model,
-                st.session_state.mlr_y_var
-            )
+            try:
+                show_export_ui(
+                    st.session_state.mlr_model,
+                    st.session_state.mlr_y_var
+                )
+            except Exception as e:
+                st.error(f"❌ Error in Export tab: {str(e)}")
+                import traceback
+                with st.expander("🐛 Error Details"):
+                    st.code(traceback.format_exc())

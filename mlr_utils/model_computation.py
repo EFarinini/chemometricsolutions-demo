@@ -384,13 +384,14 @@ def fit_mlr_model(X, y, terms=None, exclude_central=False, return_diagnostics=Tr
             # Adjusted R-squared: R²_adj = 1 - [RSS/(n-p)] / [TSS/(n-1)]
             # where p=n_features (number of parameters)
             tss = np.sum((y_vec - np.mean(y_vec))**2)
-            r_squared = 1 - (rss / dof) / (tss / (n_samples - 1))
+            r_squared_adj = 1 - (rss / dof) / (tss / (n_samples - 1))
 
             results.update({
                 'rmse': rmse,
                 'var_res': var_res,
                 'var_y': var_y,
-                'r_squared': r_squared
+                'r_squared_adj': r_squared_adj,
+                'r_squared': r_squared_adj  # Keep for backward compatibility
             })
 
             # ===== CONDITIONAL: Statistical tests (only if DOF > 0) =====
@@ -714,11 +715,11 @@ def build_model_formula(y_var, selected_terms, include_intercept=True):
     Build a readable model formula string with proper coefficient nomenclature.
 
     NOMENCLATURE RULES:
-    - Linear terms: β1, β2, β3, ... (sequential subscripts based on variable order)
-    - Interaction terms: βij where i,j are indices of variables in the interaction
-      Example: β12 for X1*X2, β23 for X2*X3
-    - Quadratic terms: βii where i is the variable index
-      Example: β11 for X1^2, β22 for X2^2, β33 for X3^2
+    - Linear terms: b1, b2, b3, ... (sequential subscripts based on variable order)
+    - Interaction terms: bij where i,j are indices of variables in the interaction
+      Example: b12 for X1*X2, b23 for X2*X3
+    - Quadratic terms: bii where i is the variable index
+      Example: b11 for X1^2, b22 for X2^2, b33 for X3^2
 
     Args:
         y_var: response variable name
@@ -732,7 +733,7 @@ def build_model_formula(y_var, selected_terms, include_intercept=True):
 
     # Add intercept
     if include_intercept:
-        terms.append("β₀")
+        terms.append("b₀")
 
     # Build mapping: variable name -> index (1-based)
     all_vars_ordered = []
@@ -742,12 +743,12 @@ def build_model_formula(y_var, selected_terms, include_intercept=True):
 
     var_to_index = {var: i+1 for i, var in enumerate(all_vars_ordered)}
 
-    # LINEAR TERMS: β1·X1, β2·X2, β3·X3, ...
+    # LINEAR TERMS: b1·X1, b2·X2, b3·X3, ...
     for var in selected_terms['linear']:
         idx = var_to_index[var]
-        terms.append(f"β{idx}·{var}")
+        terms.append(f"b{idx}·{var}")
 
-    # INTERACTION TERMS: β12·X1*X2, β13·X1*X3, etc.
+    # INTERACTION TERMS: b12·X1*X2, b13·X1*X3, etc.
     # Parse interaction term to extract variable names
     for interaction_term in selected_terms['interactions']:
         # Interaction format: "X1*X2" or "Var1*Var2"
@@ -757,18 +758,18 @@ def build_model_formula(y_var, selected_terms, include_intercept=True):
             if var1 in var_to_index and var2 in var_to_index:
                 idx1 = var_to_index[var1]
                 idx2 = var_to_index[var2]
-                # Ensure lower index first (β12, not β21)
+                # Ensure lower index first (b12, not b21)
                 if idx1 > idx2:
                     idx1, idx2 = idx2, idx1
-                terms.append(f"β{idx1}{idx2}·{interaction_term}")
+                terms.append(f"b{idx1}{idx2}·{interaction_term}")
 
-    # QUADRATIC TERMS: β11·X1^2, β22·X2^2, etc.
+    # QUADRATIC TERMS: b11·X1^2, b22·X2^2, etc.
     for quadratic_term in selected_terms['quadratic']:
         # Quadratic format: "X1^2" or "Var1^2"
         var_name = quadratic_term.replace('^2', '').strip()
         if var_name in var_to_index:
             idx = var_to_index[var_name]
-            terms.append(f"β{idx}{idx}·{quadratic_term}")
+            terms.append(f"b{idx}{idx}·{quadratic_term}")
 
     formula = f"{y_var} = {' + '.join(terms)}"
     return formula
@@ -1271,7 +1272,7 @@ def show_model_computation_ui(data, dataset_name):
         terms_list.extend(selected_terms['quadratic'])
 
 
-        st.code(f"Design Matrix Terms: {', '.join(terms_list)}", language="text")
+        st.code(f"Design Matrix Terms: {', '.join(str(t) for t in terms_list)}", language="text")
 
 
     # Summary of selected terms
@@ -1595,7 +1596,7 @@ def _display_replicate_analysis(replicate_info_full, model_results, central_poin
     with rep_col2:
         st.metric("Total Replicates", replicate_info_full['total_replicates'])
     with rep_col3:
-        st.metric("Pooled Std Dev (σ_exp)", f"{replicate_info_full['pooled_std']:.4f}")
+        st.metric("Pooled Std Dev (s_exp)", f"{replicate_info_full['pooled_std']:.4f}")
     with rep_col4:
         st.metric("Pure Error DOF", replicate_info_full['pooled_dof'])
 
@@ -1620,11 +1621,11 @@ def _display_replicate_analysis(replicate_info_full, model_results, central_poin
         st.markdown(f"""
         **Pooled Standard Deviation Formula:**
 
-        σ_pooled = √[Σ(s²ᵢ × dfᵢ) / Σ(dfᵢ)]
+        s_pooled = √[Σ(s²ᵢ × dfᵢ) / Σ(dfᵢ)]
 
         Where s²ᵢ is the variance of group i and dfᵢ is its degrees of freedom.
 
-        **Result:** σ_exp = {replicate_info_full['pooled_std']:.4f}
+        **Result:** s_exp = {replicate_info_full['pooled_std']:.4f}
         (from {replicate_info_full['pooled_dof']} degrees of freedom)
         """)
 
@@ -1666,7 +1667,7 @@ def _display_statistical_tests(model_results, replicate_info_full, central_point
             """)
 
 
-        # F-test: σ²_DoE / σ²_exp
+        # F-test: s²_DoE / s²_exp
         f_global = var_y_doe / replicate_info_full['pooled_variance']
         f_crit_global = stats.f.ppf(0.95, dof_y_doe, replicate_info_full['pooled_dof'])
         p_global = 1 - stats.f.cdf(f_global, dof_y_doe, replicate_info_full['pooled_dof'])
@@ -1674,12 +1675,12 @@ def _display_statistical_tests(model_results, replicate_info_full, central_point
         test_col1, test_col2, test_col3 = st.columns(3)
 
         with test_col1:
-            st.metric("DoE Variance (σ²_DoE)", f"{var_y_doe:.6f}")
+            st.metric("DoE Variance (s²_DoE)", f"{var_y_doe:.6f}")
 
             st.metric("DOF", dof_y_doe)
 
         with test_col2:
-            st.metric("Experimental Variance (σ²_exp)", f"{replicate_info_full['pooled_variance']:.6f}")
+            st.metric("Experimental Variance (s²_exp)", f"{replicate_info_full['pooled_variance']:.6f}")
 
             st.metric("DOF", replicate_info_full['pooled_dof'])
 
@@ -1702,7 +1703,7 @@ def _display_statistical_tests(model_results, replicate_info_full, central_point
         # Show variance ratio
         variance_ratio = var_y_doe / replicate_info_full['pooled_variance']
         st.markdown(f"""
-        **Variance Ratio**: σ²_DoE / σ²_exp = {variance_ratio:.2f}
+        **Variance Ratio**: s²_DoE / s²_exp = {variance_ratio:.2f}
 
         - Ratio > 4: Strong factor effects
         - Ratio 2-4: Moderate factor effects
@@ -1717,8 +1718,8 @@ def _display_statistical_tests(model_results, replicate_info_full, central_point
 
     st.info("""
     **F-test**: Compares model residual variance vs pure experimental variance.
-    - H₀: Model is adequate (σ²_model = σ²_exp)
-    - H₁: Significant lack of fit (σ²_model > σ²_exp)
+    - H₀: Model is adequate (s²_model = s²_exp)
+    - H₁: Significant lack of fit (s²_model > s²_exp)
     """)
 
     if 'rmse' in model_results:
@@ -1760,7 +1761,7 @@ def _display_statistical_tests(model_results, replicate_info_full, central_point
         result_col1, result_col2 = st.columns([1, 3])
 
         with result_col1:
-            st.metric("RMSE / σ_exp", f"{ratio:.2f}")
+            st.metric("RMSE / s_exp", f"{ratio:.2f}")
 
         with result_col2:
             if p_lof > 0.05:
@@ -1960,8 +1961,8 @@ def _display_statistical_summary(model_results, all_y_data, y_data, central_poin
         error_ratio = model_results['rmse'] / replicate_info_full['pooled_std']
         summary_parts.append(f"""
     🔬 **Experimental Error (from replicates):**
-    - Pure error: σ_exp = {replicate_info_full['pooled_std']:.4f} (DOF = {replicate_info_full['pooled_dof']})
-    - Error ratio: RMSE/σ_exp = {error_ratio:.2f}""")
+    - Pure error: s_exp = {replicate_info_full['pooled_std']:.4f} (DOF = {replicate_info_full['pooled_dof']})
+    - Error ratio: RMSE/s_exp = {error_ratio:.2f}""")
 
 
         # Interpret error ratio
@@ -1992,7 +1993,7 @@ def _display_statistical_summary(model_results, all_y_data, y_data, central_poin
 
                 summary_parts.append(f"""
     📈 **Factor Effects:**
-    - DoE variance: σ²_DoE = {var_y_doe:.6f}
+    - DoE variance: s²_DoE = {var_y_doe:.6f}
     - F-test p-value: {p_global:.4f}
     - Variance amplification: {variance_ratio:.1f}×""")
 
@@ -2224,47 +2225,417 @@ def _display_coefficients_table(model_results):
             st.code(traceback.format_exc())
 
 
+def sort_coefficients_by_type(coef_names):
+    """
+    Sort coefficient names in standard order:
+    1. Linear terms (no * or ^)
+    2. Interaction terms (contains *)
+    3. Quadratic terms (contains ^2)
+
+    Args:
+        coef_names: list of coefficient name strings
+
+    Returns:
+        sorted_names: list sorted by term type, maintaining alphabetical within each group
+    """
+    linear = []
+    interactions = []
+    quadratic = []
+
+    for name in coef_names:
+        if '^2' in name or ('^' in name and '2' in name):
+            quadratic.append(name)
+        elif '*' in name:
+            interactions.append(name)
+        else:
+            linear.append(name)
+
+    # Sort each group alphabetically for consistency
+    linear.sort()
+    interactions.sort()
+    quadratic.sort()
+
+    # Combine in correct order
+    sorted_names = linear + interactions + quadratic
+    return sorted_names
+
+
+def sort_coefficients_correct_order(coef_names, variable_names):
+    """
+    Sort coefficients in CORRECT MODEL SEQUENCE based on variable order.
+
+    Order: Intercept → Linear (b1,b2,b3...) → Interactions (b12,b13,b23...) → Quadratic (b11,b22,b33...)
+
+    CRITICAL: Follows EXACT variable sequence from X matrix, NOT alphabetical!
+
+    Args:
+        coef_names (list): All coefficient names from model
+        variable_names (list): X variable names in EXACT order as used in model
+            Example: ['x1.Scavenger', 'x2.pH', 'x3.Form.start']
+
+    Returns:
+        list: Coefficient names in correct model sequence
+            Example: ['Intercept', 'x1.Scavenger', 'x2.pH', 'x3.Form.start',
+                      'x1.Scavenger*x2.pH', 'x1.Scavenger*x3.Form.start', 'x2.pH*x3.Form.start',
+                      'x1.Scavenger^2', 'x2.pH^2', 'x3.Form.start^2']
+    """
+
+    if not variable_names:
+        # Fallback to alphabetical if no variable names provided
+        return sort_coefficients_by_type(coef_names)
+
+    intercept = []
+    linear = {}      # Use dict to maintain index order
+    interactions = {}
+    quadratic = {}
+    unknown = []
+
+    # Create mapping of variable names to indices
+    var_to_idx = {var: idx for idx, var in enumerate(variable_names)}
+
+    # Separate coefficients by type
+    for coef_name in coef_names:
+        coef_str = str(coef_name)
+
+        # INTERCEPT
+        if 'Intercept' in coef_str or coef_str.lower() == 'intercept':
+            intercept.append(coef_name)
+
+        # QUADRATIC (must check before interaction - contains ^2)
+        elif '^2' in coef_str or ('^' in coef_str and '2' in coef_str):
+            # Extract variable name (remove ^2)
+            var_name = coef_str.replace('^2', '').replace('^', '').replace('2', '').strip()
+
+            # Try to find matching variable
+            var_idx = None
+            for var in variable_names:
+                if var in coef_str or var.replace('.', '') in coef_str.replace('.', ''):
+                    var_idx = var_to_idx[var]
+                    break
+
+            if var_idx is not None:
+                quadratic[var_idx] = coef_name
+            else:
+                unknown.append(coef_name)
+
+        # INTERACTION (contains *)
+        elif '*' in coef_str:
+            # Parse interaction: extract variable names
+            parts = coef_str.split('*')
+            parts = [p.strip() for p in parts]
+
+            if len(parts) == 2:
+                var1, var2 = parts
+
+                # Find indices for both variables
+                idx1 = None
+                idx2 = None
+
+                for var in variable_names:
+                    if var in var1 or var.replace('.', '') in var1.replace('.', ''):
+                        idx1 = var_to_idx[var]
+                    if var in var2 or var.replace('.', '') in var2.replace('.', ''):
+                        idx2 = var_to_idx[var]
+
+                if idx1 is not None and idx2 is not None:
+                    # Ensure consistent ordering (smaller index first)
+                    if idx1 > idx2:
+                        idx1, idx2 = idx2, idx1
+
+                    # Use tuple of indices as key
+                    key = (idx1, idx2)
+                    interactions[key] = coef_name
+                else:
+                    unknown.append(coef_name)
+            else:
+                unknown.append(coef_name)
+
+        # LINEAR TERM
+        else:
+            # Single variable coefficient - find which variable it matches
+            var_idx = None
+            for var in variable_names:
+                if var in coef_str or var.replace('.', '') in coef_str.replace('.', ''):
+                    var_idx = var_to_idx[var]
+                    break
+
+            if var_idx is not None:
+                linear[var_idx] = coef_name
+            else:
+                unknown.append(coef_name)
+
+    # Build final order
+    result = []
+
+    # 1. Intercept first
+    result.extend(intercept)
+
+    # 2. Linear terms in variable order (b1, b2, b3, ...)
+    for idx in sorted(linear.keys()):
+        result.append(linear[idx])
+
+    # 3. Interaction terms in variable pair order (b12, b13, b23, ...)
+    for key in sorted(interactions.keys()):
+        result.append(interactions[key])
+
+    # 4. Quadratic terms in variable order (b11, b22, b33, ...)
+    for idx in sorted(quadratic.keys()):
+        result.append(quadratic[idx])
+
+    # 5. Any unknown terms at the end
+    result.extend(unknown)
+
+    return result
+
+
+def to_subscript(text):
+    """
+    Convert numbers to subscripts: 1→₁, 2→₂, etc.
+
+    Args:
+        text: Text containing numbers to convert
+
+    Returns:
+        str: Text with subscripted numbers
+    """
+    return str(text).translate(str.maketrans('0123456789', '₀₁₂₃₄₅₆₇₈₉'))
+
+
+def to_superscript(text):
+    """
+    Convert numbers to superscripts: 1→¹, 2→², etc.
+
+    Args:
+        text: Text containing numbers to convert
+
+    Returns:
+        str: Text with superscripted numbers
+    """
+    return str(text).translate(str.maketrans('0123456789', '⁰¹²³⁴⁵⁶⁷⁸⁹'))
+
+
+def generate_model_equation(
+    coefficients,
+    variable_names,
+    y_variable_name="y",
+    use_subscripts=True,
+    show_coefficient_names=False,
+    decimals=4,
+    use_hat=True
+):
+    """
+    Generate compact model equation with generic variable names and proper subscripts.
+
+    Args:
+        coefficients (dict or Series): Model coefficients
+            Example: {'Intercept': 0.10, 'x1.Scavenger': -0.10, 'x2.pH': -0.03, ...}
+        variable_names (list): Original variable names in correct order
+            Example: ['x1.Scavenger', 'x2.pH', 'x3.Form.start']
+            Maps to: x₁, x₂, x₃
+        y_variable_name (str): Name of response variable (default 'y')
+        use_subscripts (bool): If True, use subscripts (x₁); if False, use x1
+        show_coefficient_names (bool): If True, show b₁, b₂; if False, show values
+        decimals (int): Decimal places for coefficients
+        use_hat (bool): If True, use ŷ; if False, use y
+
+    Returns:
+        str: Model equation
+        Example: "ŷ = 0.1000 - 0.1000·x₁ - 0.0300·x₂ + 0.0600·x₃ - 0.0500·x₁·x₂ + 0.0300·x₁² - 0.0100·x₂²"
+    """
+
+    # Response variable name with hat
+    y_name = "ŷ" if use_hat else y_variable_name
+
+    # Convert coefficients to dict if needed
+    if hasattr(coefficients, 'to_dict'):
+        coef_dict = coefficients.to_dict()
+    elif hasattr(coefficients, 'items'):
+        coef_dict = dict(coefficients)
+    else:
+        coef_dict = coefficients
+
+    terms = []
+    n_vars = len(variable_names)
+
+    # Create variable name mapping
+    var_to_idx = {var: idx for idx, var in enumerate(variable_names)}
+
+    # Helper to get variable display name
+    def get_var_display(idx):
+        if use_subscripts:
+            return f"x{to_subscript(idx + 1)}"
+        else:
+            return f"x{idx + 1}"
+
+    # Helper to get coefficient display name
+    def get_coef_display(*indices):
+        idx_str = ''.join(str(i+1) for i in indices)
+        if use_subscripts:
+            return f"b{to_subscript(idx_str)}"
+        else:
+            return f"b{idx_str}"
+
+    # 1. INTERCEPT (b₀)
+    intercept_val = None
+    for key in ['Intercept', 'b0', 'const']:
+        if key in coef_dict:
+            intercept_val = coef_dict[key]
+            break
+
+    if intercept_val is not None:
+        if show_coefficient_names:
+            terms.append(get_coef_display())  # b₀
+        else:
+            # Don't use + sign for first term
+            terms.append(f"{intercept_val:.{decimals}f}")
+
+    # 2. LINEAR TERMS (b₁·x₁, b₂·x₂, b₃·x₃, ...)
+    for i in range(n_vars):
+        var_name = variable_names[i]
+
+        # Try to find coefficient
+        coef_val = None
+        for key in coef_dict.keys():
+            key_str = str(key)
+            # Match if variable name is in the key and it's not an interaction or quadratic
+            if var_name in key_str and '*' not in key_str and '^' not in key_str:
+                coef_val = coef_dict[key]
+                break
+
+        if coef_val is not None:
+            var_display = get_var_display(i)
+
+            if show_coefficient_names:
+                coef_display = get_coef_display(i)
+                terms.append(f"{coef_display}·{var_display}")
+            else:
+                terms.append(f"{coef_val:+.{decimals}f}·{var_display}")
+
+    # 3. INTERACTION TERMS (b₁₂·x₁·x₂, b₁₃·x₁·x₃, b₂₃·x₂·x₃, ...)
+    for i in range(n_vars):
+        for j in range(i + 1, n_vars):
+            var1_name = variable_names[i]
+            var2_name = variable_names[j]
+
+            # Try to find interaction coefficient
+            coef_val = None
+            for key in coef_dict.keys():
+                key_str = str(key)
+                # Check if both variables are in the key and it has *
+                if '*' in key_str and var1_name in key_str and var2_name in key_str:
+                    coef_val = coef_dict[key]
+                    break
+
+            if coef_val is not None:
+                var1_display = get_var_display(i)
+                var2_display = get_var_display(j)
+
+                if show_coefficient_names:
+                    coef_display = get_coef_display(i, j)
+                    terms.append(f"{coef_display}·{var1_display}·{var2_display}")
+                else:
+                    terms.append(f"{coef_val:+.{decimals}f}·{var1_display}·{var2_display}")
+
+    # 4. QUADRATIC TERMS (b₁₁·x₁², b₂₂·x₂², b₃₃·x₃², ...)
+    for i in range(n_vars):
+        var_name = variable_names[i]
+
+        # Try to find quadratic coefficient
+        coef_val = None
+        for key in coef_dict.keys():
+            key_str = str(key)
+            # Check if variable is in key and it has ^2
+            if '^2' in key_str and var_name in key_str:
+                coef_val = coef_dict[key]
+                break
+
+        if coef_val is not None:
+            var_display = get_var_display(i)
+
+            if show_coefficient_names:
+                coef_display = get_coef_display(i, i)
+                terms.append(f"{coef_display}·{var_display}²")
+            else:
+                terms.append(f"{coef_val:+.{decimals}f}·{var_display}²")
+
+    # Build final equation
+    if not terms:
+        return f"{y_name} = (no terms found)"
+
+    # Join terms
+    equation = f"{y_name} = {terms[0]}"
+    for term in terms[1:]:
+        if term.startswith('+') or term.startswith('-'):
+            equation += f" {term}"
+        else:
+            equation += f" + {term}"
+
+    # Clean up spacing
+    equation = equation.replace("+ -", "- ").replace("  ", " ")
+
+    return equation
+
+
 def _display_coefficients_barplot(model_results, y_var):
-    """Display coefficients bar plot"""
+    """Display coefficients bar plot with proper ordering: Linear, Interactions, Quadratic"""
     st.markdown("#### Coefficients Bar Plot")
 
     coefficients = model_results['coefficients']
     coef_no_intercept = coefficients[coefficients.index != 'Intercept']
-    coef_names = coef_no_intercept.index.tolist()
 
-    if len(coef_names) == 0:
+    if len(coef_no_intercept) == 0:
         st.warning("No coefficients to plot (model contains only intercept)")
+        return
 
-    else:
-        colors = []
-        for name in coef_names:
-            if '*' in name:
-                n_asterisks = name.count('*')
-                colors.append('cyan' if n_asterisks > 1 else 'green')
-            elif '^2' in name or '^' in name:
-                colors.append('cyan')
+    # ========================================================================
+    # SORT COEFFICIENTS: Linear → Interactions → Quadratic
+    # ========================================================================
+    coef_names_raw = coef_no_intercept.index.tolist()
+    coef_names_sorted = sort_coefficients_by_type(coef_names_raw)
 
-            else:
-                colors.append('red')
+    # Get values in sorted order
+    coef_values = coef_no_intercept.loc[coef_names_sorted].values
+    coef_names = coef_names_sorted  # Use sorted names
 
-        fig = go.Figure()
+    # ========================================================================
+    # DETERMINE COLORS based on term type
+    # ========================================================================
+    colors = []
+    for name in coef_names:
+        if '*' in name:
+            n_asterisks = name.count('*')
+            colors.append('cyan' if n_asterisks > 1 else 'green')
+        elif '^2' in name or '^' in name:
+            colors.append('cyan')
+        else:
+            colors.append('red')
 
-        fig.add_trace(go.Bar(
-            x=coef_names,
-            y=coef_no_intercept.values,
-            marker_color=colors,
-            marker_line_color='black',
-            marker_line_width=1,
-            name='Coefficients',
-            showlegend=False
-        ))
+    # ========================================================================
+    # CREATE BAR CHART
+    # ========================================================================
+    fig = go.Figure()
 
-        if 'ci_lower' in model_results and 'ci_upper' in model_results:
-            ci_lower = model_results['ci_lower'][coef_no_intercept.index].values
-            ci_upper = model_results['ci_upper'][coef_no_intercept.index].values
+    fig.add_trace(go.Bar(
+        x=coef_names,
+        y=coef_values,
+        marker_color=colors,
+        marker_line_color='black',
+        marker_line_width=1,
+        name='Coefficients',
+        showlegend=False,
+        hovertemplate='<b>%{x}</b><br>Value: %{y:.4f}<extra></extra>'
+    ))
 
-            error_minus = coef_no_intercept.values - ci_lower
-            error_plus = ci_upper - coef_no_intercept.values
+    # ========================================================================
+    # ADD CONFIDENCE INTERVALS (if available)
+    # ========================================================================
+    if 'ci_lower' in model_results and 'ci_upper' in model_results:
+        try:
+            ci_lower = model_results['ci_lower'].loc[coef_names_sorted].values
+            ci_upper = model_results['ci_upper'].loc[coef_names_sorted].values
+
+            error_minus = coef_values - ci_lower
+            error_plus = ci_upper - coef_values
 
             fig.update_traces(
                 error_y=dict(
@@ -2277,10 +2648,16 @@ def _display_coefficients_barplot(model_results, y_var):
                     width=4
                 )
             )
+        except Exception:
+            pass
 
-        if 'p_values' in model_results:
-            p_values = model_results['p_values'][coef_no_intercept.index].values
-            for i, (name, coef, p) in enumerate(zip(coef_names, coef_no_intercept.values, p_values)):
+    # ========================================================================
+    # ADD SIGNIFICANCE MARKERS (if available)
+    # ========================================================================
+    if 'p_values' in model_results:
+        try:
+            p_values = model_results['p_values'].loc[coef_names_sorted].values
+            for i, (name, coef, p) in enumerate(zip(coef_names, coef_values, p_values)):
                 y_pos = coef
                 y_offset = max(abs(coef) * 0.05, 0.01) if coef >= 0 else -max(abs(coef) * 0.05, 0.01)
 
@@ -2298,37 +2675,104 @@ def _display_coefficients_barplot(model_results, y_var):
                         x=name, y=y_pos + y_offset,
                         text=sig_text,
                         showarrow=False,
-                        font=dict(size=20, color='black'),
+                        font=dict(size=14, color='black'),
                         yshift=10 if coef >= 0 else -10
                     )
+        except Exception:
+            pass
 
-        fig.update_layout(
-            title=f"Coefficients - {y_var}",
-            xaxis_title="Term",
-            yaxis_title="Coefficient Value",
-            height=500,
-            xaxis={'tickangle': 45},
-            showlegend=False,
-            yaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='gray')
-        )
+    # ========================================================================
+    # UPDATE LAYOUT
+    # ========================================================================
+    fig.update_layout(
+        title=f"Coefficients - {y_var}",
+        xaxis_title="Term",
+        yaxis_title="Coefficient Value",
+        height=500,
+        xaxis={'tickangle': 45},
+        showlegend=False,
+        yaxis=dict(zeroline=True, zerolinewidth=2, zerolinecolor='gray'),
+        margin=dict(b=100)
+    )
 
+    st.plotly_chart(fig, use_container_width=True)
 
-        st.plotly_chart(fig, use_container_width=True)
+    # ========================================================================
+    # DISPLAY COLOR LEGEND
+    # ========================================================================
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.caption("🔴 Red = Linear terms")
+    with col2:
+        st.caption("🟢 Green = 2-term interactions")
+    with col3:
+        st.caption("🔵 Cyan = Quadratic terms")
 
+    if 'p_values' in model_results:
+        st.caption("Significance: *** p≤0.001, ** p≤0.01, * p≤0.05")
 
-        st.markdown("""
-        **Color legend:**
-        - Red = Linear terms
-        - Green = Two-term interactions
-        - Cyan = Quadratic terms
-        """)
+        # ============================================================
+        # NEW: Display Generic Model Equation with Subscripts
+        # ============================================================
+        st.markdown("---")
+        st.markdown("#### 📐 Generic Model Equation")
+        st.info("Model equation with generic variable notation (x₁, x₂, x₃...) for easy interpretation")
 
+        try:
+            # Get x_vars from session state (needed for equation generation)
+            x_vars = st.session_state.get('mlr_x_vars', [])
 
-        st.info("Significance markers: *** p≤0.001, ** p≤0.01, * p≤0.05")
+            if x_vars:
+                # Generate numeric equation with subscripts
+                equation_numeric = generate_model_equation(
+                    coefficients=model_results['coefficients'],
+                    variable_names=x_vars,
+                    y_variable_name=y_var,
+                    use_subscripts=True,
+                    show_coefficient_names=False,
+                    decimals=4,
+                    use_hat=True
+                )
+
+                # Generate symbolic equation (with coefficient names)
+                equation_symbolic = generate_model_equation(
+                    coefficients=model_results['coefficients'],
+                    variable_names=x_vars,
+                    y_variable_name=y_var,
+                    use_subscripts=True,
+                    show_coefficient_names=True,
+                    decimals=4,
+                    use_hat=True
+                )
+
+                # Display both equations in expandable sections
+                col_eq1, col_eq2 = st.columns([5, 1])
+
+                with col_eq1:
+                    st.markdown("**Numeric Equation:**")
+                    st.code(equation_numeric, language="text")
+
+                    with st.expander("Show symbolic form (coefficient names)"):
+                        st.code(equation_symbolic, language="text")
+
+                with col_eq2:
+                    # Optional: Add copy button if pyperclip is available
+                    if st.button("📋", key=f"copy_generic_eq_{y_var}", help="Copy numeric equation"):
+                        try:
+                            import pyperclip
+                            pyperclip.copy(equation_numeric)
+                            st.success("✅")
+                        except ImportError:
+                            st.info("Install pyperclip to enable copy")
+            else:
+                st.warning("⚠️ Cannot generate generic equation: x_vars not found in session state")
+
+        except Exception as e:
+            st.warning(f"Could not generate generic equation: {str(e)}")
 
         # ===== FITTED MODEL FORMULA WITH UNCERTAINTY-BASED DECIMALS =====
         st.markdown("---")
-        st.markdown("#### Fitted Model Formula")
+        st.markdown("#### Fitted Model Formula (with actual variable names)")
 
         import math
 
@@ -2678,7 +3122,7 @@ def _display_design_analysis_results(design_results, x_vars, X_data):
         exp_col1, exp_col2, exp_col3 = st.columns(3)
 
         with exp_col1:
-            st.metric("Experimental Std Dev (σ_exp)", f"{design_results['experimental_std']:.4f}")
+            st.metric("Experimental Std Dev (s_exp)", f"{design_results['experimental_std']:.4f}")
 
         with exp_col2:
             st.metric("Degrees of Freedom", design_results['experimental_dof'])
@@ -2689,7 +3133,7 @@ def _display_design_analysis_results(design_results, x_vars, X_data):
 
         st.markdown("#### Prediction Standard Errors")
 
-        st.info("Standard error for predictions at each experimental point (σ_exp × √leverage)")
+        st.info("Standard error for predictions at each experimental point (s_exp × √leverage)")
 
         se_pred_series = pd.Series(
             design_results['prediction_se'],

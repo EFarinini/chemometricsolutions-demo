@@ -27,6 +27,7 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from io import BytesIO
 
 
 class PCAMonitor:
@@ -794,3 +795,322 @@ def plot_combined_monitoring_chart(
     )
 
     return fig
+
+
+# ============================================================================
+# EXPORT FUNCTIONS FOR MONITORING DATA AND OUTLIER DIAGNOSTICS
+# ============================================================================
+
+
+def classify_outliers_independent(
+    t2_values: np.ndarray,
+    q_values: np.ndarray,
+    t2_limits: List[float],
+    q_limits: List[float],
+    sample_labels: Optional[List[str]] = None,
+    confidence_labels: Optional[List[str]] = None
+) -> Tuple[pd.DataFrame, Dict[str, pd.DataFrame]]:
+    """
+    Classify outliers using independent T² and Q limits (MATLAB t2q_independent.m approach).
+
+    Parameters
+    ----------
+    t2_values : np.ndarray
+        T² statistic values for each sample
+    q_values : np.ndarray
+        Q statistic values for each sample
+    t2_limits : list of float
+        T² critical limits [limit_97.5%, limit_99.5%, limit_99.95%]
+    q_limits : list of float
+        Q critical limits [limit_97.5%, limit_99.5%, limit_99.95%]
+    sample_labels : list of str, optional
+        Sample identifiers (e.g., batch names). If None, uses sample numbers.
+    confidence_labels : list of str, optional
+        Labels for confidence levels. Default: ['*', '**', '***']
+
+    Returns
+    -------
+    occurrences_table : pd.DataFrame
+        Table showing number of outliers for each threshold level
+        Columns: Threshold, T2, Q
+    outlier_tables : dict
+        Dictionary with keys 'T2', 'Q', 'Combined' containing DataFrames
+        of outlier samples for each confidence level
+
+    Notes
+    -----
+    This implements the MATLAB t2q_independent.m logic:
+    - Finds samples exceeding T² thresholds independently
+    - Finds samples exceeding Q thresholds independently
+    - Finds samples exceeding either T² OR Q (combined outliers)
+    """
+    if confidence_labels is None:
+        confidence_labels = ['*', '**', '***']
+
+    n_samples = len(t2_values)
+
+    # Generate sample labels if not provided
+    if sample_labels is None:
+        sample_labels = [f"Sample_{i+1}" for i in range(n_samples)]
+
+    # Find outliers for each threshold
+    t2_outliers = []
+    q_outliers = []
+    combined_outliers = []
+
+    num_t2_above = []
+    num_q_above = []
+    num_combined_above = []
+
+    for i, (t2_lim, q_lim) in enumerate(zip(t2_limits, q_limits)):
+        # T² outliers
+        t2_out_idx = np.where(t2_values > t2_lim)[0]
+        t2_outliers.append(t2_out_idx)
+        num_t2_above.append(len(t2_out_idx))
+
+        # Q outliers
+        q_out_idx = np.where(q_values > q_lim)[0]
+        q_outliers.append(q_out_idx)
+        num_q_above.append(len(q_out_idx))
+
+        # Combined (T² OR Q)
+        combined_idx = np.where((t2_values > t2_lim) | (q_values > q_lim))[0]
+        combined_outliers.append(combined_idx)
+        num_combined_above.append(len(combined_idx))
+
+    # Create occurrences table
+    occurrences_table = pd.DataFrame({
+        'Threshold': confidence_labels,
+        'T2': num_t2_above,
+        'Q': num_q_above,
+        'T2 or Q': num_combined_above
+    })
+
+    # Create outlier detail tables
+    outlier_tables = {}
+
+    # T² outliers table
+    max_t2_rows = max(len(idx) for idx in t2_outliers) if t2_outliers and len(t2_outliers) > 0 else 1
+    t2_table_data = {}
+    for i, conf_label in enumerate(confidence_labels):
+        outlier_labels = [sample_labels[idx] for idx in t2_outliers[i]]
+        # Pad with None to match max rows
+        outlier_labels.extend([None] * (max_t2_rows - len(outlier_labels)))
+        t2_table_data[conf_label] = outlier_labels
+    outlier_tables['T2'] = pd.DataFrame(t2_table_data)
+
+    # Q outliers table
+    max_q_rows = max(len(idx) for idx in q_outliers) if q_outliers and len(q_outliers) > 0 else 1
+    q_table_data = {}
+    for i, conf_label in enumerate(confidence_labels):
+        outlier_labels = [sample_labels[idx] for idx in q_outliers[i]]
+        outlier_labels.extend([None] * (max_q_rows - len(outlier_labels)))
+        q_table_data[conf_label] = outlier_labels
+    outlier_tables['Q'] = pd.DataFrame(q_table_data)
+
+    # Combined outliers table
+    max_combined_rows = max(len(idx) for idx in combined_outliers) if combined_outliers and len(combined_outliers) > 0 else 1
+    combined_table_data = {}
+    for i, conf_label in enumerate(confidence_labels):
+        outlier_labels = [sample_labels[idx] for idx in combined_outliers[i]]
+        outlier_labels.extend([None] * (max_combined_rows - len(outlier_labels)))
+        combined_table_data[conf_label] = outlier_labels
+    outlier_tables['Combined'] = pd.DataFrame(combined_table_data)
+
+    return occurrences_table, outlier_tables
+
+
+def classify_outliers_joint(
+    t2_values: np.ndarray,
+    q_values: np.ndarray,
+    t2_limits: List[float],
+    q_limits: List[float],
+    sample_labels: Optional[List[str]] = None,
+    confidence_labels: Optional[List[str]] = None
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Classify outliers using joint diagnostic approach (MATLAB t2q_joint.m approach).
+
+    This implements hierarchical classification:
+    - Samples are assigned to the HIGHEST exceeded threshold
+    - A sample exceeding 99.95% is NOT counted in 99.5% or 97.5%
+
+    Parameters
+    ----------
+    t2_values : np.ndarray
+        T² statistic values for each sample
+    q_values : np.ndarray
+        Q statistic values for each sample
+    t2_limits : list of float
+        T² critical limits [limit_97.5%, limit_99.5%, limit_99.95%]
+    q_limits : list of float
+        Q critical limits [limit_97.5%, limit_99.5%, limit_99.95%]
+    sample_labels : list of str, optional
+        Sample identifiers. If None, uses sample numbers.
+    confidence_labels : list of str, optional
+        Labels for confidence levels. Default: ['*', '**', '***']
+
+    Returns
+    -------
+    occurrences_table : pd.DataFrame
+        Table showing number of outliers for each threshold level
+        Columns: Threshold, T2 & Q
+    outlier_table : pd.DataFrame
+        Table of outlier samples for each confidence level
+        Columns: *, **, ***
+
+    Notes
+    -----
+    This implements hierarchical classification from MATLAB t2q_joint.m:
+    - Check if sample exceeds highest threshold (99.95%) first
+    - Then check 99.5%, then 97.5%
+    - Assign to highest exceeded level only
+    """
+    if confidence_labels is None:
+        confidence_labels = ['*', '**', '***']
+
+    n_samples = len(t2_values)
+
+    if sample_labels is None:
+        sample_labels = [f"Sample_{i+1}" for i in range(n_samples)]
+
+    # Initialize outlier lists (from highest to lowest threshold)
+    outliers_list = [[], [], []]  # [level_3 (***), level_2 (**), level_1 (*)]
+
+    # Hierarchical classification (from highest to lowest)
+    for i in range(n_samples):
+        # Check highest threshold first (99.95% - ***)
+        if t2_values[i] > t2_limits[2] or q_values[i] > q_limits[2]:
+            outliers_list[2].append(i)
+        # Then check middle threshold (99.5% - **)
+        elif t2_values[i] > t2_limits[1] or q_values[i] > q_limits[1]:
+            outliers_list[1].append(i)
+        # Finally check lowest threshold (97.5% - *)
+        elif t2_values[i] > t2_limits[0] or q_values[i] > q_limits[0]:
+            outliers_list[0].append(i)
+
+    # Count occurrences
+    num_above = [len(outliers_list[i]) for i in range(3)]
+
+    # Create occurrences table
+    occurrences_table = pd.DataFrame({
+        'Threshold': confidence_labels,
+        'T2 & Q': num_above
+    })
+
+    # Create outlier detail table
+    max_rows = max(len(lst) for lst in outliers_list) if any(outliers_list) else 1
+    outlier_table_data = {}
+
+    for i, conf_label in enumerate(confidence_labels):
+        outlier_labels = [sample_labels[idx] for idx in outliers_list[i]]
+        outlier_labels.extend([None] * (max_rows - len(outlier_labels)))
+        outlier_table_data[conf_label] = outlier_labels
+
+    outlier_table = pd.DataFrame(outlier_table_data)
+
+    return occurrences_table, outlier_table
+
+
+def export_monitoring_data_to_excel(
+    t2_values: np.ndarray,
+    q_values: np.ndarray,
+    t2_limits: List[float],
+    q_limits: List[float],
+    sample_labels: Optional[List[str]] = None,
+    approach: str = 'both'
+) -> BytesIO:
+    """
+    Export monitoring data and outlier diagnostics to Excel file.
+
+    Creates a comprehensive Excel file with:
+    - Sheet 1: T² and Q values with critical limits
+    - Sheet 2: Independent diagnostics (T² outliers)
+    - Sheet 3: Independent diagnostics (Q outliers)
+    - Sheet 4: Independent diagnostics (Combined outliers)
+    - Sheet 5: Independent occurrences summary
+    - Sheet 6: Joint diagnostics outliers
+    - Sheet 7: Joint occurrences summary
+
+    Parameters
+    ----------
+    t2_values : np.ndarray
+        T² statistic values
+    q_values : np.ndarray
+        Q statistic values
+    t2_limits : list of float
+        T² limits [97.5%, 99.5%, 99.95%]
+    q_limits : list of float
+        Q limits [97.5%, 99.5%, 99.95%]
+    sample_labels : list of str, optional
+        Sample identifiers
+    approach : str, optional
+        'independent', 'joint', or 'both'. Default 'both'.
+
+    Returns
+    -------
+    BytesIO
+        Excel file as bytes buffer ready for download
+    """
+    output = BytesIO()
+
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # Sheet 1: T² and Q Values with Limits
+        values_df = pd.DataFrame({
+            'Sample': sample_labels if sample_labels else [f"Sample_{i+1}" for i in range(len(t2_values))],
+            'T2': t2_values,
+            'Q': q_values,
+            'T2_Limit_97.5%': [t2_limits[0]] * len(t2_values),
+            'T2_Limit_99.5%': [t2_limits[1]] * len(t2_values),
+            'T2_Limit_99.95%': [t2_limits[2]] * len(t2_values),
+            'Q_Limit_97.5%': [q_limits[0]] * len(q_values),
+            'Q_Limit_99.5%': [q_limits[1]] * len(q_values),
+            'Q_Limit_99.95%': [q_limits[2]] * len(q_values)
+        })
+        values_df.to_excel(writer, sheet_name='T2_Q_Values', index=False)
+
+        # Independent diagnostics
+        if approach in ['independent', 'both']:
+            occ_ind, outliers_ind = classify_outliers_independent(
+                t2_values, q_values, t2_limits, q_limits, sample_labels
+            )
+
+            occ_ind.to_excel(writer, sheet_name='Ind_Occurrences', index=False)
+            outliers_ind['T2'].to_excel(writer, sheet_name='Ind_T2_Outliers', index=False)
+            outliers_ind['Q'].to_excel(writer, sheet_name='Ind_Q_Outliers', index=False)
+            outliers_ind['Combined'].to_excel(writer, sheet_name='Ind_Combined_Outliers', index=False)
+
+        # Joint diagnostics
+        if approach in ['joint', 'both']:
+            occ_joint, outliers_joint = classify_outliers_joint(
+                t2_values, q_values, t2_limits, q_limits, sample_labels
+            )
+
+            occ_joint.to_excel(writer, sheet_name='Joint_Occurrences', index=False)
+            outliers_joint.to_excel(writer, sheet_name='Joint_Outliers', index=False)
+
+    output.seek(0)
+    return output
+
+
+def create_limits_table(t2_limits: List[float], q_limits: List[float]) -> pd.DataFrame:
+    """
+    Create a simple table of T² and Q limits.
+
+    Parameters
+    ----------
+    t2_limits : list of float
+        T² limits [97.5%, 99.5%, 99.95%]
+    q_limits : list of float
+        Q limits [97.5%, 99.5%, 99.95%]
+
+    Returns
+    -------
+    pd.DataFrame
+        Table with columns: Confidence_Level, T2_Limit, Q_Limit
+    """
+    return pd.DataFrame({
+        'Confidence_Level': ['97.5%', '99.5%', '99.95%'],
+        'T2_Limit': t2_limits,
+        'Q_Limit': q_limits
+    })

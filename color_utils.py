@@ -138,38 +138,145 @@ def create_quantitative_color_map(values, colorscale='blue_to_red'):
 def get_continuous_color_for_value(value, min_val, max_val, colorscale='blue_to_red'):
     """
     Get a single color for a specific value in a continuous range
-    
+
     Args:
         value (float): The value to get color for
         min_val (float): Minimum value in the range
         max_val (float): Maximum value in the range
         colorscale (str): Color scale type
-    
+
     Returns:
         str: RGB color string
     """
     if pd.isna(value):
         return 'rgb(128, 128, 128)'
-    
+
     if min_val == max_val:
         return 'rgb(128, 0, 128)'
-    
+
     # Normalizza il valore
     norm_val = (value - min_val) / (max_val - min_val)
     norm_val = max(0, min(1, norm_val))  # Clamp tra 0 e 1
-    
+
     if colorscale == 'blue_to_red':
         # Scala dal blu puro al rosso puro
         r = int(255 * norm_val)
         g = 0
         b = int(255 * (1 - norm_val))
         return f'rgb({r},{g},{b})'
-    
+
     # Default
     r = int(255 * norm_val)
     g = 0
     b = int(255 * (1 - norm_val))
     return f'rgb({r},{g},{b})'
+
+
+def get_trajectory_colors(n_points, style='gradient', last_point_marker=True):
+    """
+    Generate colors for trajectory visualization in monitoring plots
+
+    Args:
+        n_points (int): Number of points in trajectory
+        style (str): 'simple' for light gray line, 'gradient' for blue-to-red progression
+        last_point_marker (bool): Whether to include special marker for last point
+
+    Returns:
+        dict: Dictionary containing:
+            - 'line_colors': List of RGB color strings for each segment
+            - 'line_widths': List of line widths for each segment
+            - 'marker_colors': List of marker colors for each point
+            - 'marker_sizes': List of marker sizes for each point
+            - 'last_point_style': Dictionary with last point marker style (if enabled)
+    """
+    trajectory_colors = {
+        'line_colors': [],
+        'line_widths': [],
+        'marker_colors': [],
+        'marker_sizes': [],
+        'last_point_style': None
+    }
+
+    if style == 'simple':
+        # Light gray uniform trajectory
+        trajectory_colors['line_colors'] = ['lightgray'] * max(1, n_points - 1)
+        trajectory_colors['line_widths'] = [1.5] * max(1, n_points - 1)
+        trajectory_colors['marker_colors'] = ['lightgray'] * n_points
+        trajectory_colors['marker_sizes'] = [4] * n_points
+
+        if last_point_marker and n_points > 0:
+            trajectory_colors['last_point_style'] = {
+                'color': 'lightgray',
+                'size': 6,
+                'symbol': 'circle'
+            }
+
+    elif style == 'gradient':
+        # Blue-to-red gradient with increasing thickness
+        for i in range(max(1, n_points - 1)):
+            ratio = i / max(1, n_points - 2)
+
+            # Blue to red gradient
+            r = int(255 * ratio)
+            g = 0
+            b = int(255 * (1 - ratio))
+            color = f'rgb({r},{g},{b})'
+
+            trajectory_colors['line_colors'].append(color)
+            trajectory_colors['line_widths'].append(1.5 + (ratio * 1.5))
+            trajectory_colors['marker_colors'].append(color)
+            trajectory_colors['marker_sizes'].append(3 + (ratio * 3))
+
+        # Add color for last marker if needed
+        if n_points > 0:
+            trajectory_colors['marker_colors'].append('rgb(255,0,0)')
+            trajectory_colors['marker_sizes'].append(6)
+
+        if last_point_marker and n_points > 0:
+            trajectory_colors['last_point_style'] = {
+                'color': 'cyan',
+                'size': 10,
+                'symbol': 'star'
+            }
+
+    return trajectory_colors
+
+
+def get_sample_order_colors(n_points, colorscale='blue_to_red'):
+    """
+    Generate color gradient for data points based on their order in sequence
+    Used for coloring points independently from trajectory visualization
+
+    Args:
+        n_points (int): Number of data points
+        colorscale (str): Color scale type ('blue_to_red' default)
+
+    Returns:
+        list: List of RGB color strings, one for each point
+    """
+    colors = []
+
+    for i in range(n_points):
+        if n_points == 1:
+            # Single point: use blue
+            colors.append('rgb(0, 0, 255)')
+        else:
+            # Multiple points: gradient from blue to red
+            ratio = i / (n_points - 1)
+
+            if colorscale == 'blue_to_red':
+                r = int(255 * ratio)
+                g = 0
+                b = int(255 * (1 - ratio))
+                colors.append(f'rgb({r},{g},{b})')
+            else:
+                # Default to blue_to_red
+                r = int(255 * ratio)
+                g = 0
+                b = int(255 * (1 - ratio))
+                colors.append(f'rgb({r},{g},{b})')
+
+    return colors
 
 
 def is_quantitative_variable(data):

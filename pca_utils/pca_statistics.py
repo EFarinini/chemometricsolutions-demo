@@ -26,14 +26,18 @@ def calculate_hotelling_t2(
     in the principal component space. It indicates how far a sample is from
     the multivariate mean, accounting for variance in each PC direction.
 
+    CRITICAL: NIPALS eigenvalues use population variance (t't/n), but T²
+    requires sample variance (t't/(n-1)). We apply the correction factor
+    to match R/CAT and standard statistical references.
+
     Parameters
     ----------
     scores : np.ndarray or pd.DataFrame
         PCA scores matrix of shape (n_samples, n_components).
         Each row is a sample projected into PC space.
     eigenvalues : np.ndarray
-        Eigenvalues (explained variance) for each PC. Shape: (n_components,).
-        Used to normalize distances by variance in each PC direction.
+        Eigenvalues from NIPALS (population variance: t't/n).
+        Shape: (n_components,).
     alpha : float, optional
         Confidence level for critical limit (0 < alpha < 1).
         Default is 0.95 (95% confidence).
@@ -49,17 +53,28 @@ def calculate_hotelling_t2(
 
     Notes
     -----
-    T2 statistic formula:
+    **NIPALS vs Sample Variance Correction:**
+
+    NIPALS computes: λ_NIPALS = t't / n  (population variance)
+
+    T² requires:     λ_sample = t't / (n-1)  (sample variance)
+
+    Correction: λ_sample = λ_NIPALS × n/(n-1)
+
+    This ensures T² values match R/CAT exactly. Without this correction,
+    Python T² values would be systematically lower by factor (n-1)/n.
+
+    **T2 statistic formula:**
 
     .. math::
-        T^2_i = \sum_{j=1}^{a} \frac{t_{ij}^2}{\lambda_j}
+        T^2_i = \sum_{j=1}^{a} \frac{t_{ij}^2}{\lambda_{sample,j}}
 
     where:
     - :math:`t_{ij}` is the score for sample i on PC j
-    - :math:`\lambda_j` is the eigenvalue (variance) of PC j
+    - :math:`\lambda_{sample,j}` is the sample variance eigenvalue of PC j
     - :math:`a` is the number of components
 
-    Critical limit (F-distribution approximation):
+    **Critical limit (F-distribution approximation):**
 
     .. math::
         T^2_{crit} = \frac{(n-1) \cdot a}{n-a} \cdot F_{a,n-a,\\alpha}
@@ -71,8 +86,8 @@ def calculate_hotelling_t2(
     Examples
     --------
     >>> scores = np.array([[1.2, 0.5], [0.8, -0.3], [3.5, 2.1]])
-    >>> eigenvalues = np.array([2.5, 1.2])
-    >>> t2, limit = calculate_hotelling_t2(scores, eigenvalues, alpha=0.95)
+    >>> eigenvalues_nipals = np.array([2.5, 1.2])  # From NIPALS
+    >>> t2, limit = calculate_hotelling_t2(scores, eigenvalues_nipals, alpha=0.95)
     >>> outliers = t2 > limit
     >>> print(f"Outliers: {np.where(outliers)[0]}")
 
@@ -81,6 +96,7 @@ def calculate_hotelling_t2(
     .. [1] Jackson, J.E. (1991). A User's Guide to Principal Components.
     .. [2] Nomikos & MacGregor (1995). Multivariate SPC charts for
            monitoring batch processes. Technometrics, 37(1), 41-59.
+    .. [3] R/CAT: PCA_t2vsq_Dataset.r (uses sDev^2 = sample variance)
     """
     # Convert to numpy array if DataFrame
     if isinstance(scores, pd.DataFrame):
@@ -95,9 +111,18 @@ def calculate_hotelling_t2(
     # Ensure eigenvalues are positive (numerical stability)
     eigenvalues = np.maximum(eigenvalues, 1e-10)
 
-    # Calculate T2 for each sample
-    # T2b = Sigma| (t_ij2 / lambda|)
-    t2_values = np.sum((scores_array ** 2) / eigenvalues, axis=1)
+    # === CRITICAL CORRECTION ===
+    # Convert NIPALS eigenvalues (population variance) to sample variance
+    # λ_sample = λ_NIPALS × n/(n-1)
+    # This correction factor ensures T² values match R/CAT standard
+    if n_samples > 1:
+        eigenvalues_corrected = eigenvalues * (n_samples / (n_samples - 1))
+    else:
+        eigenvalues_corrected = eigenvalues
+
+    # === T² CALCULATION (R/CAT STANDARD) ===
+    # T²_i = Σ(t_ij² / λ_sample_j)
+    t2_values = np.sum((scores_array ** 2) / eigenvalues_corrected, axis=1)
 
     # Calculate critical value using F-distribution
     # T2_limit = [(n-1)  * a / (n-a)]  * F(a, n-a, alpha)
@@ -764,3 +789,182 @@ def cross_validate_pca(
         'PRESS': press_values,
         'optimal_components': optimal_components
     }
+
+
+def calculate_hotelling_t2_matricial(
+    X_test: np.ndarray,
+    loadings: np.ndarray,
+    eigenvalues: np.ndarray,
+    X_train_mean: np.ndarray,
+    X_train_std: Optional[np.ndarray] = None,
+    n_train: int = None
+) -> Tuple[np.ndarray, float]:
+    """
+    Calculate Hotelling's T² statistic using matricial formula for TEST DATA projection.
+    
+    This function implements the EXACT R/CAT formula from PCA_t2q_Dataset.r:
+        T² = diag(X · MT · X')
+        where MT = P · diag(1/λ) · P'
+    
+    This matricial approach correctly handles the centering/scaling transformation
+    when projecting new data onto a PCA model trained on different data.
+    
+    **CRITICAL**: This is ONLY for TEST DATA projection. For training data,
+    use the simpler `calculate_hotelling_t2()` function.
+    
+    Parameters
+    ----------
+    X_test : np.ndarray
+        Test data matrix (ORIGINAL scale, not preprocessed).
+        Shape: (n_test_samples, n_features).
+    loadings : np.ndarray
+        PCA loadings matrix from training model.
+        Shape: (n_features, n_components).
+    eigenvalues : np.ndarray
+        Eigenvalues from training model (sample variance).
+        Shape: (n_components,).
+    X_train_mean : np.ndarray
+        Mean values from training data for centering.
+        Shape: (n_features,).
+    X_train_std : np.ndarray, optional
+        Standard deviations from training data for scaling.
+        If None, only centering is applied. Shape: (n_features,).
+    n_train : int, optional
+        Number of training samples (for limit calculation).
+        If None, limit is not calculated.
+    
+    Returns
+    -------
+    t2_values : np.ndarray
+        T² statistic for each test sample. Shape: (n_test_samples,).
+    t2_limit : float
+        Critical value at 97.5% confidence (if n_train provided).
+        Otherwise returns np.nan.
+    
+    Notes
+    -----
+    **R/CAT Matricial Formula (from PCA_t2q_Dataset.r):**
+    
+    .. code-block:: r
+    
+        # Lines 29-33 from PCA_t2q_Dataset.r
+        if(PCA$center) M <- M - (unity %*% PCA$centered)
+        if(PCA$scale) M <- M / (unity %*% PCA$scaled)
+        MT <- P %*% (diag(length(L)) * (1/L)) %*% t(P)
+        TN <- diag(M %*% MT %*% t(M))
+    
+    In Python:
+    
+    .. math::
+        T^2_i = diag(X_{test} \\cdot M_T \\cdot X_{test}^T)
+        
+        M_T = P \\cdot diag(1/\\lambda) \\cdot P^T
+    
+    where:
+    - :math:`X_{test}` is the centered/scaled test data matrix
+    - :math:`P` is the loadings matrix (n_features × n_components)
+    - :math:`\\lambda` are the eigenvalues (sample variance)
+    
+    **Why this formula?**
+    
+    The matricial formula automatically accounts for:
+    1. Centering with training mean
+    2. Scaling with training std (if applicable)
+    3. Projection onto PCA space
+    4. Mahalanobis distance calculation
+    
+    All in one compact operation that matches R/CAT exactly.
+    
+    **Training vs Test Data:**
+    
+    - Training: Use `calculate_hotelling_t2(scores, eigenvalues)`
+      Simple formula: T² = Σ(t²/λ) works because scores are from the model itself
+    
+    - Test: Use this function `calculate_hotelling_t2_matricial(X_test, ...)`
+      Matricial formula needed because data is projected from external source
+    
+    Examples
+    --------
+    >>> # After training PCA model
+    >>> X_test = np.array([[1.2, 0.5, 0.8], [0.9, 1.1, 0.7]])
+    >>> loadings = pca_model['loadings'][:, :2]  # First 2 PCs
+    >>> eigenvalues = pca_model['eigenvalues'][:2]
+    >>> X_train_mean = pca_model['means']
+    >>> X_train_std = pca_model['stds']  # Or None if not scaled
+    >>> 
+    >>> t2, limit = calculate_hotelling_t2_matricial(
+    ...     X_test, loadings, eigenvalues, X_train_mean, X_train_std, n_train=100
+    ... )
+    >>> outliers = t2 > limit
+    
+    References
+    ----------
+    .. [1] R/CAT: PCA_t2q_Dataset.r, lines 9-33
+    .. [2] Jackson, J.E. (1991). A User's Guide to Principal Components
+    .. [3] Nomikos & MacGregor (1995). Multivariate SPC charts for monitoring
+    """
+    # Ensure numpy arrays
+    X_test = np.asarray(X_test)
+    loadings = np.asarray(loadings)
+    eigenvalues = np.asarray(eigenvalues)
+    X_train_mean = np.asarray(X_train_mean)
+    
+    n_test_samples, n_features = X_test.shape
+    n_components = loadings.shape[1]
+    
+    # === STEP 1: Preprocess test data (center/scale with TRAINING statistics) ===
+    # R/CAT lines 29-30:
+    # if(PCA$center) M <- M - (unity %*% PCA$centered)
+    # if(PCA$scale) M <- M / (unity %*% PCA$scaled)
+    
+    X_test_processed = X_test - X_train_mean  # Center with training mean
+    
+    if X_train_std is not None:
+        # Scale with training std (avoid division by zero)
+        std_safe = np.where(X_train_std > 1e-10, X_train_std, 1.0)
+        X_test_processed = X_test_processed / std_safe
+    
+    # === STEP 2: Create T² projection matrix ===
+    # R/CAT line 14:
+    # MT <- P %*% (diag(length(L)) * (1/L)) %*% t(P)
+
+    # === CRITICAL CORRECTION ===
+    # Convert NIPALS eigenvalues (population variance) to sample variance
+    # λ_sample = λ_NIPALS × n_train/(n_train-1)
+    # This matches the correction in calculate_hotelling_t2()
+    if n_train is not None and n_train > 1:
+        eigenvalues_corrected = eigenvalues * (n_train / (n_train - 1))
+    else:
+        eigenvalues_corrected = eigenvalues
+
+    # Ensure eigenvalues are positive (numerical stability)
+    eigenvalues_safe = np.maximum(eigenvalues_corrected, 1e-10)
+
+    # Create diagonal matrix: diag(1/λ_sample)
+    inv_eigenvalues_diag = np.diag(1.0 / eigenvalues_safe)
+    
+    # MT = P · diag(1/λ) · P'
+    MT = loadings @ inv_eigenvalues_diag @ loadings.T
+    
+    # === STEP 3: Calculate T² for each test sample ===
+    # R/CAT line 33:
+    # TN <- diag(M %*% MT %*% t(M))
+    
+    # T² = diag(X · MT · X')
+    # For each sample i: T²_i = X_i · MT · X_i'
+    t2_values = np.diag(X_test_processed @ MT @ X_test_processed.T)
+    
+    # === STEP 4: Calculate critical limit (if training size provided) ===
+    # R/CAT line 18:
+    # Tlim <- (n-1)*ncp/(n-ncp)*qf(0.95,ncp,n-ncp)
+    
+    if n_train is not None and n_train > n_components:
+        alpha = 0.975  # 97.5% confidence level
+        df1 = n_components
+        df2 = n_train - n_components
+        f_value = f.ppf(alpha, df1, df2)
+        t2_limit = ((n_train - 1) * n_components / (n_train - n_components)) * f_value
+    else:
+        t2_limit = np.nan
+    
+    return t2_values, t2_limit

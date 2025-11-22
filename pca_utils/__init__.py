@@ -66,6 +66,7 @@ from .pca_plots import (
 # Import statistical functions
 from .pca_statistics import (
     calculate_hotelling_t2,
+    calculate_hotelling_t2_matricial,
     calculate_q_residuals,
     calculate_contributions,
     calculate_leverage,
@@ -81,6 +82,14 @@ from .pca_workspace import (
     get_split_datasets_info,
     delete_split_dataset,
     clear_all_split_datasets
+)
+
+# Import monitoring export functions
+from .pca_monitoring import (
+    classify_outliers_independent,
+    classify_outliers_joint,
+    export_monitoring_data_to_excel,
+    create_limits_table
 )
 
 # Define public API
@@ -110,6 +119,7 @@ __all__ = [
 
     # Statistical functions
     'calculate_hotelling_t2',
+    'calculate_hotelling_t2_matricial',
     'calculate_q_residuals',
     'calculate_contributions',
     'calculate_leverage',
@@ -123,6 +133,12 @@ __all__ = [
     'get_split_datasets_info',
     'delete_split_dataset',
     'clear_all_split_datasets',
+
+    # Monitoring export functions
+    'classify_outliers_independent',
+    'classify_outliers_joint',
+    'export_monitoring_data_to_excel',
+    'create_limits_table',
 ]
 
 # Package metadata

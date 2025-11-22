@@ -31,6 +31,12 @@ except ImportError:
     MLR_DOE_AVAILABLE = False
 
 try:
+    import multi_doe_page
+    MULTI_DOE_AVAILABLE = True
+except ImportError:
+    MULTI_DOE_AVAILABLE = False
+
+try:
     import transformations
     TRANSFORMATIONS_AVAILABLE = True
 except ImportError:
@@ -283,6 +289,26 @@ def show_home():
         else:
             st.info("🚧 Univariate Analysis coming soon")
 
+    with col_trans4:
+        st.markdown("""
+        ### 🎯 Multi-DOE
+        *Multi-Response Design of Experiments*
+
+        **Features:**
+        - Simultaneous multi-response modeling
+        - Parallel surface analysis
+        - Multi-criteria optimization (Pareto)
+        - Weighted objective functions
+        - Comprehensive comparison views
+        """)
+
+        if MULTI_DOE_AVAILABLE:
+            if st.button("🚀 Launch Multi-DOE", key="launch_multi_doe"):
+                st.session_state.current_page = "Multi-DOE"
+                st.rerun()
+        else:
+            st.info("🚧 Multi-DOE coming soon")
+
     with col_trans5:
         st.markdown("""
         ### ⚗️ PLS Calibration
@@ -461,6 +487,14 @@ def main():
         st.sidebar.button("🧪 MLR/DOE", disabled=True, use_container_width=True, key="nav_mlr_doe_disabled")
         st.sidebar.caption("Module not found")
 
+    if MULTI_DOE_AVAILABLE:
+        if st.sidebar.button("🎯 Multi-DOE", use_container_width=True, key="nav_multi_doe"):
+            st.session_state.current_page = "Multi-DOE"
+            st.rerun()
+    else:
+        st.sidebar.button("🎯 Multi-DOE", disabled=True, use_container_width=True, key="nav_multi_doe_disabled")
+        st.sidebar.caption("Module not found")
+
     if TRANSFORMATIONS_AVAILABLE:
         if st.sidebar.button("🔬 Transformations", use_container_width=True, key="nav_transformations"):
             st.session_state.current_page = "Transformations"
@@ -584,6 +618,8 @@ def main():
         pca_monitoring_page.show()
     elif st.session_state.current_page == "MLR/DOE" and MLR_DOE_AVAILABLE:
         mlr_doe.show()
+    elif st.session_state.current_page == "Multi-DOE" and MULTI_DOE_AVAILABLE:
+        multi_doe_page.show()
     elif st.session_state.current_page == "Transformations" and TRANSFORMATIONS_AVAILABLE:
         transformations.show()
     elif st.session_state.current_page == "Bayesian Optimization" and BAYESIAN_OPTIMIZATION_AVAILABLE:

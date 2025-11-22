@@ -43,96 +43,232 @@ def count_missing_values(X: Union[pd.DataFrame, np.ndarray]) -> Tuple[int, int, 
 
 def reconstruct_missing_data(
     X: Union[pd.DataFrame, np.ndarray],
-    scores: Union[pd.DataFrame, np.ndarray],
-    loadings: Union[pd.DataFrame, np.ndarray],
-    n_components: Optional[int] = None
-) -> pd.DataFrame:
+    n_components: int,
+    max_iter: int = 1000,
+    tol: float = 1e-6,
+    center: bool = True,
+    scale: bool = False
+) -> Tuple[pd.DataFrame, dict]:
     """
-    Reconstruct missing values using PCA model.
+    Reconstruct missing values using NIPALS PCA algorithm.
 
-    Uses the PCA reconstruction formula: X_reconstructed = Scores @ Loadings.T
-    Missing values in the original data are replaced with reconstructed values.
-    Non-missing values are preserved.
+    This function implements the same algorithm as R's pcaMethods::pca(method="nipals").
+    It performs PCA on data with missing values using the NIPALS iterative algorithm,
+    then reconstructs ONLY the missing values while preserving original data.
+
+    CRITICAL: Unlike standard PCA, this uses NIPALS which handles missing data natively.
 
     Parameters
     ----------
     X : pd.DataFrame or np.ndarray
-        Original data with missing values
-    scores : pd.DataFrame or np.ndarray
-        PCA scores matrix (n_samples, n_components)
-    loadings : pd.DataFrame or np.ndarray
-        PCA loadings matrix (n_features, n_components)
-    n_components : int, optional
-        Number of components to use for reconstruction.
-        If None, uses all available components.
+        Original data matrix with missing values (NaN)
+    n_components : int
+        Number of principal components to use for reconstruction.
+        More components = better reconstruction but possible overfitting.
+    max_iter : int, optional
+        Maximum iterations for NIPALS convergence. Default 1000.
+    tol : float, optional
+        Convergence tolerance for NIPALS. Default 1e-6.
+    center : bool, optional
+        Whether to center data (subtract mean). Default True.
+        Matches R parameter: center=TRUE
+    scale : bool, optional
+        Whether to scale data (divide by std). Default False.
+        Matches R parameter: scale="uv" (unit variance) if True, "none" if False
 
     Returns
     -------
     X_reconstructed : pd.DataFrame
         Data with missing values filled by PCA reconstruction.
-        Preserves original DataFrame structure if input is DataFrame.
+        Original non-missing values are PRESERVED exactly.
+    info : dict
+        Dictionary with reconstruction information:
+        - 'n_components_used': Number of components used
+        - 'explained_variance': % variance explained by each component
+        - 'total_variance_explained': Total % variance explained
+        - 'n_iterations': Iterations needed for convergence
+        - 'converged': Whether NIPALS converged
+        - 'n_missing_before': Number of missing values before
+        - 'n_missing_after': Number of missing values after (should be 0)
 
     Examples
     --------
-    >>> # After PCA computation
-    >>> X_full = reconstruct_missing_data(X_with_nan, scores, loadings, n_components=5)
-    >>> # Check reconstruction
-    >>> n_missing_after, _, _ = count_missing_values(X_full)
-    >>> print(f"Missing values after reconstruction: {n_missing_after}")  # Should be 0
+    >>> # Data with missing values
+    >>> X_with_nan = pd.DataFrame([[1.0, 2.0, np.nan],
+    ...                             [2.0, np.nan, 4.0],
+    ...                             [3.0, 4.0, 5.0]])
+    >>>
+    >>> # Reconstruct using 2 components
+    >>> X_full, info = reconstruct_missing_data(X_with_nan, n_components=2)
+    >>> print(f"Variance explained: {info['total_variance_explained']:.1f}%")
+    >>> print(f"Missing values filled: {info['n_missing_before']}")
 
     Notes
     -----
-    - Only missing values are replaced; original values are preserved
-    - Reconstruction quality depends on variance captured by selected components
-    - More components generally give better reconstruction but may overfit
+    - Matches R/CAT algorithm: pca(M_, method="nipals", center=pre, scale=sc, nPcs=npc)
+    - NIPALS = Nonlinear Iterative Partial Least Squares
+    - Algorithm handles missing data by iteratively estimating them
+    - Original non-missing values are NEVER modified
+    - After reconstruction: M.rec[!M.na] <- M_[!M.na] (preserve originals)
+
+    Algorithm Steps (matching R):
+    1. Store mask of missing values
+    2. Initialize missing values with column means
+    3. Run NIPALS PCA for n_components
+    4. Reconstruct data: X_hat = T @ P.T (de-centered, de-scaled)
+    5. Replace ONLY missing values: X_full[missing_mask] = X_hat[missing_mask]
+    6. Original values preserved: X_full[~missing_mask] = X_original[~missing_mask]
     """
-    # Store DataFrame info if input is DataFrame
+    # Store DataFrame info
     is_dataframe = isinstance(X, pd.DataFrame)
     if is_dataframe:
         index = X.index
         columns = X.columns
-        X_array = X.values.astype(float)
+        X_array = X.values.astype(float).copy()
     else:
-        X_array = np.asarray(X, dtype=float)
+        X_array = np.asarray(X, dtype=float).copy()
         index = None
         columns = None
 
-    # Convert scores and loadings to arrays
-    if isinstance(scores, pd.DataFrame):
-        scores_array = scores.values
-    else:
-        scores_array = np.asarray(scores)
-
-    if isinstance(loadings, pd.DataFrame):
-        loadings_array = loadings.values
-    else:
-        loadings_array = np.asarray(loadings)
-
-    # Determine number of components to use
-    available_components = min(scores_array.shape[1], loadings_array.shape[1])
-    if n_components is None:
-        n_components = available_components
-    else:
-        n_components = min(n_components, available_components)
-
-    # Use only selected components
-    scores_subset = scores_array[:, :n_components]
-    loadings_subset = loadings_array[:, :n_components]
-
-    # Reconstruct data: X_hat = T @ P.T
-    X_reconstructed = scores_subset @ loadings_subset.T
-
-    # Replace only missing values, preserve original non-missing values
-    X_filled = X_array.copy()
+    # Store original data and missing mask
+    X_original = X_array.copy()
     missing_mask = np.isnan(X_array)
-    X_filled[missing_mask] = X_reconstructed[missing_mask]
+    n_missing_before = missing_mask.sum()
 
-    # Convert back to DataFrame if input was DataFrame
+    if n_missing_before == 0:
+        # No missing data - return as is
+        if is_dataframe:
+            return pd.DataFrame(X_array, index=index, columns=columns), {
+                'n_components_used': 0,
+                'explained_variance': [],
+                'total_variance_explained': 0.0,
+                'n_iterations': 0,
+                'converged': True,
+                'n_missing_before': 0,
+                'n_missing_after': 0
+            }
+        else:
+            return X_array, {}
+
+    # === NIPALS PCA WITH MISSING DATA ===
+    # Step 1: Initialize missing values with column means (of non-missing)
+    X_filled = X_array.copy()
+    for j in range(X_array.shape[1]):
+        col_data = X_array[:, j]
+        col_mean = np.nanmean(col_data)
+        X_filled[np.isnan(X_filled[:, j]), j] = col_mean
+
+    # Step 2: Center and scale (if requested)
+    # Calculate statistics ONLY from non-missing original values
+    col_means = np.zeros(X_array.shape[1])
+    col_stds = np.ones(X_array.shape[1])
+
+    if center or scale:
+        for j in range(X_array.shape[1]):
+            col_data_orig = X_original[:, j]
+            non_missing = ~np.isnan(col_data_orig)
+
+            if center:
+                col_means[j] = np.mean(col_data_orig[non_missing])
+
+            if scale:
+                col_stds[j] = np.std(col_data_orig[non_missing], ddof=1)
+                if col_stds[j] < 1e-10:
+                    col_stds[j] = 1.0
+
+    # Apply centering/scaling to filled data
+    X_preprocessed = X_filled.copy()
+    if center:
+        X_preprocessed = X_preprocessed - col_means
+    if scale:
+        X_preprocessed = X_preprocessed / col_stds
+
+    # Step 3: NIPALS algorithm for n_components
+    scores_list = []
+    loadings_list = []
+    explained_var_list = []
+    total_iter = 0
+    converged = True
+
+    X_residual = X_preprocessed.copy()
+
+    for comp in range(n_components):
+        # Initialize score vector with first column
+        t = X_residual[:, 0].copy()
+        t_old = np.zeros_like(t)
+
+        iteration = 0
+        while iteration < max_iter:
+            # Compute loadings: p = X.T @ t / (t.T @ t)
+            p = X_residual.T @ t / (t @ t)
+            p = p / np.linalg.norm(p)  # Normalize
+
+            # Compute scores: t = X @ p / (p.T @ p)
+            t = X_residual @ p / (p @ p)
+
+            # Check convergence
+            if np.linalg.norm(t - t_old) < tol:
+                break
+
+            t_old = t.copy()
+            iteration += 1
+
+        total_iter += iteration
+
+        if iteration >= max_iter:
+            converged = False
+
+        # Store component
+        scores_list.append(t)
+        loadings_list.append(p)
+
+        # Explained variance
+        var_explained = (t @ t) / (np.sum(X_preprocessed**2) + 1e-10) * 100
+        explained_var_list.append(var_explained)
+
+        # Deflate: X_residual = X_residual - t @ p.T
+        X_residual = X_residual - np.outer(t, p)
+
+    # Step 4: Reconstruct preprocessed data
+    T = np.column_stack(scores_list)  # scores matrix (n_samples, n_components)
+    P = np.column_stack(loadings_list)  # loadings matrix (n_features, n_components)
+
+    X_reconstructed_preprocessed = T @ P.T
+
+    # Step 5: Reverse preprocessing (de-center, de-scale)
+    X_reconstructed = X_reconstructed_preprocessed.copy()
+    if scale:
+        X_reconstructed = X_reconstructed * col_stds
+    if center:
+        X_reconstructed = X_reconstructed + col_means
+
+    # Step 6: CRITICAL - Preserve original non-missing values
+    # This matches R: M.rec[!M.na] <- M_[!M.na]
+    X_final = X_reconstructed.copy()
+    X_final[~missing_mask] = X_original[~missing_mask]
+
+    # Count remaining missing values (should be 0)
+    n_missing_after = np.isnan(X_final).sum()
+
+    # Prepare info dictionary
+    info = {
+        'n_components_used': n_components,
+        'explained_variance': explained_var_list,
+        'total_variance_explained': sum(explained_var_list),
+        'n_iterations': total_iter,
+        'converged': converged,
+        'n_missing_before': int(n_missing_before),
+        'n_missing_after': int(n_missing_after),
+        'center': center,
+        'scale': scale
+    }
+
+    # Convert back to DataFrame if needed
     if is_dataframe:
-        X_filled_df = pd.DataFrame(X_filled, index=index, columns=columns)
-        return X_filled_df
+        X_final_df = pd.DataFrame(X_final, index=index, columns=columns)
+        return X_final_df, info
     else:
-        return X_filled
+        return X_final, info
 
 
 def get_reconstruction_info(

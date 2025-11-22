@@ -15,7 +15,11 @@ from scipy.stats import chi2, f
 from scipy import stats
 
 # Import sistema di colori unificato
-from color_utils import get_unified_color_schemes, create_categorical_color_map
+from color_utils import (
+    get_unified_color_schemes,
+    create_categorical_color_map,
+    is_quantitative_variable
+)
 
 def calculate_t2_statistic(scores, n_components=None):
     """Calculate T² (Hotelling's T²) statistic for PCA scores"""
@@ -63,16 +67,15 @@ def calculate_control_limits(n_samples, n_variables, n_components, confidence_le
     return limits
 
 
-def create_t2_q_plot(t2_values, q_values, control_limits, sample_names=None, 
-                     title="T² vs Q Plot", color_data=None, color_variable=None, 
+def create_t2_q_plot(t2_values, q_values, control_limits, sample_names=None,
+                     title="T² vs Q Plot", color_data=None, color_variable=None,
                      show_sample_names=True):
     """
-    Create T² vs Q diagnostic plot with FIXED color consistency
+    Create T² vs Q diagnostic plot with proper color handling for both categorical and quantitative variables
     """
-
     # Get unified color scheme
     colors = get_unified_color_schemes()
-    
+
     # Handle sample names properly
     if sample_names is None or not show_sample_names:
         display_names = None
@@ -80,29 +83,46 @@ def create_t2_q_plot(t2_values, q_values, control_limits, sample_names=None,
     else:
         display_names = sample_names
         hover_text = sample_names
-    
-    # Create base scatter plot with FORCED color consistency
+
+    # Create base scatter plot with proper color handling
     if color_data is not None:
-        # SEMPRE crea color_discrete_map per garantire coerenza
-        unique_values = pd.Series(color_data).dropna().unique()
-        color_discrete_map = create_categorical_color_map(unique_values)
-        
-        fig = px.scatter(
-            x=t2_values,
-            y=q_values,
-            color=color_data,
-            text=display_names if show_sample_names else None,
-            title=title,
-            labels={'x': 'T² Statistic', 'y': 'Q Statistic', 'color': color_variable},
-            color_discrete_map=color_discrete_map  # FORZATO sempre
-        )
-        
-        # Update hover template with proper text handling
+        color_series = pd.Series(color_data)
+
+        # Check if quantitative or categorical
+        if is_quantitative_variable(color_series):
+            # QUANTITATIVE: Use continuous blue-to-red scale
+            color_scale = [(0.0, 'rgb(0, 0, 255)'), (0.5, 'rgb(128, 0, 128)'), (1.0, 'rgb(255, 0, 0)')]
+
+            fig = px.scatter(
+                x=t2_values,
+                y=q_values,
+                color=color_data,
+                text=display_names if show_sample_names else None,
+                title=title,
+                labels={'x': 'T² Statistic', 'y': 'Q Statistic', 'color': color_variable},
+                color_continuous_scale=color_scale
+            )
+        else:
+            # CATEGORICAL: Use discrete color map
+            unique_values = color_series.dropna().unique()
+            color_discrete_map = create_categorical_color_map(unique_values)
+
+            fig = px.scatter(
+                x=t2_values,
+                y=q_values,
+                color=color_data,
+                text=display_names if show_sample_names else None,
+                title=title,
+                labels={'x': 'T² Statistic', 'y': 'Q Statistic', 'color': color_variable},
+                color_discrete_map=color_discrete_map
+            )
+
+        # Update hover template with color info
         if color_variable:
             hover_template = f'<b>%{{hovertext}}</b><br>T²: %{{x:.2f}}<br>Q: %{{y:.2f}}<br>{color_variable}: %{{marker.color}}<extra></extra>'
         else:
             hover_template = '<b>%{hovertext}</b><br>T²: %{x:.2f}<br>Q: %{y:.2f}<extra></extra>'
-            
+
         fig.update_traces(
             hovertemplate=hover_template,
             hovertext=hover_text,
@@ -272,9 +292,10 @@ def show_advanced_diagnostics_tab(processed_data, scores, pca_params, timestamps
     st.markdown("### 🎯 T² vs Q Diagnostic Analysis")
     st.info("Advanced outlier detection using Hotelling's T² and Q statistics")
     
-    # Parameter selection
-    col1, col2, col3 = st.columns(3)
-    
+    # ⚙️ Diagnostic Configuration
+    st.markdown("### ⚙️ Diagnostic Configuration")
+    col1, col2 = st.columns(2)
+
     with col1:
         n_components = st.slider(
             "Number of components for diagnostics:",
@@ -283,68 +304,16 @@ def show_advanced_diagnostics_tab(processed_data, scores, pca_params, timestamps
             value=min(3, scores.shape[1]),
             help="More components = more sensitive T², fewer components = more sensitive Q"
         )
-    
+
     with col2:
-        diagnostic_type = st.selectbox(
-            "Diagnostic approach:",
+        control_limit_approach = st.radio(
+            "Control Limit Approach:",
             ["Independent T²/Q", "Joint T²/Q"],
             help="Independent: separate thresholds | Joint: hierarchical classification"
         )
-    
-    with col3:
-        # FIXED: Properly handle the checkbox state
-        show_sample_names = st.checkbox("Show sample names on plots", value=False, key="show_names_diag")
-    
-    # === UNIFIED VISUALIZATION OPTIONS ===
-    st.markdown("### 🎨 Visualization Options")
-    
-    # Get original dataset for coloring options
-    try:
-        original_data = st.session_state.current_data
-        
-        # Get custom variables
-        custom_vars = []
-        if 'custom_variables' in st.session_state:
-            custom_vars = list(st.session_state.custom_variables.keys())
-        
-        # All available coloring options (exclude variables used in PCA)
-        pca_variables = pca_params.get('parameters', {}).get('variables', [])
-        available_color_vars = [col for col in original_data.columns if col not in pca_variables]
-        
-        col_viz1, col_viz2, col_viz3 = st.columns(3)
-        
-        with col_viz1:
-            all_color_options = (["None", "Row Index"] + available_color_vars + custom_vars)
-            color_by = st.selectbox("Color points by:", all_color_options, key="diag_color")
-        
-        with col_viz2:
-            plot_type = st.selectbox(
-                "Additional plots:",
-                ["T² vs Q Only", "Include Time Series"],
-                help="Time series shows T² and Q trends over sample number/time"
-            )
-        
 
-        
-        # Prepare color data
-        color_data = None
-        color_variable = None
-        
-        if color_by != "None":
-            color_variable = color_by
-            if color_by == "Row Index":
-                color_data = [f"Sample_{i+1}" for i in range(len(processed_data))]
-            elif color_by in custom_vars:
-                color_data = st.session_state.custom_variables[color_by].reindex(processed_data.index).fillna("Unknown")
-            else:
-                color_data = original_data[color_by].reindex(processed_data.index).fillna("Unknown")
-                
-    except Exception as e:
-        # Fallback if original data not available
-        color_data = None
-        color_variable = None
-        plot_type = "T² vs Q Only"
-        st.info("Original dataset not available for coloring options")
+    # Store for later use
+    diagnostic_type = control_limit_approach
     
     # Calculate diagnostics
     with st.spinner("Calculating T² and Q statistics..."):
@@ -363,19 +332,115 @@ def show_advanced_diagnostics_tab(processed_data, scores, pca_params, timestamps
             # Calculate control limits
             n_samples, n_variables = processed_data.shape
             control_limits = calculate_control_limits(n_samples, n_variables, n_components)
-            
-            # FIXED: Get sample names based on checkbox state
-            if show_sample_names:
-                sample_names = processed_data.index.tolist()
-            else:
-                sample_names = [f"Sample_{i+1}" for i in range(len(t2_values))]
-            
+
             st.success("✅ Diagnostics calculated successfully")
-            
+
         except Exception as e:
             st.error(f"❌ Error calculating diagnostics: {str(e)}")
             return
-    
+
+    # === NEW: 📊 Diagnostic Plots Section ===
+    st.divider()
+    st.markdown("### 📊 Diagnostic Plots")
+    st.info("Boxes define acceptance regions at 97.5%, 99.5%, 99.95% limits")
+
+    # Get original dataset for coloring options
+    try:
+        original_data = st.session_state.current_data
+
+        # Get custom variables
+        custom_vars = []
+        if 'custom_variables' in st.session_state:
+            custom_vars = list(st.session_state.custom_variables.keys())
+
+        # All available coloring options (exclude variables used in PCA)
+        pca_variables = pca_params.get('parameters', {}).get('variables', [])
+        available_color_vars = [col for col in original_data.columns if col not in pca_variables]
+
+        # Visualization controls
+        col_plot1, col_plot2, col_plot3 = st.columns(3)
+
+        with col_plot1:
+            all_color_options = ["None", "Row Index"] + available_color_vars + custom_vars
+            color_by = st.selectbox(
+                "Color Points By:",
+                all_color_options,
+                key="diag_color",
+                help="Select variable to color the diagnostic points"
+            )
+
+        with col_plot2:
+            show_sample_names = st.checkbox(
+                "Show Sample Labels",
+                value=False,
+                key="show_names_diag",
+                help="Display sample IDs on the plots"
+            )
+
+        with col_plot3:
+            plot_type = st.selectbox(
+                "Additional Plots:",
+                ["T² vs Q Only", "Include Time Series"],
+                key="diag_plot_type",
+                help="Time series shows T² and Q trends over sample number/time"
+            )
+
+        # Prepare color data using unified color system
+        color_data = None
+        color_variable = None
+
+        if color_by != "None":
+            color_variable = color_by
+
+            if color_by == "Row Index":
+                # Use row index as categorical
+                color_data = [str(i) for i in range(len(scores))]
+
+            elif color_by in custom_vars:
+                # Custom variable from session state
+                if 'custom_variables' in st.session_state:
+                    custom_data = st.session_state.custom_variables.get(color_by)
+                    if custom_data is not None and len(custom_data) == len(scores):
+                        color_data = custom_data
+                    else:
+                        st.warning(f"⚠️ Custom variable '{color_by}' length mismatch")
+                        color_by = "None"
+                        color_variable = None
+
+            else:
+                # Regular column from original data
+                if color_by in original_data.columns:
+                    color_series = original_data[color_by]
+
+                    # Check if quantitative or categorical
+                    if is_quantitative_variable(color_series):
+                        # Quantitative: use continuous color scale (handled in plotting function)
+                        color_data = color_series.values
+                        st.info(f"📊 Using continuous color scale for **{color_by}** (quantitative)")
+                    else:
+                        # Categorical: convert to categorical color mapping
+                        color_data = color_series.astype(str).values
+                        unique_count = len(pd.Series(color_data).unique())
+                        st.info(f"🎨 Using categorical colors for **{color_by}** ({unique_count} categories)")
+                else:
+                    st.warning(f"⚠️ Column '{color_by}' not found")
+                    color_by = "None"
+                    color_variable = None
+
+    except Exception as e:
+        # Fallback if original data not available
+        color_data = None
+        color_variable = None
+        plot_type = "T² vs Q Only"
+        show_sample_names = False
+        st.info("Original dataset not available for coloring options")
+
+    # Get sample names based on checkbox state
+    if show_sample_names:
+        sample_names = processed_data.index.tolist()
+    else:
+        sample_names = [f"Sample_{i+1}" for i in range(len(t2_values))]
+
     # Display results based on diagnostic type
     if diagnostic_type == "Independent T²/Q":
         st.markdown("### 📊 Independent T² and Q Analysis")
