@@ -1168,7 +1168,7 @@ def _show_loadings_plots_tab():
 
         # === NEW: ANTIDERIVATIVE OPTION ===
         use_antiderivative = st.checkbox(
-            "📊 Show Antiderivative (for derivative-preprocessed data)",
+            "📊 Show Antiderivative (for derivative-preprocessed data) by P. Oliveri et al. / Analytica Chimica Acta 1058 (2019) 9e17",
             value=False,
             key="scatter_antideriv_checkbox",
             help="Enable if data was preprocessed with row derivative transformation"
