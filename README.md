@@ -1,9 +1,14 @@
 # ChemometricSolutions - Modular Web Application
 
+> ⚠️ **OFFICIAL REPOSITORY** ⚠️  
+> This is the **official and maintained** repository.  
+> **DO NOT use** the old repository `FarininiChemometricSolutions/chemometricsolutions-demos` - it is no longer maintained.  
+> 📧 Contact: chemometricsolutions@gmail.com
+
 Professional chemometric analysis tools brought to the web. A comprehensive Streamlit-based platform for PCA, MLR/DoE, data handling, and classification with a fully modular architecture featuring root-level menu modules and shared workspace utilities.
 
 **Live Demo:** https://chemometricsolutions-demo.streamlit.app/  
-**GitHub:** https://github.com/FarininiChemometricSolutions/chemometricsolutions-demos
+**GitHub:** https://github.com/EFarinini/chemometricsolutions-demo
 
 ---
 
@@ -13,7 +18,7 @@ Professional chemometric analysis tools brought to the web. A comprehensive Stre
 ## 📂 Project Structure
 
 ```
-chemometricsolutions-demos/
+chemometricsolutions-demo/
 │
 ├── streamlit_app.py                 # Main entry point (initializes app state)
 ├── homepage.py                      # Homepage with navigation dashboard
@@ -184,12 +189,6 @@ if "my_dataset" in datasets:
 
 **Backend Connection:** `modules/data_handling/` (loaders.py, exporters.py, transformations.py)
 
-**Key Prompts for Development:**
-
-> **Prompt 1:** "In `data_handling.py`, Tab1 "Load Data", add a feature to detect file encoding automatically. Modify: section "File Upload", function should call `loaders.detect_file_encoding()` and display detected encoding to user before loading."
-
-> **Prompt 2:** "In `data_handling.py`, Tab3 "Export Data", add batch export capability. When user selects multiple datasets from workspace, export all to separate files in a ZIP. Modify `exporters.py` to add `export_batch_to_zip(datasets_dict, output_path)` function."
-
 ---
 
 ### **2. pca.py** - Principal Component Analysis
@@ -200,111 +199,67 @@ if "my_dataset" in datasets:
 - Interactive 2D/3D score plots with hovering info
 - Loading plots and biplot visualization
 - Variance explained analysis with Scree plots
-- Hotelling's T² and Q (SPE) statistics
-- Contribution analysis for outlier diagnostics
-- Varimax/Promax rotation
-- Model diagnostics and summary statistics
+- T² and Q statistics with control limits
+- Varimax/Promax rotation options
+- Sample contribution analysis
 
-**Backend Connection:** `modules/pca/` (calculations.py, plots.py, diagnostics.py, statistics.py)
-
-**Key Prompts for Development:**
-
-> **Prompt 3:** "In `pca.py`, Tab2 "Model Diagnostics", add a new section "Outlier Detection" that displays: (1) T² vs Q scatter plot with control limits, (2) list of samples exceeding limits. Call `diagnostics.get_outliers_t2_q(scores, loadings, confidence=0.95)` and `plots.plot_t2_vs_q(t2_scores, q_scores)` from modules/pca/."
-
-> **Prompt 4:** "In `pca.py`, Tab3 "Loadings", add interactive feature: when user clicks on a variable name in a table, highlight that variable in the loading plot. Use Plotly's `customdata` and event handling to implement this."
+**Backend Connection:** `modules/pca/` (calculations.py, diagnostics.py, plots.py, statistics.py)
 
 ---
 
 ### **3. mlr_doe.py** - Multiple Linear Regression & Design of Experiments
-**Entry Point:** `Main Menu → MLR/DOE`
+**Entry Point:** `Main Menu → MLR & DoE`
 
 **Features:**
-- Candidate point generation for experimental design
 - Full factorial design generation (2^k, 3^k)
-- MLR model computation with/without interactions
-- Response surface 3D visualization
-- Model diagnostics (R², adjusted R², RMSE, VIF, lack-of-fit)
-- Prediction intervals and uncertainty quantification
-- Automatic model equation generation
+- MLR model fitting with interaction terms
+- Response surface visualization (3D plots)
+- VIF analysis for multicollinearity
+- Residual analysis and diagnostics
+- Optimal point prediction
 
-**Backend Connection:** `modules/mlr_doe/` (doe_generator.py, mlr_model.py, response_surface.py, diagnostics.py, candidate_points.py, confidence_intervals.py)
-
-**Key Prompts for Development:**
-
-> **Prompt 5:** "In `mlr_doe.py`, Tab1 "Candidate Points", Section "Point Optimization", add Pareto front visualization for multi-objective optimization. User selects 2-3 response variables → display 2D/3D Pareto front. Call `pareto_optimization.compute_pareto_front(response_surfaces, objectives)` and `plots.plot_pareto_front_3d(pareto_points)`."
-
-> **Prompt 6:** "In `mlr_doe.py`, Tab2 "Response Surface", modify Section "Model Equation" to include model validation statistics. Display: R², Adjusted R², PRESS, Lack-of-fit F-statistic. Call `diagnostics.get_model_validation_stats(residuals, n_samples, n_factors)` from modules/mlr_doe/diagnostics.py."
+**Backend Connection:** `modules/mlr_doe/` (doe_generator.py, mlr_model.py, diagnostics.py, response_surface.py)
 
 ---
 
-### **4. multi_doe_page.py** - Multi-Response Design of Experiments
-**Entry Point:** `Main Menu → Multi-DOE`
+### **4. multi_doe_page.py** - Multi-Response DoE
+**Entry Point:** `Main Menu → Multi-Response DoE`
 
 **Features:**
-- Define X variables once, multiple Y variables simultaneously
-- Automatic model fitting for each response variable
-- Unified coefficients comparison across all responses
-- Parallel response surface analysis (one surface per Y)
-- Multi-criteria decision making with Pareto front optimization
-- Model diagnostics for each response independently
-- Predictions across all models with confidence intervals
-- Experimental design matrix generation (standalone tool)
-- Export all model results and predictions
+- Multiple response optimization
+- Desirability functions
+- Pareto front visualization
+- Trade-off analysis between responses
 
-**Architecture:**
-- Fits multiple **independent MLR models** (one per Y variable)
-- All models use the **same X matrix and terms**
-- Comparison views show model coefficients side-by-side
-- Each response has its own diagnostic plots, surfaces, and predictions
-
-**Backend Modules:**
-- `modules/mlr_doe/` - Core MLR computation (reused for each Y)
-- `mlr_utils/model_computation_multidoe.py` - Multi-response fitting engine
-- `mlr_utils/model_diagnostics_multidoe.py` - Parallel diagnostics
-- `mlr_utils/surface_analysis_multidoe.py` - Multi-surface visualization
-- `mlr_utils/predictions_multidoe.py` - Unified predictions interface
-- `mlr_utils/pareto_ui_multidoe.py` - Multi-objective optimization
-- `mlr_utils/export_multidoe.py` - Batch export for all models
-
-**Tabs in Multi-DOE Module:**
-1. **Model Computation** - Select X/Y variables, fit all models, view coefficients
-2. **Model Diagnostics** - R², RMSE, VIF, residuals (switchable by response)
-3. **Surface Analysis** - 3D response surfaces (one per Y variable)
-4. **Predictions** - Predict multiple responses simultaneously
-5. **Multi-Criteria Decision Making** - Pareto front, desirability functions
-6. **Generate Matrix** - Standalone experimental design tool
-7. **Export** - Download models, predictions, and reports
+**Backend Connection:** `modules/mlr_doe/` (pareto_optimization.py, surface_analysis.py)
 
 ---
 
-### **5. transformations.py** - Data Preprocessing & Spectral Processing
+### **5. transformations.py** - Data Preprocessing
 **Entry Point:** `Main Menu → Transformations`
 
 **Features:**
-- Scaling methods (standardization, normalization, autoscaling)
-- Mean centering
-- Spectral preprocessing (SNV, MSC, Savitzky-Golay derivatives)
-- Missing value imputation
-- Transformation visualization (before/after)
-- Preset transformation pipelines
+- Centering (mean, median)
+- Scaling (standardization, normalization, autoscaling)
+- Spectral preprocessing (SNV, MSC, derivatives)
+- Missing data handling
+- Before/after visualization
 
-**Backend Connection:** `modules/transformations/` (scaling.py, spectral.py, missing_data.py, transform_plots.py)
+**Backend Connection:** `modules/transformations/` (scaling.py, centering.py, spectral.py, missing_data.py)
 
 ---
 
-### **6. pca_monitoring_page.py** - Quality Control & Statistical Process Monitoring
+### **6. pca_monitoring_page.py** - Quality Control & SPC
 **Entry Point:** `Main Menu → Quality Control`
 
 **Features:**
-- PCA monitoring model from historical data
-- T² and Q control chart visualization
-- Real-time sample monitoring against limits
-- Automatic pretreatment method detection
-- Contribution analysis for fault diagnostics
-- Control limit calculation (95%, 99% confidence)
+- PCA model training on reference data
+- T² and Q control charts
+- Real-time monitoring simulation
+- Fault detection and diagnosis
+- Contribution plots for out-of-control points
 
-**Backend Connection:** `modules/quality_control/` (pca_monitoring.py, control_charts.py, fault_detection.py, contributions.py)
-
+**Backend Connection:** `modules/quality_control/` (pca_monitoring.py, control_charts.py, fault_detection.py)
 
 ---
 
@@ -312,125 +267,83 @@ if "my_dataset" in datasets:
 **Entry Point:** `Main Menu → Bayesian Optimization`
 
 **Features:**
-- Gaussian Process modeling of response surface
-- Acquisition function optimization (EI, UCB, POI)
-- Automated optimal point suggestion
-- 1D/2D/nD visualization
-- Iterative refinement with new experimental data
-- Convergence diagnostics
+- Gaussian Process surrogate model
+- Acquisition function visualization (EI, UCB, POI)
+- Sequential experimental design
+- Convergence analysis
 
 **Backend Connection:** `modules/bayesian_optimization/` (gaussian_process.py, acquisition.py, optimization.py)
 
 ---
 
-### **8. classification_page.py** - Classification & Pattern Recognition
+### **8. classification_page.py** - Classification Methods
 **Entry Point:** `Main Menu → Classification`
 
 **Features:**
-- PLS-DA, SIMCA, LDA, KNN classifiers
-- Model training with cross-validation
-- Hyperparameter tuning
-- Performance metrics (accuracy, precision, recall, F1, ROC)
-- Confusion matrix visualization
-- Feature importance analysis
-- New sample classification
+- PLS-DA (Partial Least Squares Discriminant Analysis)
+- SIMCA (Soft Independent Modeling of Class Analogy)
+- LDA (Linear Discriminant Analysis)
+- KNN (K-Nearest Neighbors)
+- Confusion matrix and ROC curves
+- Cross-validation metrics
 
 **Backend Connection:** `modules/classification/` (models.py, training.py, evaluation.py, plots.py)
 
-**Key Prompts for Development:**
-
 ---
 
-### **9. calibration_page.py** - PLS Multivariate Calibration
-**Entry Point:** `Main Menu → PLS Calibration`
+### **9. calibration_page.py** - PLS Calibration
+**Entry Point:** `Main Menu → Calibration`
 
 **Features:**
-- PLS1/PLS2 model computation
-- Cross-validation with LV selection
-- Prediction intervals and uncertainty quantification
-- Model quality metrics (R², RMSEC, RMSECV, RMSEP)
-- Outlier detection (Mahalanobis distance, leverage)
-- Sample predictions with confidence bands
+- PLS1/PLS2 regression
+- Latent variable selection (cross-validation)
+- Prediction with uncertainty
+- Model diagnostics (R², RMSEC, RMSECV, RMSEP)
+- Leverage and influence analysis
 
 **Backend Connection:** `modules/calibration/` (pls_regression.py, calibration.py, predictions.py, diagnostics.py)
 
-**Key Prompts for Development:**
-
 ---
 
-### **10. univariate_page.py** - Univariate Statistical Analysis
-**Entry Point:** `Main Menu → Univariate Analysis`
+### **10. univariate_page.py** - Univariate Statistics
+**Entry Point:** `Main Menu → Univariate`
 
 **Features:**
-- Descriptive statistics (mean, median, std, skewness, kurtosis)
-- Hypothesis testing (t-test, ANOVA, Mann-Whitney, Kruskal-Wallis)
-- Distribution fitting and normality tests
-- Correlation matrices (Pearson, Spearman)
-- Univariate visualizations (histograms, Q-Q plots, box plots)
-- Outlier detection methods (IQR, Z-score, Mahalanobis)
+- Descriptive statistics
+- Hypothesis testing (t-test, ANOVA)
+- Distribution fitting
+- Correlation analysis
+- Outlier detection
 
-**Backend Connection:** `modules/univariate/` (descriptive_stats.py, hypothesis_tests.py, plots.py, outlier_detection.py)
+**Backend Connection:** `modules/univariate/` (descriptive_stats.py, hypothesis_tests.py, distributions.py)
 
 ---
 
-## 🔨 Common Utilities (Root-Level)
+## 🎨 Color Utilities
 
-### **color_utils.py** - Theme & Color Management
+### **color_utils.py** (Root-level)
+
+Provides unified color palettes for all visualizations:
+
 ```python
-from color_utils import get_theme_colors, apply_streamlit_theme
+from color_utils import get_color_palette, get_theme_colors
 
-# Get ChemometricSolutions color palette
-colors = get_theme_colors()
-primary_blue = colors['primary']
-accent_orange = colors['accent']
+# Get categorical color palette
+colors = get_color_palette('categorical', n_colors=10)
 
-# Apply theme to Streamlit app
-apply_streamlit_theme()
+# Get theme-specific colors (dark/light mode)
+theme = get_theme_colors(dark_mode=True)
 ```
 
-**Contains:**
-- ChemometricSolutions brand colors (primary blue #2E5293, accent orange #FF6B35)
-- Color palettes for plots (discrete, continuous, diverging)
-- Theme management functions
-- Accessibility-compliant color selections
+**Available Palettes:**
+- `categorical` - For discrete groups
+- `sequential` - For continuous values
+- `diverging` - For values around a midpoint
+- `qualitative` - High-contrast categorical
 
 ---
 
-### **workspace_utils.py** - Dataset Management
-```python
-from workspace_utils import get_current_dataset, activate_dataset_in_workspace
-
-# Access shared dataset
-data = get_current_dataset()
-
-# Switch dataset
-all_datasets = get_workspace_datasets()
-if "backup_data" in all_datasets:
-    activate_dataset_in_workspace("backup_data", all_datasets["backup_data"])
-```
-
-**Key Functions:**
-- `get_workspace_datasets()` - Dict of all workspace datasets
-- `get_current_dataset()` - Currently active dataset
-- `activate_dataset_in_workspace(name, dataframe)` - Switch active dataset
-- `remove_dataset_from_workspace(name)` - Remove dataset
-- `get_dataset_info(name)` - Dataset metadata
-
----
-
-### **config.py** - Global Configuration
-```python
-import config
-
-# Access app settings
-APP_NAME = config.APP_NAME
-THEME_COLOR = config.PRIMARY_COLOR
-MAX_UPLOAD_SIZE = config.MAX_FILE_SIZE_MB
-```
-
----
-
-## 🎨 Visualization Module
+## 🔌 Visualization Module
 
 All plotting is centralized in `modules/visualization/`:
 
@@ -471,12 +384,12 @@ Every module accesses via: get_current_dataset()
 ### Installation
 
 ```bash
-# Clone repository
-git clone https://github.com/FarininiChemometricSolutions/chemometricsolutions-demos.git
-cd chemometricsolutions-demos
+# Clone repository (OFFICIAL REPOSITORY)
+git clone https://github.com/EFarinini/chemometricsolutions-demo.git
+cd chemometricsolutions-demo
 
 # Create virtual environment
-python -m venv venv
+python3 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 
 # Install dependencies
@@ -491,40 +404,6 @@ streamlit run streamlit_app.py
 ```
 
 Open browser → `http://localhost:8501`
-
----
-
-## 📝 Development Quick Start
-
-### **Adding a New Feature to Existing Module**
-
-**Example: Add confidence interval bands to PCA predictions**
-
-1. **Backend calculation** → `modules/pca/predictions.py`
-   ```python
-   def predict_with_ci(pca_model, new_data, confidence=0.95):
-       # Implementation here
-       return scores, ci_lower, ci_upper
-   ```
-
-2. **Frontend UI** → `pca.py`
-   ```python
-   from modules.pca.predictions import predict_with_ci
-   
-   # In your Streamlit tab:
-   scores, ci_lower, ci_upper = predict_with_ci(model, new_data)
-   fig = plots.plot_scores_with_ci(scores, ci_lower, ci_upper)
-   st.plotly_chart(fig)
-   ```
-
-### **Creating a New Module (Advanced)**
-
-1. Create folder `modules/mymodule/`
-2. Implement calculation functions (no Streamlit!)
-3. Create root-level file `mymodule_page.py` with `show()` function
-4. Add import check to `homepage.py`
-5. Add button/link to homepage and sidebar navigation
-6. Update this README
 
 ---
 
@@ -614,7 +493,7 @@ MIT License - See LICENSE file for details
 Chemometrics & Analytical Chemistry Expert
 
 - Website: https://chemometricsolutions.com
-- GitHub: https://github.com/FarininiChemometricSolutions
+- GitHub: https://github.com/EFarinini
 - Email: chemometricsolutions@gmail.com
 
 ---
