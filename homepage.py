@@ -586,7 +586,7 @@ def main():
     st.sidebar.markdown("### 🔗 Links")
     st.sidebar.markdown("""
     - [ChemometricSolutions Website](https://chemometricsolutions.com)
-    - [GitHub Demos](https://github.com/FarininiChemometricSolutions/chemometricsolutions-demos)
+    - [GitHub Demos](https://github.com/EFarinini/chemometricsolutions-demo)
     - [CAT Software](https://gruppochemiometria.it/index.php/software)
     """)
     
