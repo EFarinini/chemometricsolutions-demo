@@ -48,7 +48,14 @@ from .config import (
     AVAILABLE_DISTANCE_METRICS,
     DEFAULT_N_COMPONENTS_SIMCA,
     PLOT_COLORS,
-    COOMANS_AXIS_LIMIT
+    COOMANS_AXIS_LIMIT,
+    # PCA Preprocessing constants
+    DEFAULT_N_COMPONENTS_PCA,
+    DEFAULT_PCA_MAX_ITER,
+    DEFAULT_PCA_TOLERANCE,
+    MIN_N_COMPONENTS_PCA,
+    MAX_N_COMPONENTS_PCA_RATIO,
+    PCA_VARIANCE_THRESHOLD
 )
 
 # Import preprocessing functions
@@ -58,8 +65,10 @@ from .preprocessing import (
     split_by_class,
     create_cv_folds,
     create_stratified_cv_folds,
+    create_stratified_cv_folds_with_groups,
     prepare_training_test,
-    balance_classes
+    balance_classes,
+    suggest_n_components_pca
 )
 
 # Import calculation functions
@@ -91,7 +100,17 @@ from .calculations import (
     predict_uneq_detailed,
 
     # NIPALS (for SIMCA/UNEQ)
-    nipals_pca
+    nipals_pca,
+
+    # PCA Preprocessing
+    fit_pca_preprocessor,
+    project_onto_pca,
+    fit_lda_with_pca,
+    predict_lda_with_pca,
+    fit_qda_with_pca,
+    predict_qda_with_pca,
+    fit_knn_with_pca,
+    predict_knn_with_pca
 )
 
 # Import diagnostic functions
@@ -108,7 +127,14 @@ from .diagnostics import (
     cross_validate_classifier,
     find_best_k,
     compare_models,
-    get_misclassified_samples
+    get_misclassified_samples,
+    # CV with PCA preprocessing
+    cross_validate_lda_with_pca,
+    cross_validate_qda_with_pca,
+    cross_validate_knn_with_pca,
+    # kNN Neighbor Analysis
+    analyze_sample_neighbors_by_k,
+    get_sample_metadata
 )
 
 # Import plotting functions
@@ -122,8 +148,17 @@ from .plots import (
     plot_decision_boundary_2d,
     plot_class_separation,
     plot_mahalanobis_distances,
+    plot_mahalanobis_distance_closest_category,
+    plot_mahalanobis_distance_category,
+    plot_mahalanobis_distance_object,
     plot_knn_neighbors,
-    plot_classification_report
+    plot_classification_report,
+    # PCA Preprocessing plots
+    plot_pca_variance_explained,
+    plot_pca_scores_2d,
+    plot_pca_loadings,
+    # kNN Neighbor Analysis plots
+    plot_sample_neighbors_by_k
 )
 
 # Define public API
@@ -136,6 +171,13 @@ __all__ = [
     'DEFAULT_N_COMPONENTS_SIMCA',
     'PLOT_COLORS',
     'COOMANS_AXIS_LIMIT',
+    # PCA Preprocessing config
+    'DEFAULT_N_COMPONENTS_PCA',
+    'DEFAULT_PCA_MAX_ITER',
+    'DEFAULT_PCA_TOLERANCE',
+    'MIN_N_COMPONENTS_PCA',
+    'MAX_N_COMPONENTS_PCA_RATIO',
+    'PCA_VARIANCE_THRESHOLD',
 
     # Preprocessing
     'validate_classification_data',
@@ -143,8 +185,10 @@ __all__ = [
     'split_by_class',
     'create_cv_folds',
     'create_stratified_cv_folds',
+    'create_stratified_cv_folds_with_groups',
     'prepare_training_test',
     'balance_classes',
+    'suggest_n_components_pca',
 
     # LDA
     'fit_lda',
@@ -175,6 +219,16 @@ __all__ = [
     # NIPALS
     'nipals_pca',
 
+    # PCA Preprocessing
+    'fit_pca_preprocessor',
+    'project_onto_pca',
+    'fit_lda_with_pca',
+    'predict_lda_with_pca',
+    'fit_qda_with_pca',
+    'predict_qda_with_pca',
+    'fit_knn_with_pca',
+    'predict_knn_with_pca',
+
     # Diagnostics
     'calculate_confusion_matrix',
     'calculate_classification_metrics',
@@ -189,6 +243,13 @@ __all__ = [
     'find_best_k',
     'compare_models',
     'get_misclassified_samples',
+    # CV with PCA preprocessing
+    'cross_validate_lda_with_pca',
+    'cross_validate_qda_with_pca',
+    'cross_validate_knn_with_pca',
+    # kNN Neighbor Analysis
+    'analyze_sample_neighbors_by_k',
+    'get_sample_metadata',
 
     # Plotting
     'plot_confusion_matrix',
@@ -200,8 +261,17 @@ __all__ = [
     'plot_decision_boundary_2d',
     'plot_class_separation',
     'plot_mahalanobis_distances',
+    'plot_mahalanobis_distance_closest_category',
+    'plot_mahalanobis_distance_category',
+    'plot_mahalanobis_distance_object',
     'plot_knn_neighbors',
     'plot_classification_report',
+    # PCA Preprocessing plots
+    'plot_pca_variance_explained',
+    'plot_pca_scores_2d',
+    'plot_pca_loadings',
+    # kNN Neighbor Analysis plots
+    'plot_sample_neighbors_by_k',
 ]
 
 # Package metadata

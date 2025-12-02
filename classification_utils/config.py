@@ -44,3 +44,11 @@ COOMANS_CLIP_VALUE = 4.0  # Values > 6 are clipped to 4-6 range
 # Validation thresholds
 MIN_SAMPLES_PER_CLASS = 3
 MAX_CLASSES = 10
+
+# PCA Preprocessing defaults
+DEFAULT_N_COMPONENTS_PCA = 5
+DEFAULT_PCA_MAX_ITER = 1000
+DEFAULT_PCA_TOLERANCE = 1e-7
+MIN_N_COMPONENTS_PCA = 1
+MAX_N_COMPONENTS_PCA_RATIO = 0.95  # Max 95% of n_features
+PCA_VARIANCE_THRESHOLD = 0.95  # Default 95% cumulative variance threshold

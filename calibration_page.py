@@ -604,8 +604,6 @@ def render_validation_tab():
                 st.markdown("""
                 **Variable Importance in Projection (VIP)**
                 - Ranks variables by importance to predictions
-                - VIP > 1.0 (green): Important → KEEP
-                - VIP < 0.5 (red): Not important → REMOVE
                 - Use for feature selection
                 """)
         except Exception as e:

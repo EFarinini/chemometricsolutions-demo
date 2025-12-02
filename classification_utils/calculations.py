@@ -20,7 +20,10 @@ from .config import (
     DEFAULT_K_MAX,
     DEFAULT_CONFIDENCE_LEVEL,
     NIPALS_MAX_ITER,
-    NIPALS_TOLERANCE
+    NIPALS_TOLERANCE,
+    DEFAULT_N_COMPONENTS_PCA,
+    DEFAULT_PCA_MAX_ITER,
+    DEFAULT_PCA_TOLERANCE
 )
 
 
@@ -643,6 +646,475 @@ def predict_knn_detailed(
         'k': k,
         'classes': classes
     }
+
+
+# ============================================================================
+# PCA Preprocessing for Classification
+# ============================================================================
+
+def fit_pca_preprocessor(
+    X: np.ndarray,
+    n_components: Optional[int] = None,
+    max_iter: int = DEFAULT_PCA_MAX_ITER,
+    tolerance: float = DEFAULT_PCA_TOLERANCE
+) -> Dict[str, any]:
+    """
+    Fit PCA preprocessor using NIPALS algorithm for classification preprocessing.
+
+    This function is used to perform dimensionality reduction BEFORE classification.
+    It is designed to be applied ONLY on training data, then used to project
+    evaluation/test data using project_onto_pca().
+
+    IMPORTANT: This PCA is for preprocessing purposes - it reduces dimensionality
+    while preserving variance. For class-specific PCA (SIMCA), use nipals_pca() instead.
+
+    Parameters
+    ----------
+    X : ndarray of shape (n_samples, n_features)
+        Training data (should already be centered/scaled if desired)
+    n_components : int, optional
+        Number of components to extract. If None, defaults to min(n_samples-1, n_features, 15)
+    max_iter : int, default=1000
+        Maximum iterations for NIPALS convergence
+    tolerance : float, default=1e-7
+        Convergence tolerance for NIPALS
+
+    Returns
+    -------
+    dict
+        PCA model containing:
+        - loadings : ndarray of shape (n_components, n_features)
+            PCA loading vectors (P matrix)
+        - explained_variance : ndarray of shape (n_components,)
+            Variance explained by each component
+        - explained_variance_ratio : ndarray of shape (n_components,)
+            Proportion of total variance explained by each component
+        - cumulative_variance_ratio : ndarray of shape (n_components,)
+            Cumulative proportion of variance explained
+        - mean_X : ndarray of shape (n_features,)
+            Mean of training data (for centering new data)
+        - n_components : int
+            Number of components extracted
+        - n_features : int
+            Number of original features
+        - n_samples : int
+            Number of training samples
+
+    Notes
+    -----
+    - Uses NIPALS algorithm for iterative extraction of components
+    - Handles missing values gracefully (if present, uses available data)
+    - Automatically limits n_components to sensible maximum
+
+    Examples
+    --------
+    >>> X_train = np.random.randn(100, 20)
+    >>> pca_model = fit_pca_preprocessor(X_train, n_components=5)
+    >>> print(f"Variance retained: {pca_model['cumulative_variance_ratio'][-1]*100:.1f}%")
+
+    See Also
+    --------
+    project_onto_pca : Project new data onto fitted PCA model
+    nipals_pca : NIPALS PCA for SIMCA/UNEQ class modeling
+    """
+    n_samples, n_features = X.shape
+
+    # Determine maximum sensible components
+    max_possible = min(n_samples - 1, n_features)
+
+    if n_components is None:
+        n_components = min(max_possible, DEFAULT_N_COMPONENTS_PCA)
+    else:
+        n_components = min(n_components, max_possible)
+
+    if n_components < 1:
+        raise ValueError(f"n_components must be >= 1, got {n_components}")
+
+    # Center the data (store mean for later projection)
+    mean_X = np.mean(X, axis=0)
+    X_centered = X - mean_X
+
+    # Initialize storage
+    scores = np.zeros((n_samples, n_components))
+    loadings = np.zeros((n_components, n_features))
+    explained_var = np.zeros(n_components)
+
+    X_residual = X_centered.copy()
+    total_var = np.sum(X_centered ** 2)
+
+    # NIPALS iterations for each component
+    for comp in range(n_components):
+        # Initialize with column having maximum variance
+        var_cols = np.sum(X_residual ** 2, axis=0)
+        if np.all(var_cols == 0):
+            # No more variance to extract
+            break
+        max_var_idx = np.argmax(var_cols)
+        t = X_residual[:, max_var_idx].reshape(-1, 1)
+
+        # NIPALS iterations
+        for iteration in range(max_iter):
+            # Calculate loading vector: p = X'*t / (t'*t)
+            t_norm = t.T @ t
+            if t_norm < 1e-15:
+                break
+            p = (X_residual.T @ t) / t_norm
+
+            # Normalize loading
+            p_norm = np.linalg.norm(p)
+            if p_norm < 1e-15:
+                break
+            p = p / p_norm
+
+            # Calculate score vector: t_new = X*p / (p'*p)
+            t_new = (X_residual @ p) / (p.T @ p)
+
+            # Check convergence
+            diff = np.abs(np.sum(t_new ** 2) - np.sum(t ** 2))
+            if diff < tolerance:
+                break
+
+            t = t_new
+
+        # Store results
+        scores[:, comp] = t.flatten()
+        loadings[comp, :] = p.flatten()
+
+        # Calculate explained variance
+        explained_var[comp] = np.sum(t ** 2)
+
+        # Deflate matrix
+        X_residual = X_residual - t @ p.T
+
+    # Calculate variance ratios
+    explained_var_ratio = explained_var / total_var if total_var > 0 else explained_var
+    cumulative_var_ratio = np.cumsum(explained_var_ratio)
+
+    return {
+        'loadings': loadings,
+        'scores': scores,
+        'explained_variance': explained_var,
+        'explained_variance_ratio': explained_var_ratio,
+        'cumulative_variance_ratio': cumulative_var_ratio,
+        'mean_X': mean_X,
+        'n_components': n_components,
+        'n_features': n_features,
+        'n_samples': n_samples,
+        'residuals': X_residual
+    }
+
+
+def project_onto_pca(
+    X: np.ndarray,
+    pca_model: Dict[str, any]
+) -> np.ndarray:
+    """
+    Project new data onto a fitted PCA model.
+
+    This function is used to transform new data (e.g., evaluation/test set)
+    using a PCA model that was fitted on training data only.
+
+    IMPORTANT: The new data is centered using the training mean stored in pca_model.
+    Do NOT re-center or re-fit PCA on the evaluation data - this ensures proper
+    cross-validation without data leakage.
+
+    Parameters
+    ----------
+    X : ndarray of shape (n_samples, n_features)
+        New data to project (should have same scaling as training data)
+    pca_model : dict
+        PCA model from fit_pca_preprocessor() containing:
+        - loadings : PCA loading vectors
+        - mean_X : training data mean for centering
+        - n_components : number of components
+
+    Returns
+    -------
+    T : ndarray of shape (n_samples, n_components)
+        Projected scores in PCA space
+
+    Raises
+    ------
+    ValueError
+        If X has different number of features than training data
+
+    Notes
+    -----
+    The projection formula is: T = (X - mean_X) @ P.T
+    where P is the loadings matrix.
+
+    Examples
+    --------
+    >>> # Fit on training data
+    >>> pca_model = fit_pca_preprocessor(X_train, n_components=5)
+    >>>
+    >>> # Project evaluation data (NEVER used in PCA fitting)
+    >>> X_eval_pca = project_onto_pca(X_eval, pca_model)
+    >>>
+    >>> # X_eval_pca can now be used for classification
+
+    See Also
+    --------
+    fit_pca_preprocessor : Fit PCA model on training data
+    """
+    n_samples, n_features = X.shape
+
+    # Validate dimensions
+    if n_features != pca_model['n_features']:
+        raise ValueError(
+            f"X has {n_features} features but PCA model was fitted with {pca_model['n_features']} features"
+        )
+
+    # Center using training mean
+    X_centered = X - pca_model['mean_X']
+
+    # Project onto loadings: T = X_centered @ P.T
+    # loadings is (n_components, n_features), so we need loadings.T
+    T = X_centered @ pca_model['loadings'].T
+
+    return T
+
+
+# ============================================================================
+# Wrapper Functions for Classifiers with PCA Preprocessing
+# ============================================================================
+
+def fit_lda_with_pca(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    n_components_pca: int,
+    **lda_kwargs
+) -> Dict[str, any]:
+    """
+    Fit LDA classifier with PCA preprocessing.
+
+    This function combines PCA dimensionality reduction with LDA classification
+    in a single pipeline. PCA is fitted on the training data only.
+
+    Parameters
+    ----------
+    X_train : ndarray of shape (n_samples, n_features)
+        Training data
+    y_train : ndarray of shape (n_samples,)
+        Training class labels
+    n_components_pca : int
+        Number of PCA components for preprocessing
+    **lda_kwargs : dict
+        Additional arguments passed to fit_lda (currently none)
+
+    Returns
+    -------
+    dict
+        Combined model containing:
+        - pca_model : dict from fit_pca_preprocessor
+        - lda_model : dict from fit_lda
+        - n_components_pca : int
+        - model_type : str ('lda_with_pca')
+
+    Notes
+    -----
+    - PCA is fitted ONLY on X_train
+    - X_train is projected onto PCA before LDA fitting
+    - For prediction, use predict_lda_with_pca()
+
+    Examples
+    --------
+    >>> model = fit_lda_with_pca(X_train, y_train, n_components_pca=5)
+    >>> y_pred = predict_lda_with_pca(X_test, model)
+    """
+    # Fit PCA on training data
+    pca_model = fit_pca_preprocessor(X_train, n_components=n_components_pca)
+
+    # Project training data onto PCA
+    X_train_pca = project_onto_pca(X_train, pca_model)
+
+    # Fit LDA on projected data
+    lda_model = fit_lda(X_train_pca, y_train)
+
+    return {
+        'pca_model': pca_model,
+        'lda_model': lda_model,
+        'n_components_pca': n_components_pca,
+        'model_type': 'lda_with_pca'
+    }
+
+
+def predict_lda_with_pca(
+    X_test: np.ndarray,
+    combined_model: Dict[str, any]
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Predict using LDA model with PCA preprocessing.
+
+    Parameters
+    ----------
+    X_test : ndarray of shape (n_samples, n_features)
+        Test data (original feature space)
+    combined_model : dict
+        Combined model from fit_lda_with_pca
+
+    Returns
+    -------
+    predictions : ndarray of shape (n_samples,)
+        Predicted class labels
+    distances : ndarray of shape (n_samples, n_classes)
+        Mahalanobis distances to each class
+    """
+    # Project test data onto PCA (using training PCA model)
+    X_test_pca = project_onto_pca(X_test, combined_model['pca_model'])
+
+    # Predict using LDA
+    predictions, distances = predict_lda(X_test_pca, combined_model['lda_model'])
+
+    return predictions, distances
+
+
+def fit_qda_with_pca(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    n_components_pca: int,
+    **qda_kwargs
+) -> Dict[str, any]:
+    """
+    Fit QDA classifier with PCA preprocessing.
+
+    Parameters
+    ----------
+    X_train : ndarray of shape (n_samples, n_features)
+        Training data
+    y_train : ndarray of shape (n_samples,)
+        Training class labels
+    n_components_pca : int
+        Number of PCA components for preprocessing
+    **qda_kwargs : dict
+        Additional arguments passed to fit_qda (currently none)
+
+    Returns
+    -------
+    dict
+        Combined model containing pca_model, qda_model, etc.
+    """
+    # Fit PCA on training data
+    pca_model = fit_pca_preprocessor(X_train, n_components=n_components_pca)
+
+    # Project training data onto PCA
+    X_train_pca = project_onto_pca(X_train, pca_model)
+
+    # Fit QDA on projected data
+    qda_model = fit_qda(X_train_pca, y_train)
+
+    return {
+        'pca_model': pca_model,
+        'qda_model': qda_model,
+        'n_components_pca': n_components_pca,
+        'model_type': 'qda_with_pca'
+    }
+
+
+def predict_qda_with_pca(
+    X_test: np.ndarray,
+    combined_model: Dict[str, any]
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Predict using QDA model with PCA preprocessing.
+
+    Parameters
+    ----------
+    X_test : ndarray
+        Test data (original feature space)
+    combined_model : dict
+        Combined model from fit_qda_with_pca
+
+    Returns
+    -------
+    predictions : ndarray
+        Predicted class labels
+    distances : ndarray
+        Mahalanobis distances to each class
+    """
+    # Project test data onto PCA
+    X_test_pca = project_onto_pca(X_test, combined_model['pca_model'])
+
+    # Predict using QDA
+    predictions, distances = predict_qda(X_test_pca, combined_model['qda_model'])
+
+    return predictions, distances
+
+
+def fit_knn_with_pca(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    n_components_pca: int,
+    metric: str = 'euclidean'
+) -> Dict[str, any]:
+    """
+    Fit kNN classifier with PCA preprocessing.
+
+    Parameters
+    ----------
+    X_train : ndarray of shape (n_samples, n_features)
+        Training data
+    y_train : ndarray of shape (n_samples,)
+        Training class labels
+    n_components_pca : int
+        Number of PCA components for preprocessing
+    metric : str, default='euclidean'
+        Distance metric for kNN
+
+    Returns
+    -------
+    dict
+        Combined model containing pca_model, knn_model, etc.
+    """
+    # Fit PCA on training data
+    pca_model = fit_pca_preprocessor(X_train, n_components=n_components_pca)
+
+    # Project training data onto PCA
+    X_train_pca = project_onto_pca(X_train, pca_model)
+
+    # Fit kNN on projected data
+    knn_model = fit_knn(X_train_pca, y_train, metric=metric)
+
+    return {
+        'pca_model': pca_model,
+        'knn_model': knn_model,
+        'n_components_pca': n_components_pca,
+        'metric': metric,
+        'model_type': 'knn_with_pca'
+    }
+
+
+def predict_knn_with_pca(
+    X_test: np.ndarray,
+    combined_model: Dict[str, any],
+    k: int = 3
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Predict using kNN model with PCA preprocessing.
+
+    Parameters
+    ----------
+    X_test : ndarray
+        Test data (original feature space)
+    combined_model : dict
+        Combined model from fit_knn_with_pca
+    k : int, default=3
+        Number of neighbors
+
+    Returns
+    -------
+    predictions : ndarray
+        Predicted class labels
+    distances : ndarray
+        Distance matrix to training samples
+    """
+    # Project test data onto PCA
+    X_test_pca = project_onto_pca(X_test, combined_model['pca_model'])
+
+    # Predict using kNN
+    predictions, distances = predict_knn(X_test_pca, combined_model['knn_model'], k=k)
+
+    return predictions, distances
 
 
 # ============================================================================

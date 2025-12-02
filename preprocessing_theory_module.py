@@ -350,8 +350,8 @@ class SimulatedSpectralDataGenerator:
             # Combine baseline and scaled peak
             spectrum = baseline + scaled_peak
 
-            # Add noise (σ=0.02)
-            noise = np.random.normal(0, 0.02, self.n_variables)
+            # Add noise (σ=0.005 - reduced for cleaner educational visualization)
+            noise = np.random.normal(0, 0.005, self.n_variables)
             spectrum += noise
 
             spectra[i, :] = spectrum

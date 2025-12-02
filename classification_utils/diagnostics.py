@@ -14,7 +14,7 @@ import pandas as pd
 from typing import Dict, Optional, Tuple, List, Callable
 from sklearn.metrics import confusion_matrix, accuracy_score, precision_recall_fscore_support
 from .config import DEFAULT_CV_FOLDS
-from .preprocessing import create_cv_folds, create_stratified_cv_folds
+from .preprocessing import create_cv_folds, create_stratified_cv_folds, create_stratified_cv_folds_with_groups
 from . import calculations
 
 
@@ -164,12 +164,25 @@ def calculate_classification_metrics(
             'support': int(support[i])
         }
 
+    # Flatten class_metrics into per-class dictionaries for easier UI access
+    sensitivity_per_class = {cls: class_metrics[cls]['sensitivity'] for cls in class_metrics}
+    specificity_per_class = {cls: class_metrics[cls]['specificity'] for cls in class_metrics}
+    precision_per_class = {cls: class_metrics[cls]['precision'] for cls in class_metrics}
+    recall_per_class = {cls: class_metrics[cls]['recall'] for cls in class_metrics}
+    f1_per_class = {cls: class_metrics[cls]['f1_score'] for cls in class_metrics}
+
     return {
         'accuracy': accuracy * 100,
         'avg_sensitivity': np.mean(sensitivity) * 100,
         'avg_specificity': np.mean(specificity) * 100,
         'avg_efficiency': np.mean(efficiency),
         'class_metrics': class_metrics,
+        # Add flattened versions for easier access in UI
+        'sensitivity_per_class': sensitivity_per_class,
+        'specificity_per_class': specificity_per_class,
+        'precision_per_class': precision_per_class,
+        'recall_per_class': recall_per_class,
+        'f1_per_class': f1_per_class,
         'confusion_matrix': cm,
         'classes': classes_in_test
     }
@@ -266,9 +279,11 @@ def cross_validate_lda(
         CV results including predictions and metrics
     """
     n_samples = len(y)
+    classes = np.unique(y)
     fold_indices = create_cv_folds(n_samples, n_folds, random_state)
 
     y_pred_cv = np.zeros_like(y)
+    cv_details = []
 
     for fold in range(n_folds):
         # Split data
@@ -276,7 +291,7 @@ def cross_validate_lda(
         train_mask = ~test_mask
 
         X_train, y_train = X[train_mask], y[train_mask]
-        X_test = X[test_mask]
+        X_test, y_test = X[test_mask], y[test_mask]
 
         # Fit and predict
         model = calculations.fit_lda(X_train, y_train)
@@ -284,17 +299,65 @@ def cross_validate_lda(
 
         y_pred_cv[test_mask] = y_pred
 
+        # Calculate fold metrics
+        fold_metrics = calculate_classification_metrics(y_test, y_pred, classes=classes)
+
+        # Calculate Mahalanobis distances for this fold as matrix
+        mahal_dist_matrix = np.zeros((len(X_test), len(classes)))
+        try:
+            for class_idx, cls in enumerate(classes):
+                class_mask = (y_train == cls)
+                X_train_class = X_train[class_mask]
+
+                if len(X_train_class) > 0:
+                    # Calculate covariance and inverse
+                    cov_matrix = np.cov(X_train_class.T)
+
+                    # Handle singular matrix
+                    try:
+                        inv_cov = np.linalg.inv(cov_matrix)
+                    except np.linalg.LinAlgError:
+                        inv_cov = np.linalg.pinv(cov_matrix)
+
+                    # Class centroid
+                    centroid = np.mean(X_train_class, axis=0)
+
+                    # Mahalanobis distance from test samples to this class centroid
+                    diff = X_test - centroid
+                    mahal_dist = np.sqrt(np.sum(diff @ inv_cov * diff, axis=1))
+                    mahal_dist_matrix[:, class_idx] = mahal_dist
+        except Exception:
+            # If calculation fails, matrix remains zeros
+            pass
+
+        cv_details.append({
+            'fold': fold,
+            'accuracy': fold_metrics['accuracy'],
+            'n_train': len(np.where(train_mask)[0]),
+            'n_test': len(np.where(test_mask)[0]),
+            'mahal_distances_matrix': mahal_dist_matrix,
+            'test_indices': np.where(test_mask)[0]
+        })
+
     # Calculate metrics
-    metrics = calculate_classification_metrics(y, y_pred_cv)
+    metrics = calculate_classification_metrics(y, y_pred_cv, classes=classes)
 
     # Add misclassified samples
     misclassified = np.where(y != y_pred_cv)[0]
+
+    # Reconstruct full Mahalanobis distance matrix from folds
+    all_mahal_distances = np.zeros((len(y), len(classes)))
+    for fold_detail in cv_details:
+        test_idx = fold_detail['test_indices']
+        all_mahal_distances[test_idx] = fold_detail['mahal_distances_matrix']
 
     return {
         'predictions': y_pred_cv,
         'metrics': metrics,
         'misclassified_indices': misclassified,
-        'n_misclassified': len(misclassified)
+        'n_misclassified': len(misclassified),
+        'mahalanobis_distances': all_mahal_distances,
+        'cv_details': cv_details
     }
 
 
@@ -324,30 +387,80 @@ def cross_validate_qda(
         CV results
     """
     n_samples = len(y)
+    classes = np.unique(y)
     fold_indices = create_cv_folds(n_samples, n_folds, random_state)
 
     y_pred_cv = np.zeros_like(y)
+    cv_details = []
 
     for fold in range(n_folds):
         test_mask = fold_indices == fold
         train_mask = ~test_mask
 
         X_train, y_train = X[train_mask], y[train_mask]
-        X_test = X[test_mask]
+        X_test, y_test = X[test_mask], y[test_mask]
 
         model = calculations.fit_qda(X_train, y_train)
         y_pred, _ = calculations.predict_qda(X_test, model)
 
         y_pred_cv[test_mask] = y_pred
 
-    metrics = calculate_classification_metrics(y, y_pred_cv)
+        # Calculate fold metrics
+        fold_metrics = calculate_classification_metrics(y_test, y_pred, classes=classes)
+
+        # Calculate Mahalanobis distances for this fold as matrix
+        mahal_dist_matrix = np.zeros((len(X_test), len(classes)))
+        try:
+            for class_idx, cls in enumerate(classes):
+                class_mask = (y_train == cls)
+                X_train_class = X_train[class_mask]
+
+                if len(X_train_class) > 0:
+                    # Calculate covariance and inverse
+                    cov_matrix = np.cov(X_train_class.T)
+
+                    # Handle singular matrix
+                    try:
+                        inv_cov = np.linalg.inv(cov_matrix)
+                    except np.linalg.LinAlgError:
+                        inv_cov = np.linalg.pinv(cov_matrix)
+
+                    # Class centroid
+                    centroid = np.mean(X_train_class, axis=0)
+
+                    # Mahalanobis distance from test samples to this class centroid
+                    diff = X_test - centroid
+                    mahal_dist = np.sqrt(np.sum(diff @ inv_cov * diff, axis=1))
+                    mahal_dist_matrix[:, class_idx] = mahal_dist
+        except Exception:
+            # If calculation fails, matrix remains zeros
+            pass
+
+        cv_details.append({
+            'fold': fold,
+            'accuracy': fold_metrics['accuracy'],
+            'n_train': len(np.where(train_mask)[0]),
+            'n_test': len(np.where(test_mask)[0]),
+            'mahal_distances_matrix': mahal_dist_matrix,
+            'test_indices': np.where(test_mask)[0]
+        })
+
+    metrics = calculate_classification_metrics(y, y_pred_cv, classes=classes)
     misclassified = np.where(y != y_pred_cv)[0]
+
+    # Reconstruct full Mahalanobis distance matrix from folds
+    all_mahal_distances = np.zeros((len(y), len(classes)))
+    for fold_detail in cv_details:
+        test_idx = fold_detail['test_indices']
+        all_mahal_distances[test_idx] = fold_detail['mahal_distances_matrix']
 
     return {
         'predictions': y_pred_cv,
         'metrics': metrics,
         'misclassified_indices': misclassified,
-        'n_misclassified': len(misclassified)
+        'n_misclassified': len(misclassified),
+        'mahalanobis_distances': all_mahal_distances,
+        'cv_details': cv_details
     }
 
 
@@ -413,6 +526,425 @@ def cross_validate_knn(
         }
 
     return results
+
+
+# ============================================================================
+# Cross-Validation with PCA Preprocessing
+# ============================================================================
+
+def cross_validate_lda_with_pca(
+    X: np.ndarray,
+    y: np.ndarray,
+    n_components_pca: int,
+    n_folds: int = DEFAULT_CV_FOLDS,
+    scaling_method: Optional[str] = None,
+    groups: Optional[np.ndarray] = None,
+    random_state: Optional[int] = None
+) -> Dict[str, any]:
+    """
+    Cross-validation for LDA with PCA preprocessing.
+
+    IMPORTANT: PCA is fitted independently for each fold ONLY on the training set
+    of that fold. The evaluation set is NEVER included in PCA fitting - it is only
+    projected onto the fitted PCA model. This ensures proper validation and prevents
+    data leakage through preprocessing.
+
+    Data Flow per Fold:
+    1. Split data into train/eval indices
+    2. FIT PCA on X_train ONLY -> pca_model
+    3. PROJECT X_train onto PCA -> X_train_pca
+    4. PROJECT X_eval onto PCA -> X_eval_pca (using same pca_model)
+    5. FIT LDA on (X_train_pca, y_train)
+    6. PREDICT on X_eval_pca
+    7. Store predictions and metrics
+
+    Parameters
+    ----------
+    X : ndarray of shape (n_samples, n_features)
+        Feature matrix (should already be scaled if desired)
+    y : ndarray of shape (n_samples,)
+        Class labels
+    n_components_pca : int
+        Number of PCA components for preprocessing
+    n_folds : int, default=5
+        Number of CV folds
+    scaling_method : str, optional
+        Scaling method (for documentation purposes - data should already be scaled)
+    groups : ndarray of shape (n_samples,), optional
+        Cancellation groups - samples with same group stay together in train/test
+    random_state : int, optional
+        Random seed for reproducibility
+
+    Returns
+    -------
+    dict
+        CV results containing:
+        - predictions : ndarray - out-of-fold predictions
+        - y_true : ndarray - true labels (original order)
+        - metrics : dict - classification metrics (accuracy, sensitivity, etc.)
+        - cv_details : list - per-fold metrics and info
+        - n_components_pca : int - components used
+        - folds_info : dict - fold split information
+
+    Examples
+    --------
+    >>> cv_results = cross_validate_lda_with_pca(
+    ...     X_scaled, y, n_components_pca=5, n_folds=5
+    ... )
+    >>> print(f"Accuracy: {cv_results['metrics']['accuracy']:.2f}%")
+    """
+    n_samples = len(y)
+    classes = np.unique(y)
+
+    # Get fold indices using groups if provided
+    folds_dict = create_stratified_cv_folds_with_groups(y, groups, n_folds, random_state)
+
+    # Storage for predictions
+    y_pred_cv = np.zeros_like(y)
+    cv_details = []
+
+    for fold in range(n_folds):
+        train_idx = folds_dict[fold]['train_indices']
+        eval_idx = folds_dict[fold]['test_indices']
+
+        X_train, y_train = X[train_idx], y[train_idx]
+        X_eval, y_eval = X[eval_idx], y[eval_idx]
+
+        # Fit PCA on training data ONLY
+        pca_model = calculations.fit_pca_preprocessor(X_train, n_components=n_components_pca)
+
+        # Project both train and eval onto PCA
+        X_train_pca = calculations.project_onto_pca(X_train, pca_model)
+        X_eval_pca = calculations.project_onto_pca(X_eval, pca_model)
+
+        # Fit LDA on projected training data
+        lda_model = calculations.fit_lda(X_train_pca, y_train)
+
+        # Predict on projected evaluation data
+        y_pred, _ = calculations.predict_lda(X_eval_pca, lda_model)
+
+        # Store predictions
+        y_pred_cv[eval_idx] = y_pred
+
+        # Calculate fold metrics
+        fold_metrics = calculate_classification_metrics(y_eval, y_pred, classes=classes)
+
+        # Calculate Mahalanobis distances for this fold as matrix
+        mahal_dist_matrix = np.zeros((len(X_eval), len(classes)))
+        try:
+            for class_idx, cls in enumerate(classes):
+                class_mask = (y_train == cls)
+                X_train_class_pca = X_train_pca[class_mask]
+
+                if len(X_train_class_pca) > 0:
+                    # Calculate covariance and inverse
+                    cov_matrix = np.cov(X_train_class_pca.T)
+
+                    # Handle singular matrix
+                    try:
+                        inv_cov = np.linalg.inv(cov_matrix)
+                    except np.linalg.LinAlgError:
+                        inv_cov = np.linalg.pinv(cov_matrix)
+
+                    # Class centroid
+                    centroid = np.mean(X_train_class_pca, axis=0)
+
+                    # Mahalanobis distance from eval samples to this class centroid
+                    diff = X_eval_pca - centroid
+                    mahal_dist = np.sqrt(np.sum(diff @ inv_cov * diff, axis=1))
+                    mahal_dist_matrix[:, class_idx] = mahal_dist
+        except Exception:
+            # If calculation fails, matrix remains zeros
+            pass
+
+        cv_details.append({
+            'fold': fold,
+            'accuracy': fold_metrics['accuracy'],
+            'n_train': len(train_idx),
+            'n_eval': len(eval_idx),
+            'variance_explained': float(pca_model['cumulative_variance_ratio'][-1]),
+            'mahal_distances_matrix': mahal_dist_matrix,
+            'eval_indices': eval_idx
+        })
+
+    # Calculate overall metrics
+    metrics = calculate_classification_metrics(y, y_pred_cv, classes=classes)
+    misclassified = np.where(y != y_pred_cv)[0]
+
+    # Reconstruct full Mahalanobis distance matrix from folds
+    all_mahal_distances = np.zeros((len(y), len(classes)))
+    for fold_detail in cv_details:
+        eval_idx = fold_detail['eval_indices']
+        all_mahal_distances[eval_idx] = fold_detail['mahal_distances_matrix']
+
+    return {
+        'predictions': y_pred_cv,
+        'y_true': y,
+        'metrics': metrics,
+        'cv_details': cv_details,
+        'n_components_pca': n_components_pca,
+        'misclassified_indices': misclassified,
+        'n_misclassified': len(misclassified),
+        'mahalanobis_distances': all_mahal_distances,
+        'folds_info': folds_dict,
+        'scaling_method': scaling_method
+    }
+
+
+def cross_validate_qda_with_pca(
+    X: np.ndarray,
+    y: np.ndarray,
+    n_components_pca: int,
+    n_folds: int = DEFAULT_CV_FOLDS,
+    scaling_method: Optional[str] = None,
+    groups: Optional[np.ndarray] = None,
+    random_state: Optional[int] = None
+) -> Dict[str, any]:
+    """
+    Cross-validation for QDA with PCA preprocessing.
+
+    Same logic as cross_validate_lda_with_pca but using QDA classifier.
+    PCA is fitted independently per fold on training data only.
+
+    Parameters
+    ----------
+    X : ndarray of shape (n_samples, n_features)
+        Feature matrix
+    y : ndarray of shape (n_samples,)
+        Class labels
+    n_components_pca : int
+        Number of PCA components
+    n_folds : int, default=5
+        Number of CV folds
+    scaling_method : str, optional
+        Scaling method (documentation)
+    groups : ndarray, optional
+        Cancellation groups
+    random_state : int, optional
+        Random seed
+
+    Returns
+    -------
+    dict
+        CV results (same format as cross_validate_lda_with_pca)
+    """
+    n_samples = len(y)
+    classes = np.unique(y)
+
+    folds_dict = create_stratified_cv_folds_with_groups(y, groups, n_folds, random_state)
+
+    y_pred_cv = np.zeros_like(y)
+    cv_details = []
+
+    for fold in range(n_folds):
+        train_idx = folds_dict[fold]['train_indices']
+        eval_idx = folds_dict[fold]['test_indices']
+
+        X_train, y_train = X[train_idx], y[train_idx]
+        X_eval, y_eval = X[eval_idx], y[eval_idx]
+
+        # Fit PCA on training data ONLY
+        pca_model = calculations.fit_pca_preprocessor(X_train, n_components=n_components_pca)
+
+        # Project both sets
+        X_train_pca = calculations.project_onto_pca(X_train, pca_model)
+        X_eval_pca = calculations.project_onto_pca(X_eval, pca_model)
+
+        # Fit QDA on projected training data
+        qda_model = calculations.fit_qda(X_train_pca, y_train)
+
+        # Predict on projected evaluation data
+        y_pred, _ = calculations.predict_qda(X_eval_pca, qda_model)
+
+        y_pred_cv[eval_idx] = y_pred
+
+        fold_metrics = calculate_classification_metrics(y_eval, y_pred, classes=classes)
+
+        # Calculate Mahalanobis distances for this fold as matrix
+        mahal_dist_matrix = np.zeros((len(X_eval), len(classes)))
+        try:
+            for class_idx, cls in enumerate(classes):
+                class_mask = (y_train == cls)
+                X_train_class_pca = X_train_pca[class_mask]
+
+                if len(X_train_class_pca) > 0:
+                    # Calculate covariance and inverse
+                    cov_matrix = np.cov(X_train_class_pca.T)
+
+                    # Handle singular matrix
+                    try:
+                        inv_cov = np.linalg.inv(cov_matrix)
+                    except np.linalg.LinAlgError:
+                        inv_cov = np.linalg.pinv(cov_matrix)
+
+                    # Class centroid
+                    centroid = np.mean(X_train_class_pca, axis=0)
+
+                    # Mahalanobis distance from eval samples to this class centroid
+                    diff = X_eval_pca - centroid
+                    mahal_dist = np.sqrt(np.sum(diff @ inv_cov * diff, axis=1))
+                    mahal_dist_matrix[:, class_idx] = mahal_dist
+        except Exception:
+            # If calculation fails, matrix remains zeros
+            pass
+
+        cv_details.append({
+            'fold': fold,
+            'accuracy': fold_metrics['accuracy'],
+            'n_train': len(train_idx),
+            'n_eval': len(eval_idx),
+            'variance_explained': float(pca_model['cumulative_variance_ratio'][-1]),
+            'mahal_distances_matrix': mahal_dist_matrix,
+            'eval_indices': eval_idx
+        })
+
+    metrics = calculate_classification_metrics(y, y_pred_cv, classes=classes)
+    misclassified = np.where(y != y_pred_cv)[0]
+
+    # Reconstruct full Mahalanobis distance matrix from folds
+    all_mahal_distances = np.zeros((len(y), len(classes)))
+    for fold_detail in cv_details:
+        eval_idx = fold_detail['eval_indices']
+        all_mahal_distances[eval_idx] = fold_detail['mahal_distances_matrix']
+
+    return {
+        'predictions': y_pred_cv,
+        'y_true': y,
+        'metrics': metrics,
+        'cv_details': cv_details,
+        'n_components_pca': n_components_pca,
+        'misclassified_indices': misclassified,
+        'n_misclassified': len(misclassified),
+        'mahalanobis_distances': all_mahal_distances,
+        'folds_info': folds_dict,
+        'scaling_method': scaling_method
+    }
+
+
+def cross_validate_knn_with_pca(
+    X: np.ndarray,
+    y: np.ndarray,
+    n_components_pca: int,
+    k_values: Optional[List[int]] = None,
+    metric: str = 'euclidean',
+    n_folds: int = DEFAULT_CV_FOLDS,
+    scaling_method: Optional[str] = None,
+    groups: Optional[np.ndarray] = None,
+    random_state: Optional[int] = None
+) -> Dict[str, any]:
+    """
+    Cross-validation for kNN with PCA preprocessing.
+
+    Tests multiple k values if provided. PCA is fitted independently per fold
+    on training data only.
+
+    Parameters
+    ----------
+    X : ndarray of shape (n_samples, n_features)
+        Feature matrix
+    y : ndarray of shape (n_samples,)
+        Class labels
+    n_components_pca : int
+        Number of PCA components
+    k_values : list of int, optional
+        List of k values to test. If None, uses [1, 3, 5, 7]
+    metric : str, default='euclidean'
+        Distance metric for kNN
+    n_folds : int, default=5
+        Number of CV folds
+    scaling_method : str, optional
+        Scaling method (documentation)
+    groups : ndarray, optional
+        Cancellation groups
+    random_state : int, optional
+        Random seed
+
+    Returns
+    -------
+    dict
+        CV results containing:
+        - predictions : ndarray - predictions using best k
+        - y_true : ndarray - true labels
+        - metrics : dict - metrics using best k
+        - cv_details : list - per-fold info
+        - n_components_pca : int
+        - best_k : int - optimal k value
+        - k_results : dict - results for each k value tested
+    """
+    if k_values is None:
+        k_values = [1, 3, 5, 7]
+
+    n_samples = len(y)
+    classes = np.unique(y)
+
+    folds_dict = create_stratified_cv_folds_with_groups(y, groups, n_folds, random_state)
+
+    # Storage for each k value
+    k_results = {}
+
+    for k in k_values:
+        y_pred_cv = np.zeros_like(y)
+        cv_details = []
+
+        for fold in range(n_folds):
+            train_idx = folds_dict[fold]['train_indices']
+            eval_idx = folds_dict[fold]['test_indices']
+
+            X_train, y_train = X[train_idx], y[train_idx]
+            X_eval, y_eval = X[eval_idx], y[eval_idx]
+
+            # Fit PCA on training data ONLY
+            pca_model = calculations.fit_pca_preprocessor(X_train, n_components=n_components_pca)
+
+            # Project both sets
+            X_train_pca = calculations.project_onto_pca(X_train, pca_model)
+            X_eval_pca = calculations.project_onto_pca(X_eval, pca_model)
+
+            # Fit kNN on projected training data
+            knn_model = calculations.fit_knn(X_train_pca, y_train, metric=metric)
+
+            # Predict on projected evaluation data
+            y_pred, _ = calculations.predict_knn(X_eval_pca, knn_model, k=k)
+
+            y_pred_cv[eval_idx] = y_pred
+
+            fold_metrics = calculate_classification_metrics(y_eval, y_pred, classes=classes)
+            cv_details.append({
+                'fold': fold,
+                'accuracy': fold_metrics['accuracy'],
+                'n_train': len(train_idx),
+                'n_eval': len(eval_idx),
+                'variance_explained': float(pca_model['cumulative_variance_ratio'][-1])
+            })
+
+        metrics = calculate_classification_metrics(y, y_pred_cv, classes=classes)
+        misclassified = np.where(y != y_pred_cv)[0]
+
+        k_results[k] = {
+            'predictions': y_pred_cv,
+            'metrics': metrics,
+            'cv_details': cv_details,
+            'misclassified_indices': misclassified,
+            'n_misclassified': len(misclassified)
+        }
+
+    # Find best k
+    best_k = max(k_results.keys(), key=lambda k: k_results[k]['metrics']['accuracy'])
+
+    return {
+        'predictions': k_results[best_k]['predictions'],
+        'y_true': y,
+        'metrics': k_results[best_k]['metrics'],
+        'cv_details': k_results[best_k]['cv_details'],
+        'n_components_pca': n_components_pca,
+        'misclassified_indices': k_results[best_k]['misclassified_indices'],
+        'n_misclassified': k_results[best_k]['n_misclassified'],
+        'best_k': best_k,
+        'k_results': k_results,
+        'metric': metric,
+        'folds_info': folds_dict,
+        'scaling_method': scaling_method
+    }
 
 
 def cross_validate_simca(
@@ -1082,4 +1614,163 @@ def cross_validate_classifier(
         'fold_assignments': fold_assignments,
         'classifier_type': classifier_type,
         'classifier_params': classifier_params
+    }
+
+
+# ============================================================================
+# kNN Neighbor Analysis Functions
+# ============================================================================
+
+def analyze_sample_neighbors_by_k(
+    sample: np.ndarray,
+    model: Dict,
+    k_max: int = 7,
+    class_labels: Optional[np.ndarray] = None
+) -> pd.DataFrame:
+    """
+    Analyze how class composition of k-nearest neighbors changes as k increases.
+
+    For a given sample, compute for each k value (1 to k_max):
+    - Number of neighbors from each class
+    - Predicted class at that k
+    - Confidence at that k
+
+    Parameters
+    ----------
+    sample : ndarray of shape (1, n_features) or (n_features,)
+        Single sample to analyze
+    model : dict
+        Trained kNN model from fit_knn()
+    k_max : int
+        Maximum k value to test (default 7)
+    class_labels : ndarray
+        Class labels (used for labeling). If None, uses model['classes']
+
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame with columns:
+        - k: k value (1 to k_max)
+        - For each class: '{class}_count' (number of neighbors from that class)
+        - 'predicted_class': Class predicted at this k
+        - 'confidence': k_votes / k (prediction confidence)
+        - 'votes_by_class': dict showing votes for each class
+
+    Examples
+    --------
+    >>> analysis = analyze_sample_neighbors_by_k(
+    ...     sample=X_test[0],
+    ...     model=knn_model,
+    ...     k_max=7,
+    ...     class_labels=['A', 'B']
+    ... )
+    >>> print(analysis)
+       k  A_count  B_count  predicted_class  confidence
+    0  1        1        0              A          1.0
+    1  2        1        1              A          0.5
+    2  3        2        1              A          0.67
+    3  4        2        2              A          0.5
+    ...
+    """
+    from scipy.spatial.distance import cdist
+
+    # Ensure sample is 2D
+    if sample.ndim == 1:
+        sample = sample.reshape(1, -1)
+
+    # Get class labels from model if not provided
+    if class_labels is None:
+        class_labels = model['classes']
+
+    n_classes = len(class_labels)
+
+    # Calculate distances to all training samples
+    distances = cdist(
+        sample,
+        model['X_train'],
+        metric=model.get('metric', 'euclidean')
+    )[0]  # Get first row (our sample)
+
+    # Sort by distance to find nearest neighbors
+    sorted_indices = np.argsort(distances)
+    sorted_labels = model['y_train'][sorted_indices]
+
+    # Analyze for each k
+    results = []
+
+    for k in range(1, k_max + 1):
+        # Get k nearest neighbors
+        k_neighbor_labels = sorted_labels[:k]
+
+        # Count votes for each class
+        votes_by_class = {}
+        predictions_by_class = np.zeros(n_classes)
+
+        for i, cls in enumerate(class_labels):
+            count = np.sum(k_neighbor_labels == cls)
+            votes_by_class[cls] = int(count)
+            predictions_by_class[i] = count
+
+        # Determine predicted class (max votes)
+        predicted_class = class_labels[np.argmax(predictions_by_class)]
+        confidence = np.max(predictions_by_class) / k
+
+        # Build row
+        row = {
+            'k': k,
+            'predicted_class': predicted_class,
+            'confidence': confidence,
+            'votes_by_class': votes_by_class
+        }
+
+        # Add count for each class
+        for cls in class_labels:
+            row[f'{cls}_count'] = votes_by_class[cls]
+
+        results.append(row)
+
+    df = pd.DataFrame(results)
+    return df
+
+
+def get_sample_metadata(
+    sample_idx: int,
+    X_data: np.ndarray,
+    y_data: np.ndarray,
+    feature_names: Optional[list] = None,
+    class_labels: Optional[np.ndarray] = None
+) -> Dict:
+    """
+    Get metadata about a specific sample (true class, feature values, etc.)
+
+    Parameters
+    ----------
+    sample_idx : int
+        Index of sample
+    X_data : ndarray
+        Feature matrix
+    y_data : ndarray
+        Class labels
+    feature_names : list
+        Feature names (optional)
+    class_labels : ndarray
+        Class label names
+
+    Returns
+    -------
+    dict
+        Sample metadata: true_class, index, feature_values, etc.
+    """
+    true_class = y_data[sample_idx]
+    sample = X_data[sample_idx]
+
+    if feature_names is None:
+        feature_names = [f"Feature {i+1}" for i in range(len(sample))]
+
+    return {
+        'index': sample_idx,
+        'true_class': true_class,
+        'sample': sample,
+        'feature_values': dict(zip(feature_names, sample)),
+        'sample_id': f"Sample {sample_idx}: True={true_class}"
     }

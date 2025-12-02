@@ -981,7 +981,7 @@ def show():
         st.divider()
 
         # ===== PLOT SECTION =====
-        st.markdown("### 📈 Row Profiles Plot")
+        st.markdown("### 📈 Row Profiles Plot - Parallel Coordinates")
 
         # Marker size slider - COMPACT
         col_m1, col_m2 = st.columns([1, 3])

@@ -16,7 +16,7 @@ def RnipalsPca_exact(
     X: Union[pd.DataFrame, np.ndarray],
     nPcs: int = 2,
     maxSteps: int = 5000,
-    threshold: float = 1e-6,
+    threshold: float = 1e-7,
     center: bool = True,
     scale: bool = False
 ) -> Dict[str, Any]:
@@ -42,7 +42,7 @@ def RnipalsPca_exact(
     maxSteps : int, optional
         Maximum NIPALS iterations per component. Default is 5000.
     threshold : float, optional
-        Convergence tolerance. Default is 1e-6.
+        Convergence tolerance. Default is 1e-7 (MATLAB-aligned).
     center : bool, optional
         Center data (subtract column means). Default is True.
     scale : bool, optional
@@ -54,7 +54,7 @@ def RnipalsPca_exact(
         Dictionary with PCA results:
         - 'scores' : pd.DataFrame - PC scores (n_samples × nPcs)
         - 'loadings' : pd.DataFrame - PC loadings (n_features × nPcs)
-        - 'eigenvalues' : np.ndarray - Eigenvalues (λ = t't / n, population variance)
+        - 'eigenvalues' : np.ndarray - Eigenvalues (λ = t't, MATLAB-aligned)
         - 'explained_variance' : np.ndarray - Alias for eigenvalues
         - 'explained_variance_ratio' : np.ndarray - Proportion of variance (0-1)
         - 'cumulative_variance' : np.ndarray - Cumulative proportion (0-1)
@@ -65,12 +65,12 @@ def RnipalsPca_exact(
 
     Notes
     -----
-    NIPALS PCA algorithm:
+    NIPALS PCA algorithm (MATLAB-aligned):
     1. Total variance = sum(var(X_original)) calculated BEFORE preprocessing
     2. Initialization = first column (column 0), normalized to ||t|| = 1
-    3. Eigenvalue λ = t't / n  [population variance, NIPALS standard]
-    4. Variance ratio = λ / sum(all eigenvalues)  [Standard PCA formula]
-    5. Sign convention: largest absolute loading is positive
+    3. Eigenvalue λ = t't  [MATLAB: varexp(t) = xmax'*xmax, NO division by n]
+    4. Variance ratio = λ / vartot, where vartot = sum(sum(X_preprocessed²))
+    5. Convergence threshold = 1e-7 (MATLAB: while diff>0.0000001)
     
     References
     ----------
@@ -135,7 +135,11 @@ def RnipalsPca_exact(
     
     # Work on a copy for deflation
     X_residual = Matrix.copy()
-    
+
+    # Store original preprocessed matrix for vartot calculation (MATLAB-style)
+    # This preserves the matrix BEFORE deflation loop
+    X_preprocessed_original = X_residual.copy()
+
     # === NIPALS ALGORITHM ===
     for comp in range(nPcs):
         iteration_count = 0
@@ -195,9 +199,10 @@ def RnipalsPca_exact(
         # Store results for this component
         scores_list.append(th)
         loadings_list.append(ph)
-        # CORRECTED: Eigenvalue = population variance (NIPALS standard)
-        # λ = t't / n (raw variance, NOT sample variance with n-1)
-        eigenvalues[comp] = np.dot(th, th) / n_samples
+        # Eigenvalue calculation (MATLAB-aligned NIPALS)
+        # MATLAB: varexp(t) = xmax'*xmax = ||score||²
+        # Do NOT divide by n_samples to match MATLAB formula exactly
+        eigenvalues[comp] = np.dot(th, th)
         n_iterations.append(iteration_count)
         
         # Deflation: Remove this component from residual matrix
@@ -210,25 +215,25 @@ def RnipalsPca_exact(
     scores_array = np.column_stack(scores_list)
     loadings_array = np.column_stack(loadings_list)
 
-    # === VARIANCE CALCULATION - R/NIPALS STANDARD ===
-    # NIPALS eigenvalues: λ_i = (t_i' * t_i) / n_samples
+    # === VARIANCE EXPLANATION RATIO (MATLAB-ALIGNED FORMULA) ===
+    # MATLAB implementation (nipals.m lines 36, 59-60):
+    #   vartot = sum(sum(X²))               [Frobenius norm squared]
+    #   varexp(t) = xmax'*xmax = ||score||²
+    #   vp(t) = varexp(t) / vartot * 100
     #
-    # Variance explained ratio = λ_i / Σ(λ_j)
-    # This matches R-CAT and is invariant to preprocessing mode
-    #
-    # NOTE: This is fundamental property of NIPALS:
-    # - Σ(λ_j) = total variance of preprocessed data
-    # - Doesn't matter if center-only or center+scale
-    # - The preprocessing affects how variance is interpreted,
-    #   not the ratio calculation itself
+    # Python aligns: Use same formula with explicit vartot calculation
 
-    # Sum of eigenvalues = total variance of preprocessed data
-    total_variance_preprocessed = np.sum(eigenvalues)
+    # Calculate vartot = Frobenius norm squared of preprocessed matrix
+    # vartot = sum(sum(X_preprocessed²))
+    # This matches MATLAB line 36: vartot=sum(sum(x.^2))
+    vartot = np.nansum(X_preprocessed_original ** 2)
 
-    if total_variance_preprocessed > 0:
-        # Standard PCA formula: λ_i / Σ(λ_j)
-        # Result is a ratio (0-1), multiply by 100 for percentage display
-        explained_variance_ratio = eigenvalues / total_variance_preprocessed
+    if vartot > 0:
+        # Variance ratio formula (MATLAB-aligned)
+        # explained_variance_ratio = eigenvalue / vartot
+        # NOTE: eigenvalues are now ||score||² (removed /n_samples division)
+        # So this ratio represents: (proportion of ||score||² explained by component)
+        explained_variance_ratio = eigenvalues / vartot
     else:
         explained_variance_ratio = np.zeros_like(eigenvalues)
 
@@ -537,6 +542,151 @@ def varimax_rotation(
         )
     
     return rotated_loadings, iteration
+
+
+def varimax_with_scores(
+    X: Union[pd.DataFrame, np.ndarray],
+    loadings: Union[pd.DataFrame, np.ndarray],
+    scores: Union[pd.DataFrame, np.ndarray],
+    max_iter: int = 100,
+    tol: float = 1e-6
+) -> Dict[str, Any]:
+    """
+    Varimax rotation with score recalculation (MATLAB-aligned).
+
+    Performs orthogonal rotation to maximize variance of squared loadings,
+    then recalculates scores and variance explained using the original data.
+    This matches MATLAB varimax.m behavior exactly.
+
+    Parameters
+    ----------
+    X : np.ndarray or pd.DataFrame
+        Original preprocessed data matrix (n_samples × n_features). REQUIRED.
+    loadings : np.ndarray or pd.DataFrame
+        PCA loadings (n_features × n_components) to rotate.
+    scores : np.ndarray or pd.DataFrame
+        PCA scores (n_samples × n_components) - used for verification only.
+    max_iter : int, optional
+        Maximum iterations. Default 100.
+    tol : float, optional
+        Tolerance (not used, kept for API consistency). Default 1e-6.
+
+    Returns
+    -------
+    dict with keys:
+        - 'loadings_rotated' : Rotated loadings, sorted by variance (descending)
+        - 'scores_rotated' : Rotated scores = X @ loadings_rotated
+        - 'variance_rotated' : Variance explained by each component after rotation (%)
+        - 'variance_cumulative' : Cumulative variance explained (%)
+        - 'rotation_indices' : Indices for sorting (for reproducibility)
+        - 'iterations' : Number of iterations until convergence
+        - 'vartot' : Total variance (Frobenius norm squared)
+
+    Notes
+    -----
+    **CRITICAL: Recalculation after rotation (MATLAB-aligned)**
+
+    MATLAB varimax.m:
+        1. Rotate loadings (Kaiser criterion)
+        2. prs = x * lot'            ← Recalculate scores
+        3. vp = sum(prs²)/vartot*100 ← Recalculate variance
+        4. [a,b]=sort(-vp)           ← Sort descending
+        5. rs = prs(:,b); rl = lot(b,:)
+
+    Python (this function):
+        1. Rotate loadings (Kaiser criterion)
+        2. scores_rotated = X @ rotated_loadings  ← Step 2
+        3. variance = sum(scores_rotated²)/vartot*100  ← Step 3
+        4. Sort descending  ← Step 4
+        5. Return sorted loadings and scores
+
+    References
+    ----------
+    .. [1] MATLAB varimax.m (Brereton, Chemometrics)
+    .. [2] Kaiser, H. F. (1958). The varimax criterion for analytic rotation
+    """
+    # === INPUT VALIDATION ===
+    # Convert to numpy arrays
+    if isinstance(X, pd.DataFrame):
+        X_array = X.values
+        X_index = X.index
+        X_columns = X.columns
+    else:
+        X_array = np.asarray(X)
+        X_index = None
+        X_columns = None
+
+    if isinstance(loadings, pd.DataFrame):
+        loadings_array = loadings.values
+        loadings_index = loadings.index
+        loadings_columns = loadings.columns
+    else:
+        loadings_array = np.asarray(loadings)
+        loadings_index = None
+        loadings_columns = None
+
+    if isinstance(scores, pd.DataFrame):
+        scores_index = scores.index
+        scores_columns = scores.columns
+    else:
+        scores_index = None
+        scores_columns = None
+
+    n_samples, n_features = X_array.shape
+    n_vars, n_components = loadings_array.shape
+
+    # === STEP 1: Rotate loadings (use existing function) ===
+    rotated_loadings_array, iterations = varimax_rotation(
+        loadings_array, max_iter=max_iter, tol=tol
+    )
+
+    # === STEP 2: Recalculate scores (MATLAB: prs = x * lot') ===
+    # scores_rotated = X @ rotated_loadings
+    scores_rotated = X_array @ rotated_loadings_array
+
+    # === STEP 3: Recalculate variance explained (MATLAB: vp = sum(prs²)/vartot*100) ===
+    # vartot = sum(sum(X²)) - Frobenius norm squared
+    vartot = np.nansum(X_array ** 2)
+
+    # variance_rotated = sum(scores_rotated²) / vartot * 100 (for each component)
+    variance_rotated_pct = np.sum(scores_rotated ** 2, axis=0) / vartot * 100
+
+    # === STEP 4: Sort by variance descending (MATLAB: [a,b]=sort(-vp)) ===
+    sort_indices = np.argsort(-variance_rotated_pct)  # Negative for descending
+
+    # Apply sorting
+    loadings_rotated_sorted = rotated_loadings_array[:, sort_indices]
+    scores_rotated_sorted = scores_rotated[:, sort_indices]
+    variance_rotated_sorted = variance_rotated_pct[sort_indices]
+    variance_cumulative = np.cumsum(variance_rotated_sorted)
+
+    # === PREPARE OUTPUT ===
+    # Convert back to DataFrame if input was DataFrame
+    if isinstance(loadings, pd.DataFrame):
+        rc_names = [f'RC{i+1}' for i in range(n_components)]  # Rotated Components
+        loadings_rotated_sorted = pd.DataFrame(
+            loadings_rotated_sorted,
+            index=loadings_index,
+            columns=rc_names
+        )
+
+    if isinstance(scores, pd.DataFrame):
+        rc_names = [f'RC{i+1}' for i in range(n_components)]
+        scores_rotated_sorted = pd.DataFrame(
+            scores_rotated_sorted,
+            index=scores_index if scores_index is not None else X_index,
+            columns=rc_names
+        )
+
+    return {
+        'loadings_rotated': loadings_rotated_sorted,
+        'scores_rotated': scores_rotated_sorted,
+        'variance_rotated': variance_rotated_sorted,
+        'variance_cumulative': variance_cumulative,
+        'rotation_indices': sort_indices,
+        'iterations': iterations,
+        'vartot': vartot
+    }
 
 
 # === UTILITY FUNCTIONS ===

@@ -294,7 +294,7 @@ def show_tab3_test_set_validation():
             st.metric("Bias (Test)", f"{results['metrics']['Bias']:.3f}")
 
         # ===== PREPROCESSING VERIFICATION =====
-        with st.expander("🔍 Preprocessing Verification (MATLAB Compatible)"):
+        with st.expander("🔍 Preprocessing Verification"):
             preprocessing_method = st.session_state.get('preprocessing', 'unknown')
 
             # Get scaler info from model
@@ -330,7 +330,7 @@ def show_tab3_test_set_validation():
                     st.write(f"Preprocessing applied automatically inside pls_predict()")
 
                 st.divider()
-                st.info("✅ Test data preprocessed using **SAME** parameters as training (MATLAB compatible)")
+                st.info("✅ Test data preprocessed using **SAME** parameters as training")
             else:
                 st.warning("No preprocessing info available in model")
 

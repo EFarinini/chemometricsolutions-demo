@@ -12,7 +12,7 @@ Functions for preparing data for classification analysis including:
 import numpy as np
 import pandas as pd
 from typing import Tuple, Dict, Optional, Union
-from .config import MIN_SAMPLES_PER_CLASS, MAX_CLASSES
+from .config import MIN_SAMPLES_PER_CLASS, MAX_CLASSES, PCA_VARIANCE_THRESHOLD
 
 
 def validate_classification_data(
@@ -319,6 +319,166 @@ def create_stratified_cv_folds(
     return fold_indices_original
 
 
+def create_stratified_cv_folds_with_groups(
+    y: Union[pd.Series, np.ndarray],
+    groups: Optional[Union[pd.Series, np.ndarray]] = None,
+    n_folds: int = 5,
+    random_state: Optional[int] = None
+) -> Dict[int, Dict[str, np.ndarray]]:
+    """
+    Create stratified K-fold indices with optional cancellation groups support.
+
+    This function creates CV fold indices while ensuring that samples from the
+    same group (cancellation group) NEVER appear in both training and test sets
+    within the same fold. This is critical for proper validation when samples
+    are related (e.g., replicates, time series from same subject).
+
+    IMPORTANT: When using PCA preprocessing with CV, PCA must be fitted ONLY on
+    the training set of each fold. The evaluation set is projected onto this
+    PCA model without being used in fitting. This function provides the indices
+    needed to implement this correctly.
+
+    Parameters
+    ----------
+    y : Series or ndarray of shape (n_samples,)
+        Class labels for stratification
+    groups : Series or ndarray of shape (n_samples,), optional
+        Group/sample identifiers for cancellation. Samples with the same group
+        value will always stay together (never split between train and test).
+        If None, behaves like standard stratified K-fold.
+    n_folds : int, default=5
+        Number of cross-validation folds
+    random_state : int, optional
+        Random seed for reproducibility
+
+    Returns
+    -------
+    dict
+        Nested dictionary with fold information:
+        {
+            fold_idx: {
+                'train_indices': ndarray - indices for training set
+                'test_indices': ndarray - indices for test/evaluation set
+                'train_groups': ndarray - group values in training (if groups provided)
+                'test_groups': ndarray - group values in test (if groups provided)
+            }
+        }
+
+    Notes
+    -----
+    - With groups: Uses GroupKFold-like logic with stratification
+    - Without groups: Falls back to standard stratified K-fold
+    - Class proportions are maintained per fold when possible
+    - All groups are represented across the full CV procedure
+
+    Examples
+    --------
+    >>> y = np.array([0, 0, 0, 1, 1, 1, 0, 0, 1, 1])
+    >>> groups = np.array(['A', 'A', 'B', 'B', 'C', 'C', 'D', 'D', 'E', 'E'])
+    >>> folds = create_stratified_cv_folds_with_groups(y, groups, n_folds=5)
+    >>> # Samples in same group (e.g., 'A') will always be in same split
+
+    >>> # Without groups - standard stratified K-fold
+    >>> folds = create_stratified_cv_folds_with_groups(y, groups=None, n_folds=5)
+
+    See Also
+    --------
+    create_stratified_cv_folds : Standard stratified K-fold (returns array)
+    """
+    if random_state is not None:
+        np.random.seed(random_state)
+
+    # Convert to arrays if needed
+    if isinstance(y, pd.Series):
+        y_arr = y.values
+    else:
+        y_arr = np.array(y)
+
+    n_samples = len(y_arr)
+    unique_classes = np.unique(y_arr)
+
+    # If no groups provided, fall back to standard stratified K-fold
+    if groups is None:
+        fold_indices = create_stratified_cv_folds(y_arr, n_folds, random_state)
+        folds_dict = {}
+        for fold in range(n_folds):
+            test_mask = fold_indices == fold
+            train_mask = ~test_mask
+            folds_dict[fold] = {
+                'train_indices': np.where(train_mask)[0],
+                'test_indices': np.where(test_mask)[0],
+                'train_groups': None,
+                'test_groups': None
+            }
+        return folds_dict
+
+    # Convert groups to array
+    if isinstance(groups, pd.Series):
+        groups_arr = groups.values
+    else:
+        groups_arr = np.array(groups)
+
+    unique_groups = np.unique(groups_arr)
+    n_groups = len(unique_groups)
+
+    if n_groups < n_folds:
+        raise ValueError(
+            f"Number of groups ({n_groups}) must be >= n_folds ({n_folds}). "
+            f"Consider using fewer folds or not using groups."
+        )
+
+    # Strategy: Assign entire groups to folds while trying to maintain stratification
+    # First, determine majority class for each group
+    group_class_info = {}
+    for grp in unique_groups:
+        grp_mask = groups_arr == grp
+        grp_classes, grp_counts = np.unique(y_arr[grp_mask], return_counts=True)
+        majority_class = grp_classes[np.argmax(grp_counts)]
+        group_class_info[grp] = {
+            'majority_class': majority_class,
+            'n_samples': grp_mask.sum(),
+            'indices': np.where(grp_mask)[0]
+        }
+
+    # Group groups by majority class for stratified assignment
+    class_groups = {cls: [] for cls in unique_classes}
+    for grp, info in group_class_info.items():
+        class_groups[info['majority_class']].append(grp)
+
+    # Shuffle groups within each class
+    for cls in unique_classes:
+        np.random.shuffle(class_groups[cls])
+
+    # Assign groups to folds in round-robin fashion within each class
+    group_to_fold = {}
+    for cls in unique_classes:
+        for i, grp in enumerate(class_groups[cls]):
+            group_to_fold[grp] = i % n_folds
+
+    # Build fold indices
+    folds_dict = {}
+    for fold in range(n_folds):
+        test_groups = [grp for grp, f in group_to_fold.items() if f == fold]
+        train_groups = [grp for grp, f in group_to_fold.items() if f != fold]
+
+        test_indices = []
+        for grp in test_groups:
+            test_indices.extend(group_class_info[grp]['indices'].tolist())
+
+        train_indices = []
+        for grp in train_groups:
+            train_indices.extend(group_class_info[grp]['indices'].tolist())
+
+        folds_dict[fold] = {
+            'train_indices': np.array(train_indices),
+            'test_indices': np.array(test_indices),
+            'train_groups': np.array(train_groups),
+            'test_groups': np.array(test_groups)
+        }
+
+    return folds_dict
+
+
 def prepare_training_test(
     X_train: Union[pd.DataFrame, np.ndarray],
     y_train: Union[pd.Series, np.ndarray],
@@ -479,3 +639,121 @@ def balance_classes(
     y_balanced = y_balanced[shuffle_idx]
 
     return X_balanced, y_balanced
+
+
+def suggest_n_components_pca(
+    X: Union[pd.DataFrame, np.ndarray],
+    explained_variance_ratio: Optional[np.ndarray] = None,
+    cumsum_threshold: float = PCA_VARIANCE_THRESHOLD,
+    max_components: Optional[int] = None
+) -> Dict[str, any]:
+    """
+    Suggest optimal number of PCA components based on cumulative variance explained.
+
+    This function helps determine how many PCA components to use for preprocessing.
+    It analyzes variance distribution and recommends a number of components that
+    retains a specified proportion of total variance.
+
+    Parameters
+    ----------
+    X : DataFrame or ndarray of shape (n_samples, n_features)
+        Training data (used to determine max sensible components if variance not provided)
+    explained_variance_ratio : ndarray of shape (n_components,), optional
+        Variance explained by each component (from a fitted PCA model).
+        If None, a temporary PCA will be fitted to calculate this.
+    cumsum_threshold : float, default=0.95
+        Cumulative variance threshold (0 to 1). Components are selected until
+        this proportion of total variance is explained.
+    max_components : int, optional
+        Hard limit on maximum components to consider.
+
+    Returns
+    -------
+    dict
+        Dictionary containing:
+        - recommended_n_components : int
+            Number of components at cumsum_threshold
+        - variance_explained : float
+            Actual cumulative variance at recommended components (0 to 1)
+        - max_possible : int
+            Maximum sensible number of components based on data shape
+        - suggested_range : tuple (min, max)
+            Recommended range for user slider
+        - all_variances : list
+            Cumulative variance at each component count
+
+    Notes
+    -----
+    - This is the MOST COMMON approach in chemometrics
+    - Default threshold of 95% is industry standard
+    - For small datasets, consider lower threshold (90%) to avoid overfitting
+
+    Examples
+    --------
+    >>> from classification_utils import fit_pca_preprocessor
+    >>> pca_model = fit_pca_preprocessor(X_train, n_components=20)
+    >>> suggestion = suggest_n_components_pca(
+    ...     X_train,
+    ...     explained_variance_ratio=pca_model['explained_variance_ratio'],
+    ...     cumsum_threshold=0.95
+    ... )
+    >>> print(f"Recommended: {suggestion['recommended_n_components']} components")
+    >>> print(f"Variance retained: {suggestion['variance_explained']*100:.1f}%")
+
+    See Also
+    --------
+    fit_pca_preprocessor : Fit PCA model to get explained_variance_ratio
+    """
+    # Convert to array if needed
+    if isinstance(X, pd.DataFrame):
+        X_arr = X.values
+    else:
+        X_arr = np.array(X)
+
+    n_samples, n_features = X_arr.shape
+    max_sensible = min(n_samples - 1, n_features)
+
+    if max_components is not None:
+        max_sensible = min(max_components, max_sensible)
+
+    # If variance not provided, fit temporary PCA to get it
+    if explained_variance_ratio is None:
+        # Import here to avoid circular import
+        from .calculations import fit_pca_preprocessor
+
+        n_comp_temp = min(max_sensible, 50)  # Fit enough components
+        pca_temp = fit_pca_preprocessor(X_arr, n_components=n_comp_temp)
+        explained_variance_ratio = pca_temp['explained_variance_ratio']
+
+    # Calculate cumulative sum
+    cumsum = np.cumsum(explained_variance_ratio)
+
+    # Find first component where cumsum >= threshold
+    idx_threshold = np.where(cumsum >= cumsum_threshold)[0]
+    if len(idx_threshold) > 0:
+        recommended_n = idx_threshold[0] + 1  # +1 because indexing starts at 0
+    else:
+        recommended_n = len(explained_variance_ratio)  # All components
+
+    # Apply hard caps
+    recommended_n = min(recommended_n, max_sensible)
+    recommended_n = max(recommended_n, 1)  # At least 1 component
+
+    # Calculate suggested range for user slider
+    min_suggested = max(1, recommended_n - 3)
+    max_suggested = min(max_sensible, recommended_n + 5, 15)
+
+    # Get variance at recommended
+    if recommended_n <= len(cumsum):
+        variance_at_recommended = float(cumsum[recommended_n - 1])
+    else:
+        variance_at_recommended = float(cumsum[-1])
+
+    return {
+        'recommended_n_components': recommended_n,
+        'variance_explained': variance_at_recommended,
+        'max_possible': max_sensible,
+        'suggested_range': (min_suggested, max_suggested),
+        'all_variances': cumsum.tolist(),
+        'cumsum_threshold': cumsum_threshold
+    }

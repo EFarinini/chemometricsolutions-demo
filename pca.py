@@ -17,7 +17,7 @@ from pathlib import Path
 import io
 
 # Import PCA calculation functions (REQUIRED - from pca_utils)
-from pca_utils.pca_calculations import compute_pca, varimax_rotation
+from pca_utils.pca_calculations import compute_pca, varimax_rotation, varimax_with_scores
 
 # Try to import plotting and statistics modules (optional - from pca_utils)
 try:
@@ -148,8 +148,8 @@ def show():
         _show_score_plots_tab()
     
     # TAB 5: Interpretation
-    with tabs[4]:
-        _show_interpretation_tab()
+    #with tabs[4]:
+    #    _show_interpretation_tab()
     
     # TAB 6: Advanced Diagnostics
     with tabs[5]:
@@ -181,7 +181,7 @@ def _show_model_computation_tab(data: pd.DataFrame):
     - Apply Varimax rotation (optional)
     """
     st.markdown("## 🔧 PCA Model Computation")
-    st.markdown("*Equivalent to R PCA_model_PCA.r*")
+   # st.markdown("*Equivalent to R PCA_model_PCA.r*")
 
     # === SECTION 0: SELECT DATASET FROM WORKSPACE ===
     from workspace_utils import display_workspace_dataset_selector
@@ -395,45 +395,6 @@ def _show_model_computation_tab(data: pd.DataFrame):
                 n_components = n_components_display
 
                 st.success(f"✅ PCA computation completed in {elapsed:.2f} seconds!")
-
-                # DEBUG: Display variance calculation details
-                with st.expander("🔍 DEBUG: R-CAT Variance Calculation Details"):
-                    st.markdown("#### R-CAT Formula: R² = λ / (total_var × (n-1))")
-
-                    col_d1, col_d2, col_d3 = st.columns(3)
-                    with col_d1:
-                        st.metric("Total Variance (original)", f"{pca_dict['total_variance']:.4f}")
-                    with col_d2:
-                        st.metric("n_samples", pca_dict['n_samples'])
-                    with col_d3:
-                        total_ss = pca_dict['total_variance'] * (pca_dict['n_samples'] - 1)
-                        st.metric("total_ss", f"{total_ss:.4f}")
-
-                    st.markdown("#### Eigenvalues (λ = t't):")
-                    st.write(pca_dict['eigenvalues'])
-
-                    st.markdown("#### Variance Ratio Calculation:")
-                    debug_df = pd.DataFrame({
-                        'Component': [f'PC{i+1}' for i in range(n_components)],
-                        'Eigenvalue (λ)': pca_dict['eigenvalues'][:n_components],
-                        'total_ss': [total_ss] * n_components,
-                        'Ratio (λ/total_ss)': pca_dict['explained_variance_ratio'][:n_components],
-                        'Ratio %': pca_dict['explained_variance_ratio'][:n_components] * 100,
-                        'Cumulative %': pca_dict['cumulative_variance'][:n_components] * 100
-                    })
-                    st.dataframe(debug_df.style.format({
-                        'Eigenvalue (λ)': '{:.4f}',
-                        'total_ss': '{:.4f}',
-                        'Ratio (λ/total_ss)': '{:.6f}',
-                        'Ratio %': '{:.2f}',
-                        'Cumulative %': '{:.2f}'
-                    }), use_container_width=True, hide_index=True)
-
-                    final_cumul = pca_dict['cumulative_variance'][-1] * 100
-                    if final_cumul < 95:
-                        st.warning(f"⚠️ Cumulative variance is {final_cumul:.2f}% with {n_components} components")
-                    else:
-                        st.success(f"✅ Cumulative variance: {final_cumul:.2f}%")
 
                 # Display results summary
                 st.markdown("### 📊 PCA Results Summary")
@@ -920,42 +881,62 @@ def _show_model_computation_tab(data: pd.DataFrame):
             if st.button("🔄 Apply Varimax Rotation", type="secondary"):
                 try:
                     with st.spinner("Applying Varimax rotation..."):
-                        # Extract loadings for rotation
+                        # Extract loadings and scores for rotation
                         loadings_subset = loadings.iloc[:, :n_factors]
-                        
-                        # Apply rotation
-                        rotated_loadings, iterations = varimax_rotation(loadings_subset)
-                        
-                        # Calculate rotated scores
-                        X_data = pca_results['original_data']
+                        scores_subset = pca_results['scores'].iloc[:, :n_factors]
+
+                        # Prepare preprocessed data (CRITICAL!)
+                        X_data = pca_results['original_data'].copy()
                         if pca_results['centering']:
                             X_data = X_data - pca_results['means']
                         if pca_results['scaling']:
                             X_data = X_data / pca_results['stds']
-                        
-                        rotated_scores = X_data @ rotated_loadings
-                        
+
+                        # Apply rotation with variance recalculation (MATLAB-aligned)
+                        varimax_result = varimax_with_scores(
+                            X=X_data,
+                            loadings=loadings_subset,
+                            scores=scores_subset
+                        )
+
+                        # Extract results
+                        rotated_loadings = varimax_result['loadings_rotated']
+                        rotated_scores = varimax_result['scores_rotated']
+                        variance_rotated = varimax_result['variance_rotated']  # NEW!
+                        variance_cumulative = varimax_result['variance_cumulative']  # NEW!
+                        iterations = varimax_result['iterations']
+
                         # Rename to Factor instead of PC
                         factor_names = [f'Factor{i+1}' for i in range(n_factors)]
                         rotated_loadings.columns = factor_names
                         rotated_scores.columns = factor_names
-                        
-                        # Update session state
+
+                        # CRITICAL: Update eigenvalues and variance ratios from Varimax results
+                        # These are DIFFERENT from original PCA after rotation!
+                        eigenvalues_rotated = variance_rotated * varimax_result['vartot'] / 100
+
+                        # Update session state with COMPLETE Varimax results
                         st.session_state['pca_results'].update({
                             'method': 'Varimax Rotation',
                             'scores': rotated_scores,
                             'loadings': rotated_loadings,
+                            'eigenvalues': eigenvalues_rotated,  # NEW!
+                            'explained_variance': eigenvalues_rotated,  # NEW!
+                            'explained_variance_ratio': variance_rotated / 100,  # NEW! (as ratio 0-1)
+                            'cumulative_variance': variance_cumulative / 100,  # NEW! (as ratio 0-1)
                             'varimax_applied': True,
                             'varimax_iterations': iterations,
                             'n_components': n_factors
                         })
-                        
+
                         st.success(f"✅ Varimax rotation completed in {iterations} iterations!")
-                        st.info("♻️ Scores and loadings updated. Check other tabs to see rotated results.")
+                        st.info("♻️ Scores, loadings, AND variance recalculated. Check other tabs to see rotated results.")
                         st.rerun()
-                
+
                 except Exception as e:
                     st.error(f"❌ Varimax rotation failed: {str(e)}")
+                    import traceback
+                    st.error(f"Details: {traceback.format_exc()}")
 
 
 # ============================================================================
@@ -965,7 +946,7 @@ def _show_model_computation_tab(data: pd.DataFrame):
 def _show_variance_plots_tab():
     """Display advanced variance plots with multiple visualization options."""
     st.markdown("## 📊 Variance Plots")
-    st.markdown("*Equivalent to R PCA_variance_plot.r and PCA_cumulative_var_plot.r*")
+    #st.markdown("*Equivalent to R PCA_variance_plot.r and PCA_cumulative_var_plot.r*")
 
     if 'pca_results' not in st.session_state:
         st.warning("⚠️ No PCA model computed. Please compute a model first.")
@@ -1132,7 +1113,7 @@ def _show_variance_plots_tab():
 def _show_loadings_plots_tab():
     """Display loadings plots with multiple visualization options."""
     st.markdown("## 📈 Loadings Plots")
-    st.markdown("*Equivalent to R PCA_plots_loadings.r*")
+    #st.markdown("*Equivalent to R PCA_plots_loadings.r*")
 
     if 'pca_results' not in st.session_state:
         st.warning("⚠️ Please compute PCA in **Model Computation** tab first")
@@ -1168,7 +1149,7 @@ def _show_loadings_plots_tab():
 
         # === NEW: ANTIDERIVATIVE OPTION ===
         use_antiderivative = st.checkbox(
-            "📊 Show Antiderivative (for derivative-preprocessed data) by P. Oliveri et al. / Analytica Chimica Acta 1058 (2019) 9e17",
+            "📊 Show Antiderivative (for derivative-preprocessed data) by P. Oliveri et al. / Analytica Chimica Acta 1058 (2019) 9-17 DOI: https://doi.org/10.1016/j.aca.2018.10.055",
             value=False,
             key="scatter_antideriv_checkbox",
             help="Enable if data was preprocessed with row derivative transformation"
@@ -1402,7 +1383,7 @@ def _show_loadings_plots_tab():
 def _show_score_plots_tab():
     """Display score plots (2D and 3D) with color-by options."""
     st.markdown("## 🎯 Score Plots")
-    st.markdown("*Equivalent to R PCA_plots_scores.r*")
+    #st.markdown("*Equivalent to R PCA_plots_scores.r*")
 
     if 'pca_results' not in st.session_state:
         st.warning("⚠️ Please compute PCA in **Model Computation** tab first")
@@ -2334,36 +2315,36 @@ def _show_score_plots_tab():
 # TAB 5: INTERPRETATION
 # ============================================================================
 
-def _show_interpretation_tab():
+#def _show_interpretation_tab():
     """Display component/factor interpretation."""
-    st.markdown("## 📝 Component Interpretation")
+#    st.markdown("## 📝 Component Interpretation")
     
-    if 'pca_results' not in st.session_state:
-        st.warning("⚠️ Please compute PCA in **Model Computation** tab first")
-        return
+#    if 'pca_results' not in st.session_state:
+#        st.warning("⚠️ Please compute PCA in **Model Computation** tab first")
+#        return
     
-    pca_results = st.session_state['pca_results']
-    is_varimax = pca_results.get('varimax_applied', False)
+#    pca_results = st.session_state['pca_results']
+#    is_varimax = pca_results.get('varimax_applied', False)
     
-    st.info("🔮 AI-powered interpretation coming soon!")
+#    st.info("🔮 AI-powered interpretation coming soon!")
     
-    st.markdown("""
+#    st.markdown("""
     ### Manual Interpretation Guide
     
-    **For Standard PCA:**
-    1. Look at the scree plot to determine significant components
-    2. Examine loadings to understand which variables contribute to each PC
-    3. Interpret scores to identify sample patterns and clusters
-    4. Check diagnostics for outliers and model quality
+#    **For Standard PCA:**
+#    1. Look at the scree plot to determine significant components
+#    2. Examine loadings to understand which variables contribute to each PC
+#    3. Interpret scores to identify sample patterns and clusters
+#    4. Check diagnostics for outliers and model quality
     
-    **For Varimax-Rotated Factors:**
-    1. Rotated factors have simpler structure (easier interpretation)
-    2. Each variable typically loads highly on fewer factors
-    3. Look for factor themes based on high-loading variables
-    4. Factors remain orthogonal (uncorrelated)
+#    **For Varimax-Rotated Factors:**
+#    1. Rotated factors have simpler structure (easier interpretation)
+#    2. Each variable typically loads highly on fewer factors
+#    3. Look for factor themes based on high-loading variables
+#    4. Factors remain orthogonal (uncorrelated)
     
-    👉 Check the **Loadings** and **Scores** tabs for detailed visualizations
-    """)
+#    👉 Check the **Loadings** and **Scores** tabs for detailed visualizations
+#    """)
 
 
 # ============================================================================
@@ -3527,7 +3508,7 @@ def _show_advanced_diagnostics_tab():
 def _show_export_tab():
     """Display export options for PCA results."""
     st.markdown("## 💾 Extract & Export")
-    st.markdown("*Equivalent to R PCA_extract.r*")
+    #st.markdown("*Equivalent to R PCA_extract.r*")
     
     if 'pca_results' not in st.session_state:
         st.warning("⚠️ Please compute PCA in **Model Computation** tab first")

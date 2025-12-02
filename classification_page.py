@@ -24,6 +24,7 @@ try:
         # Preprocessing
         validate_classification_data,
         prepare_training_test,
+        suggest_n_components_pca,
 
         # Classifiers
         fit_lda, predict_lda, cross_validate_lda, predict_lda_detailed,
@@ -31,6 +32,18 @@ try:
         fit_knn, predict_knn, cross_validate_knn, predict_knn_detailed,
         fit_simca, predict_simca, predict_simca_detailed, cross_validate_simca,
         fit_uneq, predict_uneq, predict_uneq_detailed, cross_validate_uneq,
+
+        # PCA Preprocessing for classifiers
+        fit_pca_preprocessor,
+        project_onto_pca,
+        fit_lda_with_pca, predict_lda_with_pca,
+        fit_qda_with_pca, predict_qda_with_pca,
+        fit_knn_with_pca, predict_knn_with_pca,
+
+        # CV with PCA preprocessing
+        cross_validate_lda_with_pca,
+        cross_validate_qda_with_pca,
+        cross_validate_knn_with_pca,
 
         # Diagnostics
         calculate_classification_metrics,
@@ -50,12 +63,16 @@ try:
         plot_model_comparison,
         plot_decision_boundary_2d,
         plot_class_separation,
+        plot_mahalanobis_distances,
         plot_classification_report,
         calculate_distance_matrix,
+        plot_pca_variance_explained,
+        plot_pca_scores_2d,
 
         # Constants
         AVAILABLE_DISTANCE_METRICS,
-        get_available_classifiers
+        get_available_classifiers,
+        DEFAULT_N_COMPONENTS_PCA
     )
     CLASSIFICATION_AVAILABLE = True
 except ImportError as e:
@@ -361,8 +378,16 @@ def show():
             help="If TRUE: reserve 30% for final holdout test in Tab 4. If FALSE: use full dataset for CV in Tab 2."
         )
 
+        # ═══════════════════════════════════════════════════════════════════════
+        # PRESERVE SAMPLE NAMES (DataFrame index)
+        # ═══════════════════════════════════════════════════════════════════════
+
+        # CRITICAL: Save sample names for later use in plots
+        # X_full is already a DataFrame, so we can get the index directly
+        st.session_state['sample_names'] = X_full.index.tolist()
+
         # Always save X_full and y_full regardless of split choice
-        st.session_state['X_full'] = X_full
+        st.session_state['X_full'] = X_full  # Keep as DataFrame to preserve index
         st.session_state['y_full'] = y_full
         st.session_state['classes'] = classes
         st.session_state['dataset_name'] = dataset_name
@@ -388,14 +413,31 @@ def show():
                 def stratified_split_per_class(X, y, test_size=0.3, random_state=None):
                     """
                     Split data 70-30 (or custom ratio) for EACH CLASS separately
+                    ✅ PRESERVES ORIGINAL INDICES/SAMPLE NAMES
                     """
                     from sklearn.model_selection import train_test_split
 
-                    # Convert to DataFrame/Series if needed for easier handling
+                    # ✅ FIX: Preserve original index when converting to DataFrame/Series
+                    original_X_index = None
+                    original_y_index = None
+
+                    # Save original indices if they exist
+                    if hasattr(X, 'index'):
+                        original_X_index = X.index
+                    if hasattr(y, 'index'):
+                        original_y_index = y.index
+
+                    # Convert to DataFrame/Series if needed, preserving indices
                     if not isinstance(X, pd.DataFrame):
-                        X = pd.DataFrame(X)
+                        X = pd.DataFrame(X, index=original_X_index)
                     if not isinstance(y, pd.Series):
-                        y = pd.Series(y)
+                        # If y has an index, use it; otherwise align with X's index
+                        if original_y_index is not None:
+                            y = pd.Series(y, index=original_y_index)
+                        elif original_X_index is not None:
+                            y = pd.Series(y, index=original_X_index)
+                        else:
+                            y = pd.Series(y)
 
                     classes_list = np.unique(y)
 
@@ -403,6 +445,18 @@ def show():
                     X_test_list = []
                     y_train_list = []
                     y_test_list = []
+
+                    # Debug: Show index info
+                    with st.expander("🔍 Debug: Index Preservation Check", expanded=False):
+                        st.write(f"**X DataFrame info:**")
+                        st.write(f"- Type: {type(X)}")
+                        st.write(f"- Index type: {type(X.index)}")
+                        st.write(f"- Is RangeIndex: {isinstance(X.index, pd.RangeIndex)}")
+                        st.write(f"- First 5 indices: {X.index[:5].tolist()}")
+                        st.write(f"\n**y Series info:**")
+                        st.write(f"- Type: {type(y)}")
+                        st.write(f"- Index type: {type(y.index)}")
+                        st.write(f"- First 5 indices: {y.index[:5].tolist()}")
 
                     st.write("**Split per class:**")
 
@@ -429,10 +483,11 @@ def show():
                         st.write(f"  - Class **{cls}**: {len(y_train_cls)} train ({100*len(y_train_cls)/len(y_cls):.0f}%), {len(y_test_cls)} test ({100*len(y_test_cls)/len(y_cls):.0f}%)")
 
                     # Concatenate all classes
-                    X_train = pd.concat(X_train_list, ignore_index=True)
-                    X_test = pd.concat(X_test_list, ignore_index=True)
-                    y_train = pd.concat(y_train_list, ignore_index=True)
-                    y_test = pd.concat(y_test_list, ignore_index=True)
+                    # ✅ CRITICAL: Keep ignore_index=False to preserve sample names
+                    X_train = pd.concat(X_train_list, ignore_index=False)
+                    X_test = pd.concat(X_test_list, ignore_index=False)
+                    y_train = pd.concat(y_train_list, ignore_index=False)
+                    y_test = pd.concat(y_test_list, ignore_index=False)
 
                     # Shuffle (to mix classes)
                     if random_state is not None:
@@ -441,10 +496,12 @@ def show():
                     shuffle_idx_train = np.random.permutation(len(X_train))
                     shuffle_idx_test = np.random.permutation(len(X_test))
 
-                    X_train = X_train.iloc[shuffle_idx_train].reset_index(drop=True)
-                    X_test = X_test.iloc[shuffle_idx_test].reset_index(drop=True)
-                    y_train = y_train.iloc[shuffle_idx_train].reset_index(drop=True)
-                    y_test = y_test.iloc[shuffle_idx_test].reset_index(drop=True)
+                    # ✅ CRITICAL: Don't reset indices, just shuffle
+                    # Preserve the original sample names from X_full
+                    X_train = X_train.iloc[shuffle_idx_train]
+                    X_test = X_test.iloc[shuffle_idx_test]
+                    y_train = y_train.iloc[shuffle_idx_train]
+                    y_test = y_test.iloc[shuffle_idx_test]
 
                     return X_train, X_test, y_train, y_test
 
@@ -492,6 +549,43 @@ def show():
                 st.session_state['y_train'] = y_train
                 st.session_state['y_test'] = y_test
                 st.session_state['split_done'] = True
+
+                # ✅ FIX 1: Robustly extract sample names with multiple fallbacks
+                test_sample_names = None
+
+                # Try to get names from DataFrame index (preferred)
+                if hasattr(X_test, 'index'):
+                    try:
+                        test_sample_names = X_test.index.tolist()
+                        st.write(f"✓ Extracted {len(test_sample_names)} test sample names from X_test.index")
+                    except Exception as e:
+                        st.warning(f"Could not get index from X_test: {e}")
+
+                # Fallback: if X_test is numpy array, try y_test
+                if test_sample_names is None and hasattr(y_test, 'index'):
+                    try:
+                        test_sample_names = y_test.index.tolist()
+                        st.write(f"✓ Extracted {len(test_sample_names)} test sample names from y_test.index (fallback)")
+                    except Exception as e:
+                        st.warning(f"Could not get index from y_test: {e}")
+
+                st.session_state['test_sample_names'] = test_sample_names
+
+                # Same for training set
+                train_sample_names = None
+                if hasattr(X_train, 'index'):
+                    try:
+                        train_sample_names = X_train.index.tolist()
+                        st.write(f"✓ Extracted {len(train_sample_names)} train sample names from X_train.index")
+                    except:
+                        pass
+                if train_sample_names is None and hasattr(y_train, 'index'):
+                    try:
+                        train_sample_names = y_train.index.tolist()
+                        st.write(f"✓ Extracted {len(train_sample_names)} train sample names from y_train.index (fallback)")
+                    except:
+                        pass
+                st.session_state['train_sample_names'] = train_sample_names
 
         else:
             # No split - use full dataset
@@ -636,7 +730,8 @@ def show():
         # Store selected classifier
         st.session_state.selected_classifier = selected_classifier
 
-        # Classifier-specific parameters
+        # kNN metric selection (needed for preprocessing info)
+        metric = None
         if selected_classifier == 'kNN':
             with col2:
                 metric = st.selectbox(
@@ -644,6 +739,160 @@ def show():
                     AVAILABLE_DISTANCE_METRICS,
                     key="tab1_knn_metric"
                 )
+
+            # Save kNN parameters to session state
+            st.session_state.k_value = k_value
+            st.session_state.metric = metric
+
+        # ═══════════════════════════════════════════════════════════════════════
+        # PREPROCESSING REQUIREMENTS BY METHOD
+        # ═══════════════════════════════════════════════════════════════════════
+
+        st.divider()
+
+        # Display method-specific preprocessing requirements
+        preprocessing_info = {
+            'LDA': {
+                'scaling': 'OPTIONAL',
+                'centering': 'Optional',
+                'why': 'Uses Mahalanobis distance (scale-invariant). Preprocessing optional but may help numerical stability',
+                'recommendation': 'none',
+                'icon': 'ℹ️',
+                'color': 'info'
+            },
+            'QDA': {
+                'scaling': 'OPTIONAL',
+                'centering': 'Optional',
+                'why': 'Uses Mahalanobis distance (scale-invariant). Scaling recommended for numerical stability with many parameters',
+                'recommendation': 'autoscale',
+                'icon': '⚠️',
+                'color': 'warning'
+            },
+            'kNN': {
+                'scaling': 'CRITICAL',
+                'centering': 'Optional',
+                'why': 'Euclidean/Manhattan distances are scale-sensitive; large-variance features dominate (Mahalanobis is scale-invariant)',
+                'recommendation': 'autoscale',
+                'icon': '🚨',
+                'color': 'error'
+            },
+            'SIMCA': {
+                'scaling': 'CRITICAL',
+                'centering': 'Internal (NIPALS)',
+                'why': 'PCA is NOT scale-invariant; high-variance features dominate PC directions without scaling',
+                'recommendation': 'autoscale',
+                'icon': '🚨',
+                'color': 'error'
+            },
+            'UNEQ': {
+                'scaling': 'OPTIONAL',
+                'centering': 'Optional',
+                'why': 'Uses Mahalanobis distance (scale-invariant). Scaling recommended for numerical stability like QDA',
+                'recommendation': 'autoscale',
+                'icon': '⚠️',
+                'color': 'warning'
+            }
+        }
+
+        info = preprocessing_info[selected_classifier]
+
+        # Display requirements in an expander
+        with st.expander(f"{info['icon']} {selected_classifier} Preprocessing Requirements", expanded=True):
+            col_req1, col_req2, col_req3 = st.columns([1, 1, 2])
+
+            with col_req1:
+                st.metric("Scaling", info['scaling'])
+
+            with col_req2:
+                st.metric("Centering", info['centering'])
+
+            with col_req3:
+                st.info(f"**Why?** {info['why']}")
+
+            # Show current preprocessing status
+            if scaling_method == 'autoscale':
+                st.success(f"""
+                ✅ **Current Preprocessing:** Autoscale (Center + Scale)
+                - Formula: `(X - mean) / std`
+                - All features contribute equally to {selected_classifier}
+                - ✓ {'Optimal' if info['scaling'] == 'CRITICAL' else 'Recommended'} for {selected_classifier}
+                """)
+            elif scaling_method == 'center':
+                if info['scaling'] == 'CRITICAL':
+                    st.error(f"""
+                    ❌ **Current Preprocessing:** Center only
+                    - ⚠️ {selected_classifier} requires SCALING for optimal performance
+                    - Change to 'Autoscale' in Step 1 settings
+                    """)
+                elif info['scaling'] == 'OPTIONAL':
+                    st.info(f"""
+                    ℹ️ **Current Preprocessing:** Center only
+                    - {selected_classifier} is scale-invariant (Mahalanobis distance)
+                    - Autoscale may improve numerical stability
+                    """)
+                else:
+                    st.warning(f"""
+                    ⚠️ **Current Preprocessing:** Center only
+                    - Scaling recommended for {selected_classifier}
+                    - Consider changing to 'Autoscale' in Step 1
+                    """)
+            elif scaling_method == 'none':
+                if info['scaling'] == 'CRITICAL':
+                    st.error(f"""
+                    ❌ **No Preprocessing Applied**
+                    - {selected_classifier} requires preprocessing!
+                    - Change to 'Autoscale' in Step 1 settings
+                    """)
+                elif info['scaling'] == 'OPTIONAL':
+                    st.info(f"""
+                    ℹ️ **No Preprocessing Applied**
+                    - {selected_classifier} is scale-invariant (works without scaling)
+                    - Autoscale recommended for numerical stability
+                    """)
+                else:
+                    st.warning(f"""
+                    ⚠️ **No Preprocessing Applied**
+                    - Preprocessing recommended for {selected_classifier}
+                    - Consider using 'Autoscale' in Step 1
+                    """)
+
+            # Method-specific notes
+            if selected_classifier == 'kNN' and metric:
+                if metric == 'mahalanobis':
+                    st.caption("📌 **Note:** Mahalanobis distance is scale-invariant (uses covariance). Autoscale recommended for numerical stability.")
+                else:
+                    st.caption(f"📌 **Note:** {metric.capitalize()} distance is scale-sensitive. Autoscale is CRITICAL.")
+            elif selected_classifier == 'SIMCA':
+                st.caption("📌 **Note:** SIMCA uses PCA (NOT scale-invariant). High-variance features dominate PCs without scaling. Autoscale is CRITICAL.")
+            elif selected_classifier == 'LDA':
+                st.caption("📌 **Note:** LDA uses Mahalanobis distance (scale-invariant). Scaling optional but may help numerical stability.")
+            elif selected_classifier in ['QDA', 'UNEQ']:
+                st.caption("📌 **Note:** Uses Mahalanobis distance (scale-invariant). Scaling recommended for numerical stability with many parameters.")
+
+            # Quick reference table
+            st.markdown("---")
+            st.markdown("**📋 Quick Reference: Preprocessing Impact**")
+
+            impact_table = {
+                'LDA': {'Without Scaling': 'ℹ️ Mathematically equivalent (scale-invariant)', 'With Autoscale': '✅ Better numerical stability'},
+                'QDA': {'Without Scaling': '⚠️ May have numerical issues', 'With Autoscale': '✅ More stable covariance estimation'},
+                'kNN': {'Without Scaling': '🚨 Distances biased by scale (Euclidean/Manhattan)', 'With Autoscale': '✅ True nearest neighbors'},
+                'SIMCA': {'Without Scaling': '🚨 PCA dominated by high-variance features', 'With Autoscale': '✅ Balanced PC components'},
+                'UNEQ': {'Without Scaling': '⚠️ May have covariance issues', 'With Autoscale': '✅ More stable distance calculation'}
+            }
+
+            current_impact = impact_table[selected_classifier]
+            col_impact1, col_impact2 = st.columns(2)
+            with col_impact1:
+                msg = current_impact['Without Scaling']
+                if msg.startswith('🚨'):
+                    st.error(msg)
+                elif msg.startswith('⚠️'):
+                    st.warning(msg)
+                else:
+                    st.info(msg)
+            with col_impact2:
+                st.success(current_impact['With Autoscale'])
 
         # === PCA PREPROCESSING OPTION (LDA, QDA, kNN only) ===
         if selected_classifier in ['LDA', 'QDA', 'kNN']:
@@ -658,91 +907,583 @@ def show():
             )
 
             if use_pca_preprocessing:
-                st.info("📊 Data will be reduced to 3 components via PCA before classification")
+                # Get number of features for component limits
+                n_features_available = X_train_scaled.shape[1] if hasattr(X_train_scaled, 'shape') else len(X_train_scaled[0])
+                n_samples_available = X_train_scaled.shape[0] if hasattr(X_train_scaled, 'shape') else len(X_train_scaled)
+                max_pca_components = min(n_features_available - 1, n_samples_available - 1, 15)
+
+                # Get recommended number of components
+                try:
+                    pca_suggestion = suggest_n_components_pca(
+                        X_train_scaled,
+                        cumsum_threshold=0.95,
+                        max_components=max_pca_components
+                    )
+                    recommended_n = pca_suggestion['recommended_n_components']
+                    recommended_variance = pca_suggestion['variance_explained']
+                except Exception:
+                    recommended_n = min(5, max_pca_components)
+                    recommended_variance = None
+
+                col_pca1, col_pca2 = st.columns([2, 1])
+
+                with col_pca1:
+                    n_components_pca = st.slider(
+                        "PCA Components",
+                        min_value=1,
+                        max_value=max(max_pca_components, 2),
+                        value=min(recommended_n, max_pca_components),
+                        key="tab1_n_pca_components",
+                        help=f"Recommended: {recommended_n} components for 95% variance"
+                    )
+
+                with col_pca2:
+                    if recommended_variance is not None:
+                        st.metric("Recommended", f"{recommended_n} PCs", f"{recommended_variance*100:.1f}% var")
+                    else:
+                        st.metric("Selected", f"{n_components_pca} PCs")
+
+                # Store in session state
+                st.session_state.use_pca_preprocessing = True
+                st.session_state.n_components_pca = n_components_pca
+            else:
+                st.session_state.use_pca_preprocessing = False
+                st.session_state.n_components_pca = None
+                n_components_pca = None
         else:
             # SIMCA and UNEQ have PCA built-in, no need for preprocessing
             use_pca_preprocessing = False
+            st.session_state.use_pca_preprocessing = False
+            st.session_state.n_components_pca = None
+            n_components_pca = None
             if selected_classifier in ['SIMCA', 'UNEQ']:
                 st.caption("ℹ️ PCA preprocessing not needed - this classifier includes PCA internally")
 
-        # --- Train Model Button ---
-        if st.button("🚀 Train Model", type="primary", use_container_width=True, key="train_btn_tab1"):
+        # ═══════════════════════════════════════════════════════════════════════════
+        # UNIFIED CROSS-VALIDATION SECTION (All Classifiers)
+        # ═══════════════════════════════════════════════════════════════════════════
+        """
+        CROSS-VALIDATION EXECUTION
+        ══════════════════════════════════════════════════════════════════
+
+        CV can be executed in TWO modes:
+
+        1️⃣  CV-ONLY MODE (Recommended for model evaluation):
+            - Executes k-fold cross-validation on selected data
+            - Saves results in st.session_state['cv_results']
+            - Does NOT train a final model (trained_model remains None)
+            - Tab 2 displays CV results immediately
+            - Use this for: model selection, hyperparameter tuning
+
+        2️⃣  TRAIN + CV MODE (For production deployment):
+            - Trains final model on full training set (Step 4)
+            - Then runs CV for evaluation (Step 5)
+            - Saves both trained_model AND cv_results
+            - Tab 3/4 use trained_model for predictions
+
+        DEFAULT: CV-ONLY mode is active (Step 4 training is skipped)
+        """
+
+        st.divider()
+        st.markdown("### 🔄 Cross-Validation Evaluation")
+
+        # Show PCA info if enabled
+        if use_pca_preprocessing and selected_classifier in ['LDA', 'QDA', 'kNN']:
+            st.info(
+                "**PCA Preprocessing Enabled:**\n\n"
+                "For each fold:\n"
+                "1. Fit PCA **ONLY** on training data\n"
+                "2. Project training and evaluation data onto PCA space\n"
+                "3. Train classifier and predict\n\n"
+                "This prevents data leakage and ensures proper validation."
+            )
+        else:
+            st.info(
+                "**Stratified K-Fold CV:**\n"
+                "- Each fold maintains class proportions\n"
+                "- Every class is represented in each fold\n"
+                "- Provides robust performance estimates"
+            )
+
+        # CV parameters
+        col_cv1, col_cv2 = st.columns([2, 1])
+        with col_cv1:
+            n_folds_cv = st.number_input(
+                "Number of Folds",
+                min_value=2,
+                max_value=10,
+                value=5,
+                key="cv_n_folds_unified"
+            )
+        with col_cv2:
+            random_seed_cv = st.number_input(
+                "Random Seed",
+                min_value=0,
+                max_value=9999,
+                value=42,
+                key="cv_random_seed_unified"
+            )
+
+        # Unified CV button
+        if st.button(
+            "🔄 Run Cross-Validation",
+            type="primary",
+            use_container_width=True,
+            key="run_cv_unified_btn"
+        ):
             import time
+            cv_start = time.time()
 
-            train_start = time.time()
+            spinner_text = f"Running {n_folds_cv}-fold cross-validation"
+            if use_pca_preprocessing and selected_classifier in ['LDA', 'QDA', 'kNN']:
+                spinner_text += f" with PCA ({n_components_pca} components)"
+            spinner_text += "..."
 
-            with st.spinner(f"Training {selected_classifier} model..."):
+            with st.spinner(spinner_text):
                 try:
-                    # Get y values as array
                     y_values = y_for_training.values if hasattr(y_for_training, 'values') else y_for_training
 
-                    if selected_classifier == 'LDA':
-                        model = fit_lda(X_train_scaled, y_values)
-                    elif selected_classifier == 'QDA':
-                        model = fit_qda(X_train_scaled, y_values)
-                    elif selected_classifier == 'kNN':
-                        model = fit_knn(X_train_scaled, y_values, metric=metric)
-                    elif selected_classifier == 'SIMCA':
-                        model = fit_simca(X_train_scaled, y_values, n_pcs, confidence_level)
-                    elif selected_classifier == 'UNEQ':
-                        model = fit_uneq(X_train_scaled, y_values, n_pcs, confidence_level, use_pca=False)
+                    # Branch based on PCA preprocessing
+                    if use_pca_preprocessing and selected_classifier in ['LDA', 'QDA', 'kNN']:
+                        # PCA-based CV
+                        if selected_classifier == 'LDA':
+                            cv_results_raw = cross_validate_lda_with_pca(
+                                X=X_train_scaled,
+                                y=y_values,
+                                n_components_pca=n_components_pca,
+                                n_folds=n_folds_cv,
+                                scaling_method=scaling_method,
+                                random_state=random_seed_cv
+                            )
+                        elif selected_classifier == 'QDA':
+                            cv_results_raw = cross_validate_qda_with_pca(
+                                X=X_train_scaled,
+                                y=y_values,
+                                n_components_pca=n_components_pca,
+                                n_folds=n_folds_cv,
+                                scaling_method=scaling_method,
+                                random_state=random_seed_cv
+                            )
+                        elif selected_classifier == 'kNN':
+                            cv_results_raw = cross_validate_knn_with_pca(
+                                X=X_train_scaled,
+                                y=y_values,
+                                n_components_pca=n_components_pca,
+                                k_values=[k_value],
+                                metric=metric,
+                                n_folds=n_folds_cv,
+                                scaling_method=scaling_method,
+                                random_state=random_seed_cv
+                            )
 
-                    train_time = time.time() - train_start
-
-                    # Store trained model with comprehensive parameters
-                    st.session_state.trained_model = {
-                        'name': selected_classifier,
-                        'model': model,
-                        'training_time': train_time,
-                        'n_features': X_train_scaled.shape[1],
-                        'n_samples': X_train_scaled.shape[0],
-                        'classes': classes,
-                        'parameters': {
-                            'scaling': scaling_method,
-                            'k': k_value if selected_classifier == 'kNN' else None,
-                            'metric': metric if selected_classifier == 'kNN' else None,
-                            'n_pcs': n_pcs if selected_classifier in ['SIMCA', 'UNEQ'] else None,
-                            'confidence_level': confidence_level if selected_classifier in ['SIMCA', 'UNEQ'] else None,
-                            'use_pca': use_pca_preprocessing if selected_classifier in ['LDA', 'QDA', 'kNN'] else None
+                        # Standardize format for PCA results
+                        standardized_results = {
+                            'cv_predictions': cv_results_raw['predictions'],
+                            'y_true': cv_results_raw['y_true'],
+                            'metrics': cv_results_raw['metrics'],
+                            'cv_details': cv_results_raw.get('cv_details', []),
+                            'n_components_pca': n_components_pca,
+                            'use_pca_preprocessing': True,
+                            'misclassified_indices': cv_results_raw.get('misclassified_indices', []),
+                            'mahalanobis_distances': cv_results_raw.get('mahalanobis_distances', {})
                         }
-                    }
+                        cv_method = 'with_pca'
 
-                    st.success(f"✅ {selected_classifier} model trained in {train_time:.3f}s")
+                    else:
+                        # Standard CV (no PCA)
+                        n_pcs = st.session_state.get('n_pcs', 3)
+                        confidence_level = st.session_state.get('confidence_level', 0.95)
+
+                        if selected_classifier == 'LDA':
+                            cv_results = cross_validate_lda(
+                                X_train_scaled, y_values,
+                                n_folds=n_folds_cv,
+                                random_state=random_seed_cv
+                            )
+                        elif selected_classifier == 'QDA':
+                            cv_results = cross_validate_qda(
+                                X_train_scaled, y_values,
+                                n_folds=n_folds_cv,
+                                random_state=random_seed_cv
+                            )
+                        elif selected_classifier == 'kNN':
+                            cv_results = cross_validate_classifier(
+                                X_train_scaled, y_values,
+                                classifier_type='knn',
+                                n_folds=n_folds_cv,
+                                classifier_params={
+                                    'k': k_value,
+                                    'metric': metric,
+                                    'use_pca': False
+                                },
+                                random_state=random_seed_cv
+                            )
+                        elif selected_classifier == 'SIMCA':
+                            cv_results = cross_validate_classifier(
+                                X_train_scaled, y_values,
+                                classifier_type='simca',
+                                n_folds=n_folds_cv,
+                                classifier_params={
+                                    'n_components': n_pcs,
+                                    'confidence_level': confidence_level
+                                },
+                                random_state=random_seed_cv
+                            )
+                        elif selected_classifier == 'UNEQ':
+                            cv_results = cross_validate_classifier(
+                                X_train_scaled, y_values,
+                                classifier_type='uneq',
+                                n_folds=n_folds_cv,
+                                classifier_params={
+                                    'n_components': n_pcs,
+                                    'confidence_level': confidence_level,
+                                    'use_pca': False
+                                },
+                                random_state=random_seed_cv
+                            )
+
+                        # Standardize format for standard results
+                        if selected_classifier in ['LDA', 'QDA']:
+                            # Direct format from cross_validate_lda/qda
+                            standardized_results = {
+                                'cv_predictions': cv_results.get('predictions', []),
+                                'y_true': y_values,
+                                'metrics': cv_results.get('metrics', {}),
+                                'cv_details': cv_results.get('cv_details', []),
+                                'use_pca_preprocessing': False,
+                                'misclassified_indices': cv_results.get('misclassified_indices', []),
+                                'mahalanobis_distances': cv_results.get('mahalanobis_distances', {})
+                            }
+                        else:
+                            # Format from cross_validate_classifier
+                            standardized_results = {
+                                'cv_predictions': cv_results.get('cv_predictions', []),
+                                'y_true': y_values,
+                                'metrics': {
+                                    'accuracy': cv_results.get('cv_accuracy', 0),
+                                    'average_sensitivity': np.mean(list(cv_results.get('cv_sensitivity_per_class', {}).values())) if cv_results.get('cv_sensitivity_per_class') else 0,
+                                    'average_specificity': np.mean(list(cv_results.get('cv_specificity_per_class', {}).values())) if cv_results.get('cv_specificity_per_class') else 0,
+                                    'sensitivity_per_class': cv_results.get('cv_sensitivity_per_class', {}),
+                                    'specificity_per_class': cv_results.get('cv_specificity_per_class', {}),
+                                    'precision_per_class': {},
+                                    'f1_per_class': cv_results.get('cv_f1_per_class', {}),
+                                    'confusion_matrix': cv_results.get('cv_confusion_matrix', np.array([])),
+                                    'classes': classes
+                                },
+                                'cv_details': [
+                                    {
+                                        'fold': fold_res['fold'],
+                                        'accuracy': fold_res['accuracy'],
+                                        'n_train': 'N/A',
+                                        'n_eval': 'N/A'
+                                    }
+                                    for fold_res in cv_results.get('fold_results', [])
+                                ],
+                                'use_pca_preprocessing': False,
+                                'misclassified_indices': np.where(y_values != cv_results.get('cv_predictions', []))[0].tolist() if len(cv_results.get('cv_predictions', [])) > 0 else []
+                            }
+                        cv_method = 'standard'
+
+                    # ═══════════════════════════════════════════════════════════════════════
+                    # ✅ ADD kNN-SPECIFIC DATA TO standardized_results BEFORE SAVING
+                    # ═══════════════════════════════════════════════════════════════════════
+                    if selected_classifier == 'kNN':
+                        # Get kNN parameters from session state with fallback
+                        k_val = st.session_state.get('k_value', k_value if 'k_value' in locals() else 3)
+                        met = st.session_state.get('metric', metric if 'metric' in locals() else 'euclidean')
+
+                        # Add kNN-specific data to standardized_results
+                        standardized_results['X_train'] = X_train_scaled
+                        standardized_results['y_train'] = y_values
+                        standardized_results['k_value'] = k_val
+                        standardized_results['metric'] = met
+
+                    cv_time = time.time() - cv_start
+
+                    # Store in session state
+                    st.session_state['cv_results'] = standardized_results
+                    st.session_state['cv_results_time'] = cv_time
+                    st.session_state['cv_time'] = cv_time
+                    st.session_state['cv_method'] = cv_method
+                    st.session_state['cv_n_folds'] = n_folds_cv
+                    st.session_state['cv_classifier'] = selected_classifier
+
+                    # ✅ VERIFICATION
+                    with st.expander("✅ CV Storage Verification", expanded=False):
+                        st.success("✅ Cross-validation results stored!")
+                        st.write(f"**Classifier:** {selected_classifier}")
+                        st.write(f"**CV Method:** {cv_method}")
+                        st.write(f"**CV Results Keys:** {list(standardized_results.keys())[:10]}...")
+                        if selected_classifier == 'kNN':
+                            st.write(f"**kNN k_value in results:** {'k_value' in standardized_results}")
+                            st.write(f"**kNN metric in results:** {'metric' in standardized_results}")
+                            st.write(f"**X_train in results:** {'X_train' in standardized_results}")
+
+                    # ═══════════════════════════════════════════════════════════════════════
+                    # TRAIN FINAL MODEL ON FULL TRAINING DATA (for Tab 2 detailed analysis)
+                    # ═══════════════════════════════════════════════════════════════════════
+
+                    try:
+                        with st.spinner("Training final model on full training data..."):
+                            if use_pca_preprocessing and selected_classifier in ['LDA', 'QDA', 'kNN']:
+                                # Train with PCA preprocessing
+                                pca_info = fit_pca_preprocessor(
+                                    X_train_scaled,
+                                    n_components=n_components_pca,
+                                    scaling_method=scaling_method
+                                )
+                                X_train_pca = project_onto_pca(X_train_scaled, pca_info)
+
+                                if selected_classifier == 'LDA':
+                                    final_model = fit_lda_with_pca(
+                                        X_train_scaled, y_values,
+                                        n_components=n_components_pca,
+                                        scaling_method=scaling_method
+                                    )
+                                elif selected_classifier == 'QDA':
+                                    final_model = fit_qda_with_pca(
+                                        X_train_scaled, y_values,
+                                        n_components=n_components_pca,
+                                        scaling_method=scaling_method
+                                    )
+                                elif selected_classifier == 'kNN':
+                                    final_model = fit_knn_with_pca(
+                                        X_train_scaled, y_values,
+                                        n_components=n_components_pca,
+                                        k=k_value,
+                                        metric=metric,
+                                        scaling_method=scaling_method
+                                    )
+                            else:
+                                # Standard model training (no PCA)
+                                if selected_classifier == 'LDA':
+                                    final_model = fit_lda(X_train_scaled, y_values)
+                                elif selected_classifier == 'QDA':
+                                    final_model = fit_qda(X_train_scaled, y_values)
+                                elif selected_classifier == 'kNN':
+                                    final_model = fit_knn(
+                                        X_train_scaled, y_values,
+                                        k=k_value,
+                                        metric=metric
+                                    )
+                                elif selected_classifier == 'SIMCA':
+                                    n_pcs = st.session_state.get('n_pcs', 3)
+                                    confidence_level = st.session_state.get('confidence_level', 0.95)
+                                    final_model = fit_simca(
+                                        X_train_scaled, y_values,
+                                        n_components=n_pcs,
+                                        confidence_level=confidence_level
+                                    )
+                                elif selected_classifier == 'UNEQ':
+                                    n_pcs = st.session_state.get('n_pcs', 3)
+                                    confidence_level = st.session_state.get('confidence_level', 0.95)
+                                    final_model = fit_uneq(
+                                        X_train_scaled, y_values,
+                                        n_components=n_pcs,
+                                        confidence_level=confidence_level
+                                    )
+
+                        # Save trained model to session state
+                        # Get kNN parameters from session state as fallback
+                        if selected_classifier == 'kNN':
+                            k_val = st.session_state.get('k_value', k_value if 'k_value' in locals() else 3)
+                            met = st.session_state.get('metric', metric if 'metric' in locals() else 'euclidean')
+                        else:
+                            k_val = None
+                            met = None
+
+                        st.session_state.trained_model = {
+                            'model': final_model,
+                            'name': selected_classifier,
+                            'n_features': X_train_scaled.shape[1],
+                            'classes': classes.tolist() if hasattr(classes, 'tolist') else list(classes),
+                            'scaling_method': scaling_method,
+                            'X_train': X_train_scaled,  # ← ADD THIS for all classifiers
+                            'y_train': y_values,         # ← ADD THIS for all classifiers
+                            'parameters': {
+                                'k': k_val,              # ← CHANGE from k_value
+                                'metric': met,           # ← CHANGE from metric
+                                'n_components': n_components_pca if use_pca_preprocessing else None,
+                                'use_pca': use_pca_preprocessing
+                            }
+                        }
+
+                        # ✅ ALSO SAVE TO cv_results FOR TAB 2 ACCESS
+                        standardized_results['trained_model'] = st.session_state.trained_model
+                        standardized_results['final_model'] = final_model
+
+                        # For kNN, also save X_train and y_train for distance analysis
+                        if selected_classifier == 'kNN':
+                            standardized_results['X_train'] = X_train_scaled
+                            standardized_results['y_train'] = y_values
+                            standardized_results['k_value'] = k_val
+                            standardized_results['metric'] = met
+
+                        st.success("✅ Final model trained and saved!")
+
+                        # ✅ MODEL SAVE VERIFICATION
+                        with st.expander("✅ Model Save Verification", expanded=False):
+                            st.write(f"**Model saved:** {st.session_state.trained_model is not None}")
+                            if st.session_state.trained_model:
+                                st.write(f"**Model type:** {st.session_state.trained_model.get('name')}")
+                                st.write(f"**Has X_train:** {'X_train' in st.session_state.trained_model}")
+                                st.write(f"**Has y_train:** {'y_train' in st.session_state.trained_model}")
+                                st.write(f"**Parameters:** {st.session_state.trained_model.get('parameters')}")
+                            st.write(f"\n**Also in cv_results:**")
+                            st.write(f"**trained_model in cv_results:** {'trained_model' in standardized_results}")
+                            if selected_classifier == 'kNN':
+                                st.write(f"**k_value:** {standardized_results.get('k_value')}")
+                                st.write(f"**metric:** {standardized_results.get('metric')}")
+
+                    except Exception as e:
+                        st.error(f"❌ CRITICAL ERROR: Could not train final model!")
+                        st.error(f"**Error Type:** {type(e).__name__}")
+                        st.error(f"**Error Message:** {str(e)}")
+
+                        # Show full traceback for debugging
+                        import traceback
+                        with st.expander("📋 Full Error Traceback"):
+                            st.code(traceback.format_exc(), language='python')
+
+                        st.info("Tab 2 analysis will use CV results only")
+                        # Clear trained_model if training failed
+                        st.session_state.trained_model = None
+
+                    st.success(f"✅ Cross-validation completed in {cv_time:.2f}s!")
+
+                    # ═══════════════════════════════════════════════════════════════
+                    # DEBUG: Verify model was saved
+                    # ═══════════════════════════════════════════════════════════════
+
+                    with st.expander("🔍 DEBUG: Model Save Status", expanded=False):
+                        st.write("**Session State Check:**")
+                        st.write(f"- trained_model exists: {'trained_model' in st.session_state}")
+                        st.write(f"- trained_model is None: {st.session_state.get('trained_model') is None}")
+
+                        if st.session_state.get('trained_model'):
+                            tm = st.session_state.get('trained_model')
+                            st.write(f"\n**Trained Model Contents:**")
+                            st.write(f"- Name: {tm.get('name')}")
+                            st.write(f"- Has X_train: {'X_train' in tm}")
+                            st.write(f"- Has y_train: {'y_train' in tm}")
+                            st.write(f"- Has model: {'model' in tm}")
+                            st.write(f"- Parameters: {tm.get('parameters')}")
+                        else:
+                            st.error("❌ trained_model is None in session_state!")
+                            st.write("\n**Checking cv_results:**")
+                            cv_res = st.session_state.get('cv_results', {})
+                            st.write(f"- cv_results exists: {'cv_results' in st.session_state}")
+                            st.write(f"- cv_results keys: {list(cv_res.keys())}")
+                            if selected_classifier == 'kNN':
+                                st.write(f"- Has X_train: {'X_train' in cv_res}")
+                                st.write(f"- Has k_value: {'k_value' in cv_res}")
+                                st.write(f"- Has metric: {'metric' in cv_res}")
+
                     st.rerun()
 
                 except Exception as e:
-                    st.error(f"❌ Training failed: {str(e)}")
+                    st.error(f"❌ Cross-validation failed: {str(e)}")
                     import traceback
                     st.error(traceback.format_exc())
 
-        # Display trained model info
-        if st.session_state.trained_model is not None:
+        # Display CV results if available
+        if 'cv_results' in st.session_state:
+            cv_res = st.session_state['cv_results']
+            cv_time = st.session_state.get('cv_results_time', 0)
+            cv_method = st.session_state.get('cv_method', 'standard')
+
             st.divider()
-            st.success(f"✅ **Model Trained:** {st.session_state.trained_model['name']}")
+            st.success(f"✅ **CV Results Available** ({st.session_state.get('cv_classifier', selected_classifier)})")
 
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Training Time", f"{st.session_state.trained_model['training_time']:.3f}s")
-            with col2:
-                st.metric("Features", st.session_state.trained_model['n_features'])
-            with col3:
-                st.metric("Training Samples", st.session_state.trained_model['n_samples'])
+            # Metrics display
+            if cv_method == 'with_pca':
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Accuracy", f"{cv_res['metrics'].get('accuracy', 0):.1f}%")
+                with col2:
+                    st.metric("PCA Components", cv_res.get('n_components_pca', 'N/A'))
+                with col3:
+                    st.metric("Folds", st.session_state.get('cv_n_folds', n_folds_cv))
+                with col4:
+                    st.metric("Time", f"{cv_time:.2f}s")
+            else:
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Accuracy", f"{cv_res.get('metrics', {}).get('accuracy', 0):.1f}%")
+                with col2:
+                    st.metric("Folds", st.session_state.get('cv_n_folds', n_folds_cv))
+                with col3:
+                    st.metric("Time", f"{cv_time:.2f}s")
+                with col4:
+                    st.metric("Samples", len(cv_res.get('cv_predictions', [])))
 
-                with st.expander("📋 Model Summary", expanded=False):
-                    model_summary = {
-                        'Classifier': st.session_state.trained_model['name'],
-                        'Training Time (s)': round(st.session_state.trained_model['training_time'], 3),
-                        'Classes': st.session_state.trained_model['classes'].tolist(),
-                        'n_features': st.session_state.trained_model['n_features'],
-                        'n_samples': st.session_state.trained_model['n_samples'],
-                        'parameters': st.session_state.trained_model['parameters']
-                    }
-                    st.json(model_summary)
-
-                st.info("ℹ️ **Next Step:** Go to **Tab 2 (Classification Analysis)** to see cross-validation results and model evaluation.")
+            st.info("ℹ️ **Next Step:** Go to **Tab 2 (Classification Analysis)** to see detailed results, confusion matrix, and diagnostics.")
     # ========== TAB 2: CLASSIFICATION ANALYSIS ==========
     with tab2:
         st.markdown("## 🎲 Classification Analysis - Cross-Validation")
+
+        # Initialize tab1_data from session state
+        tab1_data = st.session_state.get('tab1_data', {})
+
+        # ═══════════════════════════════════════════════════════════════════════
+        # FORCE RELOAD SESSION STATE FOR kNN
+        # ═══════════════════════════════════════════════════════════════════════
+
+        # Ensure session state is properly loaded
+        trained_model_info = st.session_state.get('trained_model')
+        cv_results_info = st.session_state.get('cv_results')
+
+        # ═══════════════════════════════════════════════════════════════════════
+        # FALLBACK: If trained_model is None, reconstruct from cv_results
+        # ═══════════════════════════════════════════════════════════════════════
+
+        if trained_model_info is None and cv_results_info is not None:
+            st.warning("⚠️ Model not saved in session state - using cv_results as fallback")
+
+            # Try to reconstruct model dict from cv_results
+            cv_classifier = st.session_state.get('cv_classifier', 'Unknown')
+
+            if cv_classifier == 'kNN' and 'X_train' in cv_results_info:
+                X_train_cv = cv_results_info.get('X_train')
+                y_train_cv = cv_results_info.get('y_train')
+                metric_cv = cv_results_info.get('metric', 'euclidean')
+
+                # Calculate covariance if using Mahalanobis
+                cov_cv = None
+                if metric_cv == 'mahalanobis' and X_train_cv is not None:
+                    cov_cv = np.cov(X_train_cv, rowvar=False) + np.eye(X_train_cv.shape[1]) * 1e-10
+
+                # ✅ CORRECT: For kNN, the model IS the training data dict
+                trained_model_info = {
+                    'name': 'kNN',
+                    'n_features': X_train_cv.shape[1] if X_train_cv is not None else 0,
+                    'classes': np.unique(y_train_cv).tolist() if y_train_cv is not None else [],
+                    'scaling_method': st.session_state.get('scaling_method', 'autoscale'),
+                    'parameters': {
+                        'k': cv_results_info.get('k_value', 5),
+                        'metric': metric_cv,
+                    },
+                    'model': {  # ← THIS is the actual kNN "model"
+                        'X_train': X_train_cv,
+                        'y_train': y_train_cv,
+                        'metric': metric_cv,
+                        'cov': cov_cv,  # ← REQUIRED by predict_knn
+                    }
+                }
+                st.info("✓ Reconstructed kNN model from cv_results")
+            elif cv_classifier in ['LDA', 'QDA'] and 'trained_model' in cv_results_info:
+                # For LDA/QDA, cv_results might have the model
+                trained_model_info = cv_results_info.get('trained_model')
+
+        if trained_model_info is None:
+            st.warning("⚠️ No trained model available")
+            st.info("Make sure you ran Cross-Validation in Tab 1 first")
+        else:
+            model_name = trained_model_info.get('name', 'Unknown')
+            st.success(f"✓ Model loaded: {model_name}")
+
+        # ✅ CRITICAL: Update 'trained' variable for use throughout Tab 2
+        trained = trained_model_info
 
         # Check if data is available
         X_full = st.session_state.get('X_full')
@@ -754,855 +1495,1643 @@ def show():
             st.info("💡 Go to Tab 1 and select X (features) and Y (target)")
             return
 
-        # Determine which data to use for CV
-        split_done = st.session_state.get('split_done', False)
+        # ═══════════════════════════════════════════════════════════════════════════
+        # CHECK IF CV WAS ALREADY RUN IN TAB 1 WITH PCA PREPROCESSING
+        # ═══════════════════════════════════════════════════════════════════════════
+        cv_method = st.session_state.get('cv_method', None)
+        cv_results_from_tab1 = st.session_state.get('cv_results', None)
+        use_pca_preprocessing = st.session_state.get('use_pca_preprocessing', False)
 
+        if cv_method == 'with_pca' and cv_results_from_tab1 is not None:
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            # PCA PREPROCESSING WAS USED: CV was already run in Tab 1
+            # Tab 2 is now DISPLAY-ONLY mode
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+            st.info(
+                "**PCA Preprocessing Mode Active**\n\n"
+                "Cross-validation was executed in Tab 1 with PCA preprocessing. "
+                "This tab displays the results - no additional CV can be run.\n\n"
+                "*To run CV with different parameters, go back to Tab 1.*"
+            )
+
+            cv_classifier = st.session_state.get('cv_classifier', 'Unknown')
+            cv_n_folds = st.session_state.get('cv_n_folds', 5)
+            cv_time = st.session_state.get('cv_results_time', 0)
+            n_components_pca = cv_results_from_tab1.get('n_components_pca', 'N/A')
+
+            st.success(
+                f"🎯 **Classifier:** {cv_classifier} | "
+                f"**PCA Components:** {n_components_pca} | "
+                f"**CV Folds:** {cv_n_folds} | "
+                f"**Time:** {cv_time:.2f}s"
+            )
+
+            st.divider()
+
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            # DISPLAY CV RESULTS FROM TAB 1
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            st.markdown("### 📊 Cross-Validation Results (from Tab 1)")
+
+            cv_res = cv_results_from_tab1
+            cv_metrics = cv_res.get('metrics', {})
+
+            # Get predictions and true labels
+            y_pred_cv = cv_res.get('cv_predictions', cv_res.get('predictions', []))
+            y_true_cv = cv_res.get('y_true', [])
+
+            # Display main metrics
+            col_acc, col_sens, col_spec = st.columns(3)
+            with col_acc:
+                st.metric(
+                    "Overall Accuracy",
+                    f"{cv_metrics.get('accuracy', 0):.1f}%",
+                    help="Percentage of correctly classified samples"
+                )
+            with col_sens:
+                avg_sens = np.mean(list(cv_metrics.get('sensitivity_per_class', {}).values())) if cv_metrics.get('sensitivity_per_class') else 0
+                st.metric(
+                    "Mean Sensitivity",
+                    f"{avg_sens:.1f}%",
+                    help="Average true positive rate across classes"
+                )
+            with col_spec:
+                avg_spec = np.mean(list(cv_metrics.get('specificity_per_class', {}).values())) if cv_metrics.get('specificity_per_class') else 0
+                st.metric(
+                    "Mean Specificity",
+                    f"{avg_spec:.1f}%",
+                    help="Average true negative rate across classes"
+                )
+
+            # Confusion Matrix
+            st.markdown("#### Confusion Matrix")
+            if 'confusion_matrix' in cv_metrics:
+                classes_list = list(cv_metrics.get('sensitivity_per_class', {}).keys()) if cv_metrics.get('sensitivity_per_class') else []
+                if classes_list:
+                    fig_cm = plot_confusion_matrix(
+                        cv_metrics['confusion_matrix'],
+                        classes=classes_list,
+                        title=f"{cv_classifier} with PCA - CV Confusion Matrix"
+                    )
+                    st.plotly_chart(fig_cm, use_container_width=True)
+
+            # Per-class metrics
+            st.markdown("#### Per-Class Metrics")
+            if cv_metrics.get('sensitivity_per_class') and cv_metrics.get('specificity_per_class'):
+                metrics_df = pd.DataFrame({
+                    'Class': list(cv_metrics['sensitivity_per_class'].keys()),
+                    'Sensitivity (%)': [f"{v:.1f}" for v in cv_metrics['sensitivity_per_class'].values()],
+                    'Specificity (%)': [f"{v:.1f}" for v in cv_metrics['specificity_per_class'].values()],
+                    'F1 Score (%)': [f"{v:.1f}" for v in cv_metrics.get('f1_per_class', {}).values()] if cv_metrics.get('f1_per_class') else ['N/A'] * len(cv_metrics['sensitivity_per_class'])
+                })
+                st.dataframe(metrics_df, use_container_width=True, hide_index=True)
+
+            # PCA-specific information
+            st.markdown("#### PCA Preprocessing Details")
+            cv_details = cv_res.get('cv_details', [])
+            if cv_details:
+                pca_info_data = []
+                for i, fold_detail in enumerate(cv_details):
+                    pca_info = fold_detail.get('pca_info', {})
+                    pca_info_data.append({
+                        'Fold': i + 1,
+                        'Train Samples': fold_detail.get('train_size', 'N/A'),
+                        'Test Samples': fold_detail.get('test_size', 'N/A'),
+                        'Variance Explained (%)': f"{pca_info.get('variance_explained_total', 0) * 100:.1f}" if pca_info.get('variance_explained_total') else 'N/A',
+                        'Fold Accuracy (%)': f"{fold_detail.get('fold_accuracy', 0):.1f}" if fold_detail.get('fold_accuracy') is not None else 'N/A'
+                    })
+                pca_info_df = pd.DataFrame(pca_info_data)
+                st.dataframe(pca_info_df, use_container_width=True, hide_index=True)
+            else:
+                st.info(f"Using {n_components_pca} PCA components for dimensionality reduction before classification.")
+
+            # Skip the rest of Tab 2 (standard CV execution) when in PCA mode
+            # Just show a button to go back to Tab 1
+            st.divider()
+            st.markdown("---")
+            st.info("💡 **To modify CV parameters or re-run:** Go back to **Tab 1** and adjust PCA or CV settings.")
+
+            # Set flag to skip standard CV section
+            skip_standard_cv = True
+
+        else:
+            skip_standard_cv = False
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            # STANDARD MODE: No PCA preprocessing - standard CV in Tab 2
+            # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+            # Determine which data to use for CV
+            split_done = st.session_state.get('split_done', False)
+
+            if split_done:
+                # Use training set (70%)
+                X_for_cv = st.session_state.get('X_train')
+                y_for_cv = st.session_state.get('y_train')
+                X_for_cv_scaled = st.session_state.get('X_train_scaled')
+                cv_data_source = "training set (70%)"
+                st.info(f"📊 **CV Data**: Using {cv_data_source} - Test set (30%) is reserved for Tab 4")
+            else:
+                # Use full dataset (100%)
+                X_for_cv = X_full
+                y_for_cv = y_full
+                X_for_cv_scaled = st.session_state.get('X_scaled')  # Use X_scaled (saved in Step 5)
+                cv_data_source = "full dataset (100%)"
+                st.info(f"📊 **CV Data**: Using {cv_data_source} - No test set reserved (split disabled in Tab 1)")
+
+            if X_for_cv is None or y_for_cv is None:
+                st.error("❌ Data not found")
+                st.info("💡 Go back to Tab 1 and complete data selection")
+                return
+
+            st.divider()
+
+            # --- Cross-Validation Section ---
+            st.markdown("### ✅ Cross-Validation Evaluation")
+
+            st.info("""
+            **Stratified K-Fold CV:**
+            - Each fold maintains class proportions from the full dataset
+            - Every class is represented in each fold
+            - Provides robust performance estimates
+            """)
+
+        # ═══════════════════════════════════════════════════════════════════════════
+        # CV RESULTS DISPLAY (Tab 2 is display-only, CV execution is in Tab 1)
+        # ═══════════════════════════════════════════════════════════════════════════
+
+        # Check if CV results are available
+        if 'cv_results' not in st.session_state:
+            st.warning("⚠️ No cross-validation results available")
+            st.info("💡 Go to **Tab 1** and click **'Run Cross-Validation'** to evaluate your model.")
+            return
+
+        # Display CV results
+        cv_res = st.session_state['cv_results']
+        y_pred_cv = cv_res['cv_predictions']
+
+        # Get trained model info (may be None if using CV-only mode)
+        # NOTE: 'trained' is now set earlier (line 1402) with fallback from cv_results
+        # Do NOT overwrite it here!
+        # trained = st.session_state.get('trained_model')  # ← COMMENTED OUT - now set at line 1402
+        cv_classifier = st.session_state.get('cv_classifier', 'Cross-Validated Classifier')
+
+        # ═══════════════════════════════════════════════════════════════════════
+        # DEBUG LOGGING
+        # ═══════════════════════════════════════════════════════════════════════
+
+        with st.expander("🔍 DEBUG INFO - Check model loading (click to expand)", expanded=False):
+            st.write("**Session State Contents:**")
+            st.write(f"- trained_model exists: {'trained_model' in st.session_state}")
+            st.write(f"- cv_classifier: {cv_classifier}")
+            st.write(f"- cv_results exists: {'cv_results' in st.session_state}")
+
+            trained_info = st.session_state.get('trained_model')
+
+            if trained_info is not None:
+                st.write(f"\n**Trained Model Info:**")
+                st.write(f"- Name: {trained_info.get('name')}")
+                st.write(f"- Has 'X_train': {'X_train' in trained_info}")
+                st.write(f"- Has 'y_train': {'y_train' in trained_info}")
+                st.write(f"- Has 'model': {'model' in trained_info}")
+                st.write(f"- Parameters: {trained_info.get('parameters')}")
+            else:
+                st.error("❌ trained_model is None or NOT in session_state!")
+                st.write("\n**Possible causes:**")
+                st.write("1. Model training failed in Tab 1")
+                st.write("2. Session was cleared")
+                st.write("3. Exception occurred during model saving")
+                st.write("4. trained_model was explicitly set to None")
+
+            if 'cv_results' in st.session_state:
+                cv_info = st.session_state.get('cv_results')
+                st.write(f"\n**CV Results Available:**")
+                st.write(f"- Has 'k_value': {'k_value' in cv_info}")
+                st.write(f"- Has 'metric': {'metric' in cv_info}")
+                st.write(f"- Has 'trained_model': {'trained_model' in cv_info}")
+                st.write(f"- Keys: {list(cv_info.keys())[:10]}...")  # Show first 10 keys
+
+        # Get data for CV
+        split_done = st.session_state.get('split_done', False)
         if split_done:
-            # Use training set (70%)
             X_for_cv = st.session_state.get('X_train')
             y_for_cv = st.session_state.get('y_train')
             X_for_cv_scaled = st.session_state.get('X_train_scaled')
-            cv_data_source = "training set (70%)"
-            st.info(f"📊 **CV Data**: Using {cv_data_source} - Test set (30%) is reserved for Tab 4")
         else:
-            # Use full dataset (100%)
-            X_for_cv = X_full
-            y_for_cv = y_full
-            X_for_cv_scaled = st.session_state.get('X_scaled')  # Use X_scaled (saved in Step 5)
-            cv_data_source = "full dataset (100%)"
-            st.info(f"📊 **CV Data**: Using {cv_data_source} - No test set reserved (split disabled in Tab 1)")
+            X_for_cv = st.session_state.get('X_full')
+            y_for_cv = st.session_state.get('y_full')
+            X_for_cv_scaled = st.session_state.get('X_scaled')
 
-        if X_for_cv is None or y_for_cv is None:
-            st.error("❌ Data not found")
-            st.info("💡 Go back to Tab 1 and complete data selection")
+        if y_for_cv is None:
+            st.error("❌ Data not found. Please go back to Tab 1.")
             return
 
-        trained = st.session_state.get('trained_model')
-        if trained is None:
-            st.warning("⚠️ No model trained yet")
-            st.info("💡 Train a model in Tab 1 first (Steps 4-5)")
-            return
+        # Validate that y_for_cv and y_pred_cv have the same length
+        if len(y_for_cv) != len(y_pred_cv):
+            st.error(f"❌ Data mismatch detected: Training labels ({len(y_for_cv)} samples) don't match CV predictions ({len(y_pred_cv)} samples)")
+            st.warning("This usually happens when the model was trained with different data. Please retrain the model in Tab 1.")
+            st.stop()
 
-        st.success(f"🎯 **Model:** {trained['name']} | **Samples for CV:** {len(y_for_cv)} | **Features:** {trained['n_features']}")
+        cv_metrics = compute_classification_metrics(y_for_cv.values if hasattr(y_for_cv, 'values') else y_for_cv, y_pred_cv, classes)
+
+        st.markdown("### 📊 Cross-Validation Results")
+
+        # CV metrics - Row 1: Performance Metrics
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric(
+                "CV Accuracy",
+                f"{cv_metrics['accuracy']:.1f}%",
+                delta=f"{cv_metrics['accuracy'] - 50:.1f}%" if cv_metrics['accuracy'] != 50 else None
+            )
+        with col2:
+            st.metric("Avg Sensitivity", f"{cv_metrics['average_sensitivity']:.1f}%")
+        with col3:
+            st.metric("Avg Specificity", f"{cv_metrics['average_specificity']:.1f}%")
+
+        # CV metrics - Row 2: Efficiency Metrics
+        col4, col5, col6 = st.columns(3)
+        with col4:
+            cv_time = st.session_state.get('cv_time', st.session_state.get('cv_results_time', 0))
+            st.metric("CV Time", f"{cv_time:.2f}s")
+        with col5:
+            pred_time_avg = cv_time / len(y_pred_cv) if len(y_pred_cv) > 0 else 0
+            st.metric("Prediction Time (Avg)", f"{pred_time_avg:.4f}s/sample")
+        with col6:
+            n_features = X_for_cv_scaled.shape[1] if X_for_cv_scaled is not None else X_for_cv.shape[1] if X_for_cv is not None else 0
+            n_classes = len(classes)
+            st.metric("Model Complexity", f"{n_features} features × {n_classes} classes")
 
         st.divider()
 
-        # --- Cross-Validation Section ---
-        st.markdown("### ✅ Cross-Validation Evaluation")
+        # CV Confusion Matrix
+        st.markdown("#### Confusion Matrix (CV Predictions)")
+        fig_cm_cv = plot_confusion_matrix(
+            cv_metrics['confusion_matrix'],
+            cv_metrics['classes'].tolist(),
+            title=f"Cross-Validation Confusion Matrix - {cv_classifier}"
+        )
+        st.plotly_chart(fig_cm_cv, use_container_width=True)
 
-        st.info("""
-        **Stratified K-Fold CV:**
-        - Each fold maintains class proportions from the full dataset
-        - Every class is represented in each fold
-        - Provides robust performance estimates
+        # ═══════════════════════════════════════════════════════════════════════════
+        # CLASSIFIER-SPECIFIC DIAGNOSTICS
+        # ═══════════════════════════════════════════════════════════════════════════
+
+        st.divider()
+        st.markdown("### 🔬 Classifier-Specific Diagnostics")
+
+        # --- LDA/QDA: Mahalanobis Distance Distributions ---
+        if cv_classifier in ['LDA', 'QDA']:
+            st.markdown("#### 📏 Mahalanobis Distance Distributions")
+            st.info(
+                "Mahalanobis distances from each sample to class centroids. "
+                "Proper class separation shows distinct distribution peaks."
+            )
+
+            try:
+                # Get Mahalanobis distances from cv_results if available
+                mahal_distances = cv_res.get('mahalanobis_distances', None)
+
+                if mahal_distances is not None:
+                    # Validate matrix format - should be ndarray of shape (n_samples, n_classes)
+                    if isinstance(mahal_distances, dict):
+                        st.error("❌ Mahalanobis distances are in old dictionary format. Please re-run CV to update.")
+                        st.info("""
+        **Action Required:**
+        Re-run Cross-Validation in Tab 1 (Step 5) to recalculate distances in the correct format.
+        """)
+                    elif isinstance(mahal_distances, np.ndarray):
+                        # Verify expected shape (n_samples, n_classes)
+                        expected_shape = (len(y_for_cv), len(classes))
+                        if mahal_distances.shape != expected_shape:
+                            st.warning(f"⚠️ Unexpected matrix shape: {mahal_distances.shape}, expected {expected_shape}")
+
+                        # Create 3-tab interface for Mahalanobis distance analysis
+                        tab_closest, tab_category, tab_sample = st.tabs([
+                            "📊 Closest Category",
+                            "🎯 Distance to Specific Class",
+                            "🔍 Sample Analysis"
+                        ])
+
+                        # ═══════════════════════════════════════════════════════════════════════
+                        # NORMALIZE CLASSES AND SAMPLE NAMES
+                        # ═══════════════════════════════════════════════════════════════════════
+
+                        y_cv_array = y_for_cv.values if hasattr(y_for_cv, 'values') else y_for_cv
+
+                        # CRITICAL: Normalize all classes to strings for consistent matching
+                        classes_normalized = np.array([str(c) for c in sorted(np.unique(y_cv_array))])
+                        class_names_list = classes_normalized.tolist()
+
+                        # Convert y_cv_array to strings to match normalized classes
+                        y_cv_array_normalized = np.array([str(c) for c in y_cv_array])
+
+                        # ═══════════════════════════════════════════════════════════════════════
+                        # GET SAMPLE NAMES FROM SESSION STATE
+                        # ═══════════════════════════════════════════════════════════════════════
+
+                        # CRITICAL: Get original sample names from session_state
+                        if 'sample_names' in st.session_state:
+                            sample_names = st.session_state['sample_names']
+                            st.write(f"✅ Using original sample names from dataset ({len(sample_names)} names)")
+                        elif hasattr(X_for_cv_scaled, 'index'):
+                            # Try to get from DataFrame index
+                            sample_names = X_for_cv_scaled.index.tolist()
+                            st.write(f"✅ Using sample names from X_for_cv_scaled index")
+                        else:
+                            # Fallback: use row names if available, otherwise generate names
+                            if 'current_data' in st.session_state and hasattr(st.session_state['current_data'], 'index'):
+                                sample_names = st.session_state['current_data'].index.tolist()
+                                st.write(f"✅ Using sample names from current_data index")
+                            else:
+                                # Last resort: generate generic names
+                                sample_names = [f"Sample_{i}" for i in range(len(y_cv_array))]
+                                st.warning("⚠️ Using generated sample names (original names not available)")
+
+                        st.write(f"**Debug Info:**")
+                        st.write(f"- Classes (normalized): {class_names_list}")
+                        st.write(f"- Sample count: {len(y_cv_array_normalized)}")
+                        st.write(f"- Sample names: {sample_names[:5]}... (showing first 5)")
+
+                        # TAB 1: Distance to closest category
+                        with tab_closest:
+                            st.markdown("**Distance from each sample to its closest class**")
+                            st.caption("Shows the minimum distance to any class model. Bars colored by true class.")
+
+                            from classification_utils.plots import plot_mahalanobis_distance_closest_category
+                            fig_closest = plot_mahalanobis_distance_closest_category(
+                                mahal_distances,
+                                y_cv_array_normalized,  # Use normalized array
+                                class_names=class_names_list,
+                                title=f"{cv_classifier} - Distance to Closest Category (CV)",
+                                sample_names=sample_names  # Pass sample names
+                            )
+                            st.plotly_chart(fig_closest, use_container_width=True)
+
+                        # TAB 2: Distance to specific class
+                        with tab_category:
+                            st.markdown("**Distance from all samples to one specific class model**")
+                            st.caption("Select a class to see how all samples relate to that class's model.")
+
+                            col1, col2 = st.columns([1, 3])
+                            with col1:
+                                # Use normalized class names for selection
+                                target_class_str = st.selectbox(
+                                    "Select Target Class",
+                                    options=class_names_list,
+                                    format_func=lambda x: f"Class {x}",
+                                    key="mahal_cv_target_class"
+                                )
+
+                            try:
+                                from classification_utils.plots import plot_mahalanobis_distance_category
+
+                                fig_category = plot_mahalanobis_distance_category(
+                                    mahal_distances,
+                                    y_cv_array_normalized,  # Use normalized array
+                                    target_class=target_class_str,  # Already a string
+                                    class_names=class_names_list,
+                                    title=f"{cv_classifier} - Distance to Class {target_class_str} (CV)",
+                                    sample_names=sample_names  # Pass sample names
+                                )
+                                st.plotly_chart(fig_category, use_container_width=True)
+
+                            except Exception as e:
+                                st.error(f"❌ Error plotting: {str(e)}")
+                                with st.expander("📋 Debug Details"):
+                                    st.write(f"**Error Type**: {type(e).__name__}")
+                                    st.write(f"**Message**: {str(e)}")
+                                    st.write(f"**Target Class**: {target_class_str} (type: {type(target_class_str).__name__})")
+                                    st.write(f"**Available Classes**: {class_names_list}")
+                                    st.write(f"**Y Unique Values**: {np.unique(y_cv_array_normalized)}")
+
+                        # TAB 3: Sample-specific analysis
+                        with tab_sample:
+                            st.markdown("**Distance from one sample to all class models**")
+                            st.caption("Examine a specific sample to understand its classification.")
+
+                            col1, col2, col3 = st.columns([2, 1, 1])
+                            with col1:
+                                # Create selectbox with sample names for easy selection
+                                sample_options = [f"{sample_names[i]} (Index {i})"
+                                                for i in range(len(sample_names))]
+                                selected_option = st.selectbox(
+                                    "Select Sample",
+                                    options=sample_options,
+                                    key="mahal_cv_sample_select"
+                                )
+                                # Extract index from selected option
+                                sample_idx = int(selected_option.split("(Index ")[-1].rstrip(")"))
+
+                            # Show sample info
+                            with col2:
+                                st.metric("Sample Name", sample_names[sample_idx])
+
+                            with col3:
+                                true_class = y_cv_array_normalized[sample_idx]
+                                st.metric("True Class", true_class)
+
+                            try:
+                                from classification_utils.plots import plot_mahalanobis_distance_object
+
+                                # Get sample name for title
+                                sample_name = sample_names[sample_idx]
+
+                                fig_sample = plot_mahalanobis_distance_object(
+                                    mahal_distances,
+                                    sample_idx=sample_idx,
+                                    y_true=y_cv_array_normalized,  # Use normalized array
+                                    class_names=class_names_list,
+                                    title=f"{cv_classifier} - {sample_name} (True: {true_class}) (CV)",
+                                    sample_names=sample_names  # Pass sample names
+                                )
+                                st.plotly_chart(fig_sample, use_container_width=True)
+
+                            except Exception as e:
+                                st.error(f"❌ Error plotting: {str(e)}")
+                                with st.expander("📋 Debug Details"):
+                                    st.write(f"**Error Type**: {type(e).__name__}")
+                                    st.write(f"**Message**: {str(e)}")
+                                    st.write(f"**Sample Index**: {sample_idx}")
+                                    st.write(f"**Sample Name**: {sample_names[sample_idx] if sample_idx < len(sample_names) else 'N/A'}")
+                                    st.write(f"**True Class**: {y_cv_array_normalized[sample_idx]}")
+                                    st.write(f"**Mahal Distances Shape**: {mahal_distances.shape}")
+                    else:
+                        st.error(f"❌ Invalid mahalanobis_distances type: {type(mahal_distances).__name__}")
+                else:
+                    st.warning("⚠️ Mahalanobis distances not available in CV results")
+                    st.info("""
+        **Possible causes:**
+        1. CV was executed without Mahalanobis distance calculation
+        2. Data type mismatch during CV processing
+        3. Model requires training first (Tab 1, Step 4)
+
+        **Solution:**
+        - Re-run CV in Tab 1 (Step 5) to recalculate distances
+        - Or train a model in Tab 1 (Step 4) before CV
         """)
 
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            n_folds = st.number_input(
-                "Number of Folds",
-                min_value=2,
-                max_value=10,
-                value=5,
-                key="cv_n_folds_tab2"
-            )
-        with col2:
-            random_seed = st.number_input(
-                "Random Seed",
-                min_value=0,
-                max_value=9999,
-                value=42,
-                key="cv_random_seed_tab2"
-            )
+            except Exception as e:
+                st.warning(f"Could not display Mahalanobis distance plot: {str(e)}")
 
-        if st.button("🔄 Run Stratified Cross-Validation", type="primary", use_container_width=True, key="run_cv_btn_tab2"):
-            import time
+        # --- kNN: Distance & Neighbor Analysis ---
+        elif cv_classifier == 'kNN':
+            st.markdown("#### 📍 Distance & Neighbor Analysis (kNN)")
 
-            # Check if we have scaled data
-            if X_for_cv_scaled is None:
-                st.error("❌ Scaled data not found")
-                st.info("💡 Go to Tab 1 and complete Steps 4-5 (configure preprocessing and train model)")
-                st.stop()
+            # Debug expander (can be removed later)
+            with st.expander("🔍 kNN Model Loading Debug", expanded=False):
+                st.write(f"trained variable is None: {trained is None}")
+                st.write(f"cv_res has 'trained_model': {'trained_model' in cv_res if cv_res else 'N/A'}")
+                if cv_res:
+                    st.write(f"cv_res has 'X_train': {'X_train' in cv_res}")
+                    st.write(f"cv_res has 'k_value': {'k_value' in cv_res}")
+                    st.write(f"cv_res keys: {list(cv_res.keys())}")
 
-            # Validate data consistency before running CV
-            if len(y_for_cv) != len(X_for_cv_scaled):
-                st.error(f"❌ Data inconsistency detected: {len(y_for_cv)} labels vs {len(X_for_cv_scaled)} samples")
-                st.warning("⚠️ Please return to Tab 1 and retrain the model to ensure data consistency.")
-                st.stop()
+            try:
+                # Try multiple sources to get the model
+                knn_model = None
 
-            cv_start = time.time()
+                # Priority 1: From trained variable
+                if trained and trained.get('name') == 'kNN':
+                    knn_model = trained
+                    st.success("✓ Using trained model from session state")
 
-            with st.spinner(f"Running {n_folds}-fold cross-validation..."):
-                try:
-                    # Get preprocessing params from session state
-                    n_pcs = st.session_state.get('n_pcs', 3)
-                    confidence_level = st.session_state.get('confidence_level', 0.95)
+                # Priority 2: From cv_results
+                elif cv_res and cv_res.get('trained_model'):
+                    knn_model = cv_res.get('trained_model')
+                    st.success("✓ Using trained model from cv_results")
 
-                    # Prepare CV parameters based on classifier type
-                    if trained['name'] == 'LDA':
-                        cv_results = cross_validate_classifier(
-                            X_for_cv_scaled, y_for_cv.values,
-                            classifier_type='lda',
-                            n_folds=n_folds,
-                            classifier_params={
-                                'use_pca': trained['parameters'].get('use_pca', False)
-                            },
-                            random_state=random_seed
-                        )
-                    elif trained['name'] == 'QDA':
-                        cv_results = cross_validate_classifier(
-                            X_for_cv_scaled, y_for_cv.values,
-                            classifier_type='qda',
-                            n_folds=n_folds,
-                            classifier_params={
-                                'use_pca': trained['parameters'].get('use_pca', False)
-                            },
-                            random_state=random_seed
-                        )
-                    elif trained['name'] == 'kNN':
-                        cv_results = cross_validate_classifier(
-                            X_for_cv_scaled, y_for_cv.values,
-                            classifier_type='knn',
-                            n_folds=n_folds,
-                            classifier_params={
-                                'k': trained['parameters']['k'],
-                                'metric': trained['parameters']['metric'],
-                                'use_pca': trained['parameters'].get('use_pca', False)
-                            },
-                            random_state=random_seed
-                        )
-                    elif trained['name'] == 'SIMCA':
-                        cv_results = cross_validate_classifier(
-                            X_for_cv_scaled, y_for_cv.values,
-                            classifier_type='simca',
-                            n_folds=n_folds,
-                            classifier_params={
-                                'n_components': n_pcs,
-                                'confidence_level': confidence_level
-                            },
-                            random_state=random_seed
-                        )
-                    elif trained['name'] == 'UNEQ':
-                        cv_results = cross_validate_classifier(
-                            X_for_cv_scaled, y_for_cv.values,
-                            classifier_type='uneq',
-                            n_folds=n_folds,
-                            classifier_params={
-                                'n_components': n_pcs,
-                                'confidence_level': confidence_level,
-                                'use_pca': False
-                            },
-                            random_state=random_seed
-                        )
+                # Priority 3: Check if cv_results has the data directly
+                elif cv_res and 'X_train' in cv_res:
+                    # Model might not be in trained_model key, but data is there
+                    knn_model = {
+                        'model': cv_res.get('model'),
+                        'X_train': cv_res.get('X_train'),
+                        'y_train': cv_res.get('y_train'),
+                        'parameters': {
+                            'k': cv_res.get('k_value', 3),
+                            'metric': cv_res.get('metric', 'euclidean')
+                        }
+                    }
+                    st.warning("⚠️ Reconstructed model from cv_results data")
 
-                    cv_time = time.time() - cv_start
-                    st.session_state['cv_results'] = cv_results
-                    st.session_state['cv_time'] = cv_time
-
-                    st.success(f"✅ Cross-validation completed in {cv_time:.2f}s!")
-                    st.rerun()
-
-                except Exception as e:
-                    st.error(f"❌ Cross-validation failed: {str(e)}")
-                    import traceback
-                    st.error(traceback.format_exc())
-
-        # Display CV results
-        if 'cv_results' in st.session_state:
-            cv_res = st.session_state['cv_results']
-            y_pred_cv = cv_res['cv_predictions']
-
-            # Validate that y_for_cv and y_pred_cv have the same length
-            if len(y_for_cv) != len(y_pred_cv):
-                st.error(f"❌ Data mismatch detected: Training labels ({len(y_for_cv)} samples) don't match CV predictions ({len(y_pred_cv)} samples)")
-                st.warning("This usually happens when the model was trained with different data. Please retrain the model in Tab 1.")
-                st.stop()
-
-            cv_metrics = compute_classification_metrics(y_for_cv.values, y_pred_cv, classes)
-
-            st.markdown("### 📊 Cross-Validation Results")
-
-            # CV metrics - Row 1: Performance Metrics
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric(
-                    "CV Accuracy",
-                    f"{cv_metrics['accuracy']:.1f}%",
-                    delta=f"{cv_metrics['accuracy'] - 50:.1f}%" if cv_metrics['accuracy'] != 50 else None
-                )
-            with col2:
-                st.metric("Avg Sensitivity", f"{cv_metrics['average_sensitivity']:.1f}%")
-            with col3:
-                st.metric("Avg Specificity", f"{cv_metrics['average_specificity']:.1f}%")
-
-            # CV metrics - Row 2: Efficiency Metrics
-            col4, col5, col6 = st.columns(3)
-            with col4:
-                cv_time = st.session_state.get('cv_time', 0)
-                st.metric("CV Time", f"{cv_time:.2f}s")
-            with col5:
-                pred_time_avg = cv_time / len(y_pred_cv) if len(y_pred_cv) > 0 else 0
-                st.metric("Prediction Time (Avg)", f"{pred_time_avg:.4f}s/sample")
-            with col6:
-                n_features = trained['n_features']
-                n_classes = len(classes)
-                st.metric("Model Complexity", f"{n_features} features × {n_classes} classes")
-
-            st.divider()
-
-            # CV Confusion Matrix
-            st.markdown("#### Confusion Matrix (CV Predictions)")
-            fig_cm_cv = plot_confusion_matrix(
-                cv_metrics['confusion_matrix'],
-                cv_metrics['classes'].tolist(),
-                title=f"Cross-Validation Confusion Matrix - {trained['name']}"
-            )
-            st.plotly_chart(fig_cm_cv, use_container_width=True)
-
-            # Coomans plot for SIMCA/UNEQ (with debug diagnostics and class selection)
-            st.divider()
-            st.markdown("#### 📍 Coomans Plot (CV Diagnostics - 2-Class Comparison)")
-
-            # Debug info: Show model and class information
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Model Type", trained['name'])
-            with col2:
-                st.metric("Number of Classes", len(classes))
-            with col3:
-                classes_str = ', '.join([str(c) for c in classes])
-                st.metric("Classes", classes_str)
-
-            # Check 1: Classifier type
-            if trained['name'] not in ['SIMCA', 'UNEQ']:
-                st.info(f"ℹ️ Coomans plot is only available for SIMCA and UNEQ classifiers. Current model: {trained['name']}")
-                st.caption("Coomans plots visualize distances to two class models, which is specific to SIMCA and UNEQ methods.")
-            # Check 2: Need at least 2 classes
-            elif len(classes) < 2:
-                st.warning(f"⚠️ Coomans plot requires at least 2 classes. Current classes: {classes_str} ({len(classes)} class)")
-                st.caption("Coomans plot is a two-dimensional visualization showing distances to two class models.")
-            # Both checks passed: allow class selection and render plot
-            else:
-                # Class selection interface
-                if len(classes) == 2:
-                    st.info("Coomans plot showing distance patterns for the 2 classes in your dataset")
-                    selected_class_1 = classes[0]
-                    selected_class_2 = classes[1]
+                if knn_model is None:
+                    st.error("❌ Could not find kNN model in any location")
+                    st.info("**Debugging info:**")
+                    st.write(f"- trained: {trained}")
+                    st.write(f"- cv_res keys: {list(cv_res.keys()) if cv_res else 'No cv_res'}")
                 else:
-                    st.info(f"Coomans plot requires 2 classes. You have {len(classes)} classes. Select which two to compare:")
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        selected_class_1 = st.selectbox(
-                            "Class 1",
-                            options=classes.tolist(),
-                            index=0,
-                            key="coomans_class1_tab2"
-                        )
-                    with col2:
-                        available_classes_2 = [c for c in classes if c != selected_class_1]
-                        selected_class_2 = st.selectbox(
-                            "Class 2",
-                            options=available_classes_2,
-                            index=0,
-                            key="coomans_class2_tab2"
-                        )
-                st.success(f"✅ Comparing: {selected_class_1} vs {selected_class_2}")
+                    # Extract parameters safely with multiple fallbacks
+                    k_value = knn_model.get('parameters', {}).get('k', cv_res.get('k_value', 3))
+                    metric = knn_model.get('parameters', {}).get('metric', cv_res.get('metric', 'euclidean'))
 
-                try:
-                    # Get predictions and distances for all samples
-                    if trained['name'] == 'SIMCA':
-                        pred_detailed = predict_simca_detailed(X_for_cv_scaled, trained['model'])
-                        distances_array_all = pred_detailed['distances_per_class']
-                    elif trained['name'] == 'UNEQ':
-                        pred_detailed = predict_uneq_detailed(X_for_cv_scaled, trained['model'])
-                        distances_array_all = pred_detailed['distances_per_class']
+                    # Get data - with fallback to cv_results (explicit None check to avoid array ambiguity)
+                    X_train = cv_res.get('X_train') if cv_res.get('X_train') is not None else knn_model.get('X_train')
+                    y_train = cv_res.get('y_train') if cv_res.get('y_train') is not None else knn_model.get('y_train')
 
-                    # Find indices of selected classes in the full class list
-                    class_list = classes.tolist()
-                    idx_class1 = class_list.index(selected_class_1)
-                    idx_class2 = class_list.index(selected_class_2)
+                    # Get the actual model object
+                    knn_model_obj = knn_model.get('model') if isinstance(knn_model, dict) else knn_model
 
-                    # Extract distances for the two selected classes
-                    dist_class1 = distances_array_all[:, idx_class1]
-                    dist_class2 = distances_array_all[:, idx_class2]
+                    if X_train is None or y_train is None:
+                        st.warning("⚠️ Training data not available in model")
+                        st.info("ℹ️ The model was trained but training data is not stored. Showing CV metrics only.")
 
-                    # Get critical distances for selected classes
-                    if trained['name'] == 'SIMCA':
-                        crit_dist1 = trained['model']['class_models'][selected_class_1]['f_critical']
-                        crit_dist2 = trained['model']['class_models'][selected_class_2]['f_critical']
-                    elif trained['name'] == 'UNEQ':
-                        crit_dist1 = trained['model']['class_models'][selected_class_1]['t2_critical']
-                        crit_dist2 = trained['model']['class_models'][selected_class_2]['t2_critical']
-
-                    # Filter samples to only those belonging to the two selected classes
-                    # Convert y_for_cv to array for consistent indexing
-                    y_for_cv_arr = y_for_cv.values if hasattr(y_for_cv, 'values') else np.array(y_for_cv)
-
-                    mask_selected = np.isin(y_for_cv_arr, [selected_class_1, selected_class_2])
-                    dist_class1_filtered = dist_class1[mask_selected]
-                    dist_class2_filtered = dist_class2[mask_selected]
-                    y_filtered = y_for_cv_arr[mask_selected]
-
-                    # Preserve original 1-based sample indices
-                    original_indices = np.where(mask_selected)[0]
-
-                    if hasattr(X_for_cv_scaled, 'index'):
-                        sample_names = X_for_cv_scaled.index[original_indices].tolist()
+                        # Show basic metrics
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("k (Neighbors)", k_value)
+                        with col2:
+                            st.metric("Distance Metric", metric.capitalize())
+                        with col3:
+                            accuracy = cv_metrics.get('accuracy', 0)
+                            st.metric("CV Accuracy", f"{accuracy:.1f}%")
                     else:
-                        sample_names = [str(i+1) for i in original_indices]
+                        # === METRICS DISPLAY ===
+                        st.markdown("##### 📈 Model Configuration")
 
-                    # Ensure labels are in the correct format
-                    y_true_list = y_filtered.tolist() if hasattr(y_filtered, 'tolist') else list(y_filtered)
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("k (Neighbors)", k_value)
+                        with col2:
+                            st.metric("Distance Metric", metric.capitalize())
+                        with col3:
+                            accuracy = cv_metrics.get('accuracy', 0)
+                            st.metric("CV Accuracy", f"{accuracy:.1f}%")
 
-                    # Debug info on data shapes
-                    with st.expander("🔍 Debug Information", expanded=False):
-                        st.write(f"**Total Samples**: {len(y_for_cv)}")
-                        st.write(f"**Filtered Samples (selected 2 classes)**: {len(y_filtered)}")
-                        st.write(f"**Selected Classes**: {selected_class_1} (index {idx_class1}), {selected_class_2} (index {idx_class2})")
-                        st.write(f"**Distance Array Shape (all classes)**: {distances_array_all.shape}")
-                        st.write(f"**Distance to {selected_class_1}**: min={dist_class1_filtered.min():.3f}, max={dist_class1_filtered.max():.3f}, mean={dist_class1_filtered.mean():.3f}")
-                        st.write(f"**Distance to {selected_class_2}**: min={dist_class2_filtered.min():.3f}, max={dist_class2_filtered.max():.3f}, mean={dist_class2_filtered.mean():.3f}")
-                        st.write(f"**Critical Distance {selected_class_1}**: {crit_dist1:.3f}")
-                        st.write(f"**Critical Distance {selected_class_2}**: {crit_dist2:.3f}")
-                        st.write(f"**y_filtered type**: {type(y_filtered)}, length={len(y_filtered)}")
-                        st.write(f"**y_filtered preview (first 10)**: {y_true_list[:10]}")
-                        st.write(f"**Unique classes in filtered labels**: {np.unique(y_true_list)}")
-                        st.write(f"**Sample Names (first 10)**: {sample_names[:10]}")
-                        st.write(f"**Original Indices (first 10)**: {original_indices[:10]}")
-                        st.write(f"**DEBUG - About to call plot_coomans:**")
-                        st.write(f"dist_class1_filtered shape: {dist_class1_filtered.shape}, values: {dist_class1_filtered[:5]}")
-                        st.write(f"dist_class2_filtered shape: {dist_class2_filtered.shape}, values: {dist_class2_filtered[:5]}")
-                        st.write(f"y_true_list: {y_true_list[:10]}")
-                        st.write(f"sample_names: {sample_names[:5]}")
+                        # === DISTANCE STATISTICS ===
+                        st.markdown("##### 📊 Distance Statistics")
 
-                    fig_coomans_cv = plot_coomans(
-                        dist_class1=dist_class1_filtered,
-                        dist_class2=dist_class2_filtered,
-                        y_true=y_true_list,
-                        crit_dist1=crit_dist1,
-                        crit_dist2=crit_dist2,
-                        class_names=[str(selected_class_1), str(selected_class_2)],
-                        title=f"Coomans Plot - {trained['name']}: {selected_class_1} vs {selected_class_2} (CV)",
-                        normalize=False,
-                        sample_names=sample_names
-                    )
-                    st.plotly_chart(fig_coomans_cv, use_container_width=True, key="coomans_cv_tab2")
-
-                except Exception as e:
-                    st.error(f"❌ Could not generate Coomans plot: {str(e)}")
-
-                    # Enhanced debug information on error
-                    with st.expander("🐛 Error Debug Information", expanded=True):
-                        st.write("**Error Details:**")
-                        st.code(str(e))
-
-                        st.write("**Traceback:**")
-                        import traceback
-                        st.code(traceback.format_exc())
-
-                        st.write("**Data Diagnostics:**")
                         try:
-                            st.write(f"- X_for_cv_scaled shape: {X_for_cv_scaled.shape if hasattr(X_for_cv_scaled, 'shape') else 'N/A'}")
-                            st.write(f"- y_for_cv shape/length: {y_for_cv.shape if hasattr(y_for_cv, 'shape') else len(y_for_cv)}")
-                            st.write(f"- classes: {classes}")
-                            st.write(f"- trained['name']: {trained['name']}")
-                            if 'distances_array' in locals():
-                                st.write(f"- distances_array shape: {distances_array.shape}")
-                                st.write(f"- distances_array sample values: {distances_array[:3]}")
-                        except Exception as debug_err:
-                            st.write(f"Could not retrieve debug info: {debug_err}")
+                            # Calculate pairwise distance matrix
+                            from classification_utils.calculations import calculate_distance_matrix
+                            dist_matrix = calculate_distance_matrix(X_train, X_train, metric=metric)
 
-            # Coomans Comparison: SIMCA vs UNEQ (if user wants comparison)
-            if len(classes) == 2:
-                st.divider()
-                st.markdown("#### 📊 Coomans Comparison: SIMCA vs UNEQ")
+                            # Remove diagonal (self-distances = 0)
+                            n_samples = dist_matrix.shape[0]
+                            mask = ~np.eye(n_samples, dtype=bool)
+                            distances_flat = dist_matrix[mask]
 
-                if st.checkbox("Show SIMCA vs UNEQ Comparison", value=False, key="show_coomans_comparison_tab2"):
-                    st.info("Side-by-side comparison of SIMCA and UNEQ class modeling approaches")
+                            # Statistics
+                            col1, col2, col3, col4 = st.columns(4)
+                            with col1:
+                                st.metric("Mean Distance", f"{np.mean(distances_flat):.3f}")
+                            with col2:
+                                st.metric("Median Distance", f"{np.median(distances_flat):.3f}")
+                            with col3:
+                                st.metric("Min Distance", f"{np.min(distances_flat):.3f}")
+                            with col4:
+                                st.metric("Max Distance", f"{np.max(distances_flat):.3f}")
 
-                    try:
-                        # Train both SIMCA and UNEQ for comparison
-                        with st.spinner("Training SIMCA and UNEQ for comparison..."):
-                            # Get parameters
-                            n_pcs = tab1_data.get('n_pcs', 3)
-                            confidence_level = tab1_data.get('confidence_level', 0.95)
+                            # === DISTANCE HISTOGRAM ===
+                            st.markdown("##### 📊 Distance Distribution")
 
-                            # Train SIMCA
-                            simca_model = fit_simca(X_for_cv_scaled, y_for_cv, n_pcs, confidence_level)
-                            simca_pred_detailed = predict_simca_detailed(X_for_cv_scaled, simca_model)
-                            simca_distances = simca_pred_detailed['distances_per_class']
+                            fig_hist = go.Figure()
+                            fig_hist.add_trace(go.Histogram(
+                                x=distances_flat,
+                                nbinsx=50,
+                                name="Distances",
+                                marker=dict(color='steelblue', line=dict(color='black', width=1))
+                            ))
 
-                            # Train UNEQ
-                            uneq_model = fit_uneq(X_for_cv_scaled, y_for_cv, n_pcs, confidence_level, use_pca=False)
-                            uneq_pred_detailed = predict_uneq_detailed(X_for_cv_scaled, uneq_model)
-                            uneq_distances = uneq_pred_detailed['distances_per_class']
-
-                            # Get class names and thresholds
-                            cls1, cls2 = classes[0], classes[1]
-                            simca_crit1 = simca_model['class_models'][cls1]['f_critical']
-                            simca_crit2 = simca_model['class_models'][cls2]['f_critical']
-                            uneq_crit1 = uneq_model['class_models'][cls1]['t2_critical']
-                            uneq_crit2 = uneq_model['class_models'][cls2]['t2_critical']
-
-                            # Create subplots
-                            from plotly.subplots import make_subplots
-
-                            fig_comparison = make_subplots(
-                                rows=1, cols=2,
-                                subplot_titles=(
-                                    f"SIMCA (F-statistic)",
-                                    f"UNEQ (T²-statistic)"
-                                ),
-                                horizontal_spacing=0.12
+                            fig_hist.update_layout(
+                                title=f"Distribution of Pairwise {metric.capitalize()} Distances",
+                                xaxis_title="Distance",
+                                yaxis_title="Frequency",
+                                height=400,
+                                showlegend=False,
+                                plot_bgcolor='white',
+                                xaxis=dict(showgrid=True, gridwidth=1, gridcolor='lightgray'),
+                                yaxis=dict(showgrid=True, gridwidth=1, gridcolor='lightgray')
                             )
 
-                            # Prepare data
-                            y_true_list = y_for_cv.tolist() if hasattr(y_for_cv, 'tolist') else list(y_for_cv)
+                            st.plotly_chart(fig_hist, use_container_width=True)
 
-                            # Define colors for classes
-                            color_map = {cls1: '#1f77b4', cls2: '#ff7f0e'}  # Blue and Orange
-                            colors = [color_map[cls] for cls in y_true_list]
+                        except Exception as e:
+                            st.warning(f"Could not calculate distance statistics: {str(e)}")
 
-                            # Left plot: SIMCA
-                            fig_comparison.add_trace(
-                                go.Scatter(
-                                    x=simca_distances[:, 0],
-                                    y=simca_distances[:, 1],
-                                    mode='markers',
-                                    marker=dict(color=colors, size=8, line=dict(width=1, color='white')),
-                                    name='Samples',
-                                    showlegend=False,
-                                    text=[f"Sample {i}<br>Class: {y_true_list[i]}" for i in range(len(y_true_list))],
-                                    hovertemplate='<b>%{text}</b><br>Dist to %s: %%{x:.3f}<br>Dist to %s: %%{y:.3f}<extra></extra>' % (cls1, cls2)
-                                ),
-                                row=1, col=1
+                        # ═══════════════════════════════════════════════════════════════
+                        # NEW: DISTANCE DISTRIBUTION BY CLASS
+                        # ═══════════════════════════════════════════════════════════════
+
+                        st.markdown("##### 📊 Distance Distribution by True Class")
+
+                        try:
+                            classes_list = sorted(np.unique(y_train))
+                            fig_by_class = go.Figure()
+
+                            colors = ['#0000FF', '#FF00FF', '#00FFFF', '#FF0000', '#00FF00']  # Blue, Magenta, Cyan, Red, Green
+
+                            for idx, class_label in enumerate(classes_list):
+                                class_mask = y_train == class_label
+                                class_indices = np.where(class_mask)[0]
+
+                                if len(class_indices) > 1:
+                                    class_dists = []
+                                    for i in class_indices:
+                                        for j in class_indices:
+                                            if i < j:
+                                                class_dists.append(dist_matrix[i, j])
+
+                                    if class_dists:
+                                        fig_by_class.add_trace(go.Histogram(
+                                            x=class_dists,
+                                            nbinsx=30,
+                                            name=f"Class {class_label}",
+                                            marker_color=colors[idx % len(colors)],
+                                            opacity=0.7
+                                        ))
+
+                            fig_by_class.update_layout(
+                                title="Intra-Class Distance Distribution (How tight each class is)",
+                                xaxis_title="Distance",
+                                yaxis_title="Frequency",
+                                barmode='overlay',
+                                height=400,
+                                hovermode='x unified',
+                                plot_bgcolor='white',
+                                xaxis=dict(showgrid=True, gridwidth=1, gridcolor='lightgray'),
+                                yaxis=dict(showgrid=True, gridwidth=1, gridcolor='lightgray')
                             )
 
-                            # SIMCA critical lines
-                            fig_comparison.add_hline(y=simca_crit2, line_dash="dash", line_color="red",
-                                                    annotation_text=f"{cls2} threshold", row=1, col=1)
-                            fig_comparison.add_vline(x=simca_crit1, line_dash="dash", line_color="blue",
-                                                    annotation_text=f"{cls1} threshold", row=1, col=1)
+                            st.plotly_chart(fig_by_class, use_container_width=True)
+                            st.caption("Lower distances within a class indicate tighter clusters (easier to classify)")
 
-                            # Right plot: UNEQ
-                            fig_comparison.add_trace(
-                                go.Scatter(
-                                    x=uneq_distances[:, 0],
-                                    y=uneq_distances[:, 1],
-                                    mode='markers',
-                                    marker=dict(color=colors, size=8, line=dict(width=1, color='white')),
-                                    name='Samples',
-                                    showlegend=False,
-                                    text=[f"Sample {i}<br>Class: {y_true_list[i]}" for i in range(len(y_true_list))],
-                                    hovertemplate='<b>%{text}</b><br>Dist to %s: %%{x:.3f}<br>Dist to %s: %%{y:.3f}<extra></extra>' % (cls1, cls2)
-                                ),
-                                row=1, col=2
-                            )
+                        except Exception as e:
+                            st.warning(f"Could not plot distance by class: {str(e)}")
 
-                            # UNEQ critical lines
-                            fig_comparison.add_hline(y=uneq_crit2, line_dash="dash", line_color="red",
-                                                    annotation_text=f"{cls2} threshold", row=1, col=2)
-                            fig_comparison.add_vline(x=uneq_crit1, line_dash="dash", line_color="blue",
-                                                    annotation_text=f"{cls1} threshold", row=1, col=2)
+                        # ═══════════════════════════════════════════════════════════════
+                        # NEW: NEIGHBOR VOTING ANALYSIS
+                        # ═══════════════════════════════════════════════════════════════
 
-                            # Update layout
-                            fig_comparison.update_xaxes(title_text=f"Distance to Class {cls1}", row=1, col=1)
-                            fig_comparison.update_yaxes(title_text=f"Distance to Class {cls2}", row=1, col=1)
-                            fig_comparison.update_xaxes(title_text=f"Distance to Class {cls1}", row=1, col=2)
-                            fig_comparison.update_yaxes(title_text=f"Distance to Class {cls2}", row=1, col=2)
+                        st.markdown("##### 🗳️ Neighbor Voting Analysis")
+
+                        try:
+                            y_true_arr = y_for_cv.values if hasattr(y_for_cv, 'values') else np.asarray(y_for_cv)
+                            y_pred_arr = y_pred_cv.values if hasattr(y_pred_cv, 'values') else np.asarray(y_pred_cv)
+
+                            # Calculate distance from test samples to training samples
+                            from classification_utils.calculations import calculate_distance_matrix
+                            dist_test_train = calculate_distance_matrix(X_for_cv_scaled, X_train, metric=metric)
+
+                            voting_data = []
+
+                            for sample_idx in range(min(len(X_for_cv_scaled), 100)):  # Limit to first 100 for performance
+                                distances = dist_test_train[sample_idx]
+                                k_nearest_idx = np.argsort(distances)[:k_value]
+                                k_nearest_labels = y_train[k_nearest_idx]
+
+                                true_label = y_true_arr[sample_idx]
+                                pred_label = y_pred_arr[sample_idx]
+
+                                # Count votes
+                                classes_unique = sorted(np.unique(y_train))
+                                votes = {}
+                                for cls in classes_unique:
+                                    votes[cls] = int(np.sum(k_nearest_labels == cls))
+
+                                # Confidence
+                                votes_for_pred = votes.get(pred_label, 0)
+                                confidence = votes_for_pred / k_value * 100
+
+                                # Status
+                                is_correct = true_label == pred_label
+                                status = "✓" if is_correct else "✗"
+
+                                voting_data.append({
+                                    'Sample': sample_idx,
+                                    'True': true_label,
+                                    'Pred': pred_label,
+                                    'Votes': f"{votes_for_pred}/{k_value}",
+                                    'Conf%': f"{confidence:.0f}",
+                                    'Status': status
+                                })
+
+                            voting_df = pd.DataFrame(voting_data)
+
+                            # Filter to show interesting samples
+                            interesting = voting_df[
+                                (voting_df['Conf%'] != '100') |
+                                (voting_df['Status'] == '✗')
+                            ].head(20)
+
+                            if len(interesting) > 0:
+                                st.write(f"**Samples with low confidence or misclassified** (showing {len(interesting)}):")
+                                st.dataframe(interesting, use_container_width=True, hide_index=True)
+                            else:
+                                st.success("✅ All samples have 100% confidence and are correct!")
+
+                        except Exception as e:
+                            st.warning(f"Could not analyze voting: {str(e)}")
+
+                        # ═══════════════════════════════════════════════════════════════
+                        # NEW: CORRECT VS MISCLASSIFIED DISTANCE COMPARISON
+                        # ═══════════════════════════════════════════════════════════════
+
+                        st.markdown("##### 📏 Distance Comparison: Correct vs Misclassified")
+
+                        try:
+                            y_true_arr = y_for_cv.values if hasattr(y_for_cv, 'values') else np.asarray(y_for_cv)
+                            y_pred_arr = y_pred_cv.values if hasattr(y_pred_cv, 'values') else np.asarray(y_pred_cv)
+
+                            correct_mask = y_true_arr == y_pred_arr
+                            misclass_mask = ~correct_mask
+
+                            # Mean distance to nearest neighbor
+                            mean_dist_correct = []
+                            mean_dist_misclass = []
+
+                            for sample_idx in range(len(X_for_cv_scaled)):
+                                distances = dist_test_train[sample_idx]
+                                nearest_dist = np.min(distances[distances > 0]) if np.any(distances > 0) else 0
+
+                                if correct_mask[sample_idx]:
+                                    mean_dist_correct.append(nearest_dist)
+                                else:
+                                    mean_dist_misclass.append(nearest_dist)
+
+                            fig_comparison = go.Figure()
+
+                            if len(mean_dist_correct) > 0:
+                                fig_comparison.add_trace(go.Box(
+                                    y=mean_dist_correct,
+                                    name='Correctly Classified',
+                                    marker_color='lightgreen',
+                                    boxmean='sd'
+                                ))
+
+                            if len(mean_dist_misclass) > 0:
+                                fig_comparison.add_trace(go.Box(
+                                    y=mean_dist_misclass,
+                                    name='Misclassified',
+                                    marker_color='lightcoral',
+                                    boxmean='sd'
+                                ))
 
                             fig_comparison.update_layout(
-                                title_text="Coomans Plot Comparison: SIMCA vs UNEQ (CV Diagnostics)",
-                                height=600,
-                                width=1400,
-                                showlegend=False
+                                title="Distance to Nearest Neighbor: Correct vs Misclassified Samples",
+                                yaxis_title="Distance",
+                                height=400,
+                                showlegend=True,
+                                plot_bgcolor='white'
                             )
 
                             st.plotly_chart(fig_comparison, use_container_width=True)
 
-                            # Add interpretation
-                            st.caption(
-                                "**Left (SIMCA)**: Uses F-statistic distances based on PCA models per class. "
-                                "**Right (UNEQ)**: Uses Mahalanobis T²-statistic distances with different dispersions per class. "
-                                "Points closer to origin in each plot indicate better fit to the respective class model."
+                            # Statistics
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                if len(mean_dist_correct) > 0:
+                                    st.metric(
+                                        "Correct (avg dist)",
+                                        f"{np.mean(mean_dist_correct):.3f}",
+                                        help=f"n={len(mean_dist_correct)}"
+                                    )
+                            with col2:
+                                if len(mean_dist_misclass) > 0:
+                                    st.metric(
+                                        "Misclassified (avg dist)",
+                                        f"{np.mean(mean_dist_misclass):.3f}",
+                                        help=f"n={len(mean_dist_misclass)}"
+                                    )
+
+                            st.caption("Higher distances for misclassified samples suggest they're in ambiguous regions")
+
+                        except Exception as e:
+                            st.warning(f"Could not compare distances: {str(e)}")
+
+                        # === K PERFORMANCE CHART (if available) ===
+                        st.markdown("##### 📈 k-Value Performance Metrics")
+
+                        try:
+                            # Simple alternative: just show metrics instead of k-performance chart
+                            col1, col2 = st.columns(2)
+
+                            with col1:
+                                accuracy = cv_metrics.get('accuracy', 0)
+                                sensitivity = cv_metrics.get('average_sensitivity', 0)
+                                st.metric("Accuracy", f"{accuracy:.1f}%")
+                                st.metric("Avg Sensitivity", f"{sensitivity:.1f}%")
+
+                            with col2:
+                                specificity = cv_metrics.get('average_specificity', 0)
+                                n_misclass = len(cv_res.get('misclassified_indices', []))
+                                st.metric("Avg Specificity", f"{specificity:.1f}%")
+                                st.metric("Misclassified", f"{n_misclass}")
+
+                        except Exception as e:
+                            st.info(f"Performance metrics unavailable: {str(e)}")
+
+                        # === MISCLASSIFIED SAMPLES TABLE ===
+                        st.markdown("##### ❌ Misclassified Samples Details")
+
+                        try:
+                            misclass_indices = cv_res.get('misclassified_indices', [])
+
+                            if len(misclass_indices) == 0:
+                                st.success("✅ No misclassified samples!")
+                            else:
+                                # Get predictions
+                                y_true_arr = y_for_cv.values if hasattr(y_for_cv, 'values') else np.asarray(y_for_cv)
+                                y_pred_arr = y_pred_cv.values if hasattr(y_pred_cv, 'values') else np.asarray(y_pred_cv)
+
+                                # Build detailed table
+                                misclass_data = []
+                                for idx in misclass_indices[:20]:  # Show first 20
+                                    misclass_data.append({
+                                        'Sample Index': idx,
+                                        'True Class': y_true_arr[idx],
+                                        'Predicted': y_pred_arr[idx]
+                                    })
+
+                                if misclass_data:
+                                    misclass_df = pd.DataFrame(misclass_data)
+                                    st.dataframe(misclass_df, use_container_width=True, hide_index=True)
+
+                                    if len(misclass_indices) > 20:
+                                        st.caption(f"Showing first 20 of {len(misclass_indices)} misclassified samples")
+
+                        except Exception as e:
+                            st.warning(f"Could not display misclassified samples: {str(e)}")
+
+            except Exception as e:
+                st.error(f"Error in kNN analysis: {str(e)}")
+                st.info("💡 Try re-running CV in Tab 1 to regenerate model data")
+
+        # --- SIMCA/UNEQ: Coomans Plot ---
+        elif cv_classifier in ['SIMCA', 'UNEQ']:
+            st.markdown("#### 🎯 Coomans Plot (Class Comparison)")
+            st.info(
+                "Coomans plot compares distances from samples to two classes. "
+                "Good separation shows distinct clusters."
+            )
+
+            try:
+                # Get available classes for comparison
+                classes_list = list(cv_metrics.get('sensitivity_per_class', {}).keys())
+
+                if len(classes_list) >= 2:
+                    col_class1, col_class2 = st.columns(2)
+
+                    with col_class1:
+                        selected_class1 = st.selectbox(
+                            "Class 1",
+                            options=classes_list,
+                            key="coomans_class1_diag_tab2"
+                        )
+
+                    with col_class2:
+                        remaining_classes = [c for c in classes_list if c != selected_class1]
+                        selected_class2 = st.selectbox(
+                            "Class 2",
+                            options=remaining_classes if remaining_classes else [selected_class1],
+                            key="coomans_class2_diag_tab2"
+                        )
+
+                    if selected_class1 != selected_class2:
+                        try:
+                            fig_coomans = plot_coomans(
+                                y_for_cv.values if hasattr(y_for_cv, 'values') else y_for_cv,
+                                y_pred_cv,
+                                class_1=selected_class1,
+                                class_2=selected_class2,
+                                cv_results=cv_res,
+                                classifier_type=cv_classifier.lower(),
+                                title=f"{cv_classifier} - Coomans Plot: {selected_class1} vs {selected_class2}"
                             )
-
-                    except Exception as e:
-                        st.error(f"Could not generate SIMCA vs UNEQ comparison: {str(e)}")
-                        import traceback
-                        st.error(traceback.format_exc())
-
-            st.divider()
-
-            # Per-class metrics
-            st.markdown("#### Per-Class Metrics (CV)")
-            per_class_cv_data = []
-            for cls in classes:
-                per_class_cv_data.append({
-                    'Class': cls,
-                    'Sensitivity %': f"{cv_metrics['sensitivity_per_class'][cls]:.2f}",
-                    'Specificity %': f"{cv_metrics['specificity_per_class'][cls]:.2f}",
-                    'Precision %': f"{cv_metrics['precision_per_class'][cls]:.2f}",
-                    'F1 %': f"{cv_metrics['f1_per_class'][cls]:.2f}"
-                })
-            per_class_cv_df = pd.DataFrame(per_class_cv_data)
-            st.dataframe(per_class_cv_df, use_container_width=True, hide_index=True)
-
-            # Sensitivity & Specificity Detailed Table
-            st.markdown("#### Sensitivity & Specificity by Class")
-            st.info("Detailed breakdown of True Positive Rate (Sensitivity) and True Negative Rate (Specificity)")
-
-            # Calculate class support (number of samples per class)
-            class_support = {}
-            for cls in classes:
-                class_support[cls] = int(np.sum(y_for_cv == cls))
-
-            # Create detailed sensitivity/specificity table
-            sens_spec_data = []
-            for cls in classes:
-                sens = cv_metrics['sensitivity_per_class'][cls]
-                spec = cv_metrics['specificity_per_class'][cls]
-
-                # Determine status based on both metrics
-                if sens > 80 and spec > 80:
-                    status = "🟢 Good"
-                elif sens > 70 and spec > 70:
-                    status = "🟡 OK"
+                            st.plotly_chart(fig_coomans, use_container_width=True)
+                        except Exception as e:
+                            st.warning(f"Could not display Coomans plot: {str(e)}")
                 else:
-                    status = "🔴 Low"
+                    st.info("Need at least 2 classes for Coomans plot")
 
-                sens_spec_data.append({
-                    'Class': cls,
-                    'Sensitivity %': sens,
-                    'Specificity %': spec,
-                    'Support': class_support[cls],
-                    'Status': status
-                })
+            except Exception as e:
+                st.warning(f"Could not prepare Coomans plot: {str(e)}")
 
-            sens_spec_df = pd.DataFrame(sens_spec_data)
+        st.divider()
 
-            # Apply color coding with styling
-            def color_metrics(row):
-                colors = []
-                for col in row.index:
-                    if col == 'Status':
-                        if '🟢' in str(row[col]):
-                            colors.append('background-color: #d4edda')  # Light green
-                        elif '🟡' in str(row[col]):
-                            colors.append('background-color: #fff3cd')  # Light yellow
-                        elif '🔴' in str(row[col]):
-                            colors.append('background-color: #f8d7da')  # Light red
-                        else:
-                            colors.append('')
-                    elif col in ['Sensitivity %', 'Specificity %']:
-                        val = row[col]
-                        if val > 80:
-                            colors.append('background-color: #d4edda')  # Light green
-                        elif val > 70:
-                            colors.append('background-color: #fff3cd')  # Light yellow
-                        else:
-                            colors.append('background-color: #f8d7da')  # Light red
-                    else:
-                        colors.append('')
-                return colors
+        # ═══════════════════════════════════════════════════════════════════════════
+        # GENERAL DIAGNOSTICS: ALL CLASSIFIERS
+        # ═══════════════════════════════════════════════════════════════════════════
 
-            styled_sens_spec_df = sens_spec_df.style.apply(color_metrics, axis=1).format({
-                'Sensitivity %': '{:.2f}',
-                'Specificity %': '{:.2f}'
-            })
+        st.markdown("### 📋 General Diagnostics")
 
-            st.dataframe(styled_sens_spec_df, use_container_width=True, hide_index=True)
+        # --- Misclassified Samples ---
+        st.markdown("#### 🔍 Misclassified Samples")
 
-            # Add explanatory footnote
-            st.caption(
-                "**Sensitivity (True Positive Rate)**: Percentage of actual positives correctly identified for each class. "
-                "**Specificity (True Negative Rate)**: Percentage of actual negatives correctly identified. "
-                "**Thresholds**: 🟢 Good (>80%), 🟡 OK (70-80%), 🔴 Low (<70%)"
-            )
+        try:
+            misclass_indices = cv_res.get('misclassified_indices', [])
+            n_misclass = len(misclass_indices) if misclass_indices else 0
 
-            # Classification report heatmap
-            st.markdown("#### Classification Report Heatmap")
-            fig_report = plot_classification_report(
-                cv_metrics,
-                classes.tolist(),
-                title=f"{trained['name']} CV Performance"
-            )
-            st.plotly_chart(fig_report, use_container_width=True)
+            if n_misclass == 0:
+                st.success("✅ Perfect classification! No misclassified samples.")
+            else:
+                st.warning(f"⚠️ {n_misclass} misclassified samples out of {len(y_for_cv)}")
 
-            # Misclassified samples
-            st.divider()
-            st.markdown("#### 🔍 Misclassified Samples Analysis")
+                # Show misclassified samples table
+                y_true_arr = y_for_cv.values if hasattr(y_for_cv, 'values') else np.asarray(y_for_cv)
+                y_pred_arr = y_pred_cv.values if hasattr(y_pred_cv, 'values') else np.asarray(y_pred_cv)
 
-            misclassified_indices = np.where(y_for_cv != y_pred_cv)[0]
-            n_misclassified = len(misclassified_indices)
-
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Misclassified", n_misclassified)
-            with col2:
-                st.metric("Correct", len(y_for_cv) - n_misclassified)
-            with col3:
-                accuracy = (len(y_for_cv) - n_misclassified) / len(y_for_cv) * 100
-                st.metric("Accuracy", f"{accuracy:.1f}%")
-
-            if n_misclassified > 0:
                 misclass_data = []
-                for idx in misclassified_indices[:20]:
+                for idx in (misclass_indices[:20] if len(misclass_indices) > 20 else misclass_indices):
                     misclass_data.append({
-                        'Sample Index': idx + 1,
-                        'True Class': y_for_cv[idx],
-                        'Predicted Class': y_pred_cv[idx],
-                        'Error': 'Misclassification'
+                        'Sample Index': idx,
+                        'True Class': y_true_arr[idx],
+                        'Predicted Class': y_pred_arr[idx]
                     })
 
                 misclass_df = pd.DataFrame(misclass_data)
                 st.dataframe(misclass_df, use_container_width=True, hide_index=True)
 
-                if n_misclassified > 20:
-                    st.caption(f"Showing first 20 of {n_misclassified} misclassified samples")
+                if len(misclass_indices) > 20:
+                    st.info(f"... and {len(misclass_indices) - 20} more")
+
+        except Exception as e:
+            st.info("Misclassified samples not available")
+
+        # ═══════════════════════════════════════════════════════════════════════════
+        # LEGACY COOMANS PLOT SECTION (Keep for compatibility)
+        # ═══════════════════════════════════════════════════════════════════════════
+
+        # Coomans plot for SIMCA/UNEQ (with debug diagnostics and class selection)
+        st.divider()
+        st.markdown("#### 📍 Coomans Plot (CV Diagnostics - 2-Class Comparison)")
+
+        # Debug info: Show model and class information
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            model_name = trained['name'] if trained else cv_classifier
+            st.metric("Model Type", model_name)
+        with col2:
+            st.metric("Number of Classes", len(classes))
+        with col3:
+            classes_str = ', '.join([str(c) for c in classes])
+            st.metric("Classes", classes_str)
+
+        # Check 1: Classifier type
+        classifier_name = trained['name'] if trained else cv_classifier
+        if classifier_name not in ['SIMCA', 'UNEQ']:
+            st.info(f"ℹ️ Coomans plot is only available for SIMCA and UNEQ classifiers. Current model: {classifier_name}")
+            st.caption("Coomans plots visualize distances to two class models, which is specific to SIMCA and UNEQ methods.")
+        # Check 2: Need at least 2 classes
+        elif len(classes) < 2:
+            st.warning(f"⚠️ Coomans plot requires at least 2 classes. Current classes: {classes_str} ({len(classes)} class)")
+            st.caption("Coomans plot is a two-dimensional visualization showing distances to two class models.")
+        # Both checks passed: allow class selection and render plot
+        else:
+            # Class selection interface
+            if len(classes) == 2:
+                st.info("Coomans plot showing distance patterns for the 2 classes in your dataset")
+                selected_class_1 = classes[0]
+                selected_class_2 = classes[1]
             else:
-                st.success("✅ All samples correctly classified!")
+                st.info(f"Coomans plot requires 2 classes. You have {len(classes)} classes. Select which two to compare:")
+                col1, col2 = st.columns(2)
+                with col1:
+                    selected_class_1 = st.selectbox(
+                        "Class 1",
+                        options=classes.tolist(),
+                        index=0,
+                        key="coomans_class1_tab2"
+                    )
+                with col2:
+                    available_classes_2 = [c for c in classes if c != selected_class_1]
+                    selected_class_2 = st.selectbox(
+                        "Class 2",
+                        options=available_classes_2,
+                        index=0,
+                        key="coomans_class2_tab2"
+                    )
+            st.success(f"✅ Comparing: {selected_class_1} vs {selected_class_2}")
 
-            # Distance distributions
+        # SAFETY CHECK: Trained model required for Coomans plot
+        if trained is None:
+            st.info("ℹ️ Coomans plot requires a trained SIMCA or UNEQ model.")
+            st.info("📌 To use this feature:")
+            st.write("1. Train a SIMCA or UNEQ model in **Tab 1 (Model Training)**")
+            st.write("2. Return to **Tab 2 (Diagnostics)** to view Coomans plot")
+        elif trained.get('name') not in ['SIMCA', 'UNEQ']:
+            st.info(f"ℹ️ Coomans plot is only available for SIMCA and UNEQ. Current model: {trained.get('name')}")
+        else:
+            try:
+                # Get predictions and distances for all samples
+                if trained['name'] == 'SIMCA':
+                    pred_detailed = predict_simca_detailed(X_for_cv_scaled, trained['model'])
+                    distances_array_all = pred_detailed['distances_per_class']
+                elif trained['name'] == 'UNEQ':
+                    pred_detailed = predict_uneq_detailed(X_for_cv_scaled, trained['model'])
+                    distances_array_all = pred_detailed['distances_per_class']
+
+                # Find indices of selected classes in the full class list
+                class_list = classes.tolist()
+                idx_class1 = class_list.index(selected_class_1)
+                idx_class2 = class_list.index(selected_class_2)
+
+                # Extract distances for the two selected classes
+                dist_class1 = distances_array_all[:, idx_class1]
+                dist_class2 = distances_array_all[:, idx_class2]
+
+                # Get critical distances for selected classes
+                if trained['name'] == 'SIMCA':
+                    crit_dist1 = trained['model']['class_models'][selected_class_1]['f_critical']
+                    crit_dist2 = trained['model']['class_models'][selected_class_2]['f_critical']
+                elif trained['name'] == 'UNEQ':
+                    crit_dist1 = trained['model']['class_models'][selected_class_1]['t2_critical']
+                    crit_dist2 = trained['model']['class_models'][selected_class_2]['t2_critical']
+
+                # Filter samples to only those belonging to the two selected classes
+                # Convert y_for_cv to array for consistent indexing
+                y_for_cv_arr = y_for_cv.values if hasattr(y_for_cv, 'values') else np.array(y_for_cv)
+
+                mask_selected = np.isin(y_for_cv_arr, [selected_class_1, selected_class_2])
+                dist_class1_filtered = dist_class1[mask_selected]
+                dist_class2_filtered = dist_class2[mask_selected]
+                y_filtered = y_for_cv_arr[mask_selected]
+
+                # Preserve original 1-based sample indices
+                original_indices = np.where(mask_selected)[0]
+
+                if hasattr(X_for_cv_scaled, 'index'):
+                    sample_names = X_for_cv_scaled.index[original_indices].tolist()
+                else:
+                    sample_names = [str(i+1) for i in original_indices]
+
+                # Ensure labels are in the correct format
+                y_true_list = y_filtered.tolist() if hasattr(y_filtered, 'tolist') else list(y_filtered)
+
+                # Debug info on data shapes
+                with st.expander("🔍 Debug Information", expanded=False):
+                    st.write(f"**Total Samples**: {len(y_for_cv)}")
+                    st.write(f"**Filtered Samples (selected 2 classes)**: {len(y_filtered)}")
+                    st.write(f"**Selected Classes**: {selected_class_1} (index {idx_class1}), {selected_class_2} (index {idx_class2})")
+                    st.write(f"**Distance Array Shape (all classes)**: {distances_array_all.shape}")
+                    st.write(f"**Distance to {selected_class_1}**: min={dist_class1_filtered.min():.3f}, max={dist_class1_filtered.max():.3f}, mean={dist_class1_filtered.mean():.3f}")
+                    st.write(f"**Distance to {selected_class_2}**: min={dist_class2_filtered.min():.3f}, max={dist_class2_filtered.max():.3f}, mean={dist_class2_filtered.mean():.3f}")
+                    st.write(f"**Critical Distance {selected_class_1}**: {crit_dist1:.3f}")
+                    st.write(f"**Critical Distance {selected_class_2}**: {crit_dist2:.3f}")
+                    st.write(f"**y_filtered type**: {type(y_filtered)}, length={len(y_filtered)}")
+                    st.write(f"**y_filtered preview (first 10)**: {y_true_list[:10]}")
+                    st.write(f"**Unique classes in filtered labels**: {np.unique(y_true_list)}")
+                    st.write(f"**Sample Names (first 10)**: {sample_names[:10]}")
+                    st.write(f"**Original Indices (first 10)**: {original_indices[:10]}")
+                    st.write(f"**DEBUG - About to call plot_coomans:**")
+                    st.write(f"dist_class1_filtered shape: {dist_class1_filtered.shape}, values: {dist_class1_filtered[:5]}")
+                    st.write(f"dist_class2_filtered shape: {dist_class2_filtered.shape}, values: {dist_class2_filtered[:5]}")
+                    st.write(f"y_true_list: {y_true_list[:10]}")
+                    st.write(f"sample_names: {sample_names[:5]}")
+
+                fig_coomans_cv = plot_coomans(
+                    dist_class1=dist_class1_filtered,
+                    dist_class2=dist_class2_filtered,
+                    y_true=y_true_list,
+                    crit_dist1=crit_dist1,
+                    crit_dist2=crit_dist2,
+                    class_names=[str(selected_class_1), str(selected_class_2)],
+                    title=f"Coomans Plot - {trained['name']}: {selected_class_1} vs {selected_class_2} (CV)",
+                    normalize=False,
+                    sample_names=sample_names
+                )
+                st.plotly_chart(fig_coomans_cv, use_container_width=True, key="coomans_cv_tab2")
+
+            except Exception as e:
+                st.error(f"❌ Could not generate Coomans plot: {str(e)}")
+
+                # Enhanced debug information on error
+                with st.expander("🐛 Error Debug Information", expanded=True):
+                    st.write("**Error Details:**")
+                    st.code(str(e))
+
+                    st.write("**Traceback:**")
+                    import traceback
+                    st.code(traceback.format_exc())
+
+                    st.write("**Data Diagnostics:**")
+                    try:
+                        st.write(f"- X_for_cv_scaled shape: {X_for_cv_scaled.shape if hasattr(X_for_cv_scaled, 'shape') else 'N/A'}")
+                        st.write(f"- y_for_cv shape/length: {y_for_cv.shape if hasattr(y_for_cv, 'shape') else len(y_for_cv)}")
+                        st.write(f"- classes: {classes}")
+                        st.write(f"- trained['name']: {trained.get('name', 'N/A')}")
+                        if 'distances_array' in locals():
+                            st.write(f"- distances_array shape: {distances_array.shape}")
+                            st.write(f"- distances_array sample values: {distances_array[:3]}")
+                    except Exception as debug_err:
+                        st.write(f"Could not retrieve debug info: {debug_err}")
+
+        # Coomans Comparison: SIMCA vs UNEQ (if user wants comparison)
+        if len(classes) == 2:
             st.divider()
-            st.markdown("#### 📈 Distance Distributions")
+            st.markdown("#### 📊 Coomans Comparison: SIMCA vs UNEQ")
 
+            if st.checkbox("Show SIMCA vs UNEQ Comparison", value=False, key="show_coomans_comparison_tab2"):
+                st.info("Side-by-side comparison of SIMCA and UNEQ class modeling approaches")
+
+            try:
+                # Train both SIMCA and UNEQ for comparison
+                with st.spinner("Training SIMCA and UNEQ for comparison..."):
+                    # Get parameters
+                    n_pcs = tab1_data.get('n_pcs', 3)
+                    confidence_level = tab1_data.get('confidence_level', 0.95)
+
+                    # Train SIMCA
+                    simca_model = fit_simca(X_for_cv_scaled, y_for_cv, n_pcs, confidence_level)
+                    simca_pred_detailed = predict_simca_detailed(X_for_cv_scaled, simca_model)
+                    simca_distances = simca_pred_detailed['distances_per_class']
+
+                    # Train UNEQ
+                    uneq_model = fit_uneq(X_for_cv_scaled, y_for_cv, n_pcs, confidence_level, use_pca=False)
+                    uneq_pred_detailed = predict_uneq_detailed(X_for_cv_scaled, uneq_model)
+                    uneq_distances = uneq_pred_detailed['distances_per_class']
+
+                    # Get class names and thresholds
+                    cls1, cls2 = classes[0], classes[1]
+                    simca_crit1 = simca_model['class_models'][cls1]['f_critical']
+                    simca_crit2 = simca_model['class_models'][cls2]['f_critical']
+                    uneq_crit1 = uneq_model['class_models'][cls1]['t2_critical']
+                    uneq_crit2 = uneq_model['class_models'][cls2]['t2_critical']
+
+                    # Create subplots
+                    from plotly.subplots import make_subplots
+
+                    fig_comparison = make_subplots(
+                        rows=1, cols=2,
+                        subplot_titles=(
+                            f"SIMCA (F-statistic)",
+                            f"UNEQ (T²-statistic)"
+                        ),
+                        horizontal_spacing=0.12
+                    )
+
+                    # Prepare data
+                    y_true_list = y_for_cv.tolist() if hasattr(y_for_cv, 'tolist') else list(y_for_cv)
+
+                    # Define colors for classes
+                    color_map = {cls1: '#1f77b4', cls2: '#ff7f0e'}  # Blue and Orange
+                    colors = [color_map[cls] for cls in y_true_list]
+
+                    # Left plot: SIMCA
+                    fig_comparison.add_trace(
+                        go.Scatter(
+                            x=simca_distances[:, 0],
+                            y=simca_distances[:, 1],
+                            mode='markers',
+                            marker=dict(color=colors, size=8, line=dict(width=1, color='white')),
+                            name='Samples',
+                            showlegend=False,
+                            text=[f"Sample {i}<br>Class: {y_true_list[i]}" for i in range(len(y_true_list))],
+                            hovertemplate='<b>%{text}</b><br>Dist to %s: %%{x:.3f}<br>Dist to %s: %%{y:.3f}<extra></extra>' % (cls1, cls2)
+                        ),
+                        row=1, col=1
+                    )
+
+                    # SIMCA critical lines
+                    fig_comparison.add_hline(y=simca_crit2, line_dash="dash", line_color="red",
+                                            annotation_text=f"{cls2} threshold", row=1, col=1)
+                    fig_comparison.add_vline(x=simca_crit1, line_dash="dash", line_color="blue",
+                                            annotation_text=f"{cls1} threshold", row=1, col=1)
+
+                    # Right plot: UNEQ
+                    fig_comparison.add_trace(
+                        go.Scatter(
+                            x=uneq_distances[:, 0],
+                            y=uneq_distances[:, 1],
+                            mode='markers',
+                            marker=dict(color=colors, size=8, line=dict(width=1, color='white')),
+                            name='Samples',
+                            showlegend=False,
+                            text=[f"Sample {i}<br>Class: {y_true_list[i]}" for i in range(len(y_true_list))],
+                            hovertemplate='<b>%{text}</b><br>Dist to %s: %%{x:.3f}<br>Dist to %s: %%{y:.3f}<extra></extra>' % (cls1, cls2)
+                        ),
+                        row=1, col=2
+                    )
+
+                    # UNEQ critical lines
+                    fig_comparison.add_hline(y=uneq_crit2, line_dash="dash", line_color="red",
+                                            annotation_text=f"{cls2} threshold", row=1, col=2)
+                    fig_comparison.add_vline(x=uneq_crit1, line_dash="dash", line_color="blue",
+                                            annotation_text=f"{cls1} threshold", row=1, col=2)
+
+                    # Update layout
+                    fig_comparison.update_xaxes(title_text=f"Distance to Class {cls1}", row=1, col=1)
+                    fig_comparison.update_yaxes(title_text=f"Distance to Class {cls2}", row=1, col=1)
+                    fig_comparison.update_xaxes(title_text=f"Distance to Class {cls1}", row=1, col=2)
+                    fig_comparison.update_yaxes(title_text=f"Distance to Class {cls2}", row=1, col=2)
+
+                    fig_comparison.update_layout(
+                        title_text="Coomans Plot Comparison: SIMCA vs UNEQ (CV Diagnostics)",
+                        height=600,
+                        width=1400,
+                        showlegend=False
+                    )
+
+                    st.plotly_chart(fig_comparison, use_container_width=True)
+
+                    # Add interpretation
+                    st.caption(
+                        "**Left (SIMCA)**: Uses F-statistic distances based on PCA models per class. "
+                        "**Right (UNEQ)**: Uses Mahalanobis T²-statistic distances with different dispersions per class. "
+                        "Points closer to origin in each plot indicate better fit to the respective class model."
+                    )
+
+            except Exception as e:
+                st.error(f"Could not generate SIMCA vs UNEQ comparison: {str(e)}")
+                import traceback
+                st.error(traceback.format_exc())
+
+        st.divider()
+
+        # Per-class metrics
+        st.markdown("#### Per-Class Metrics (CV)")
+        per_class_cv_data = []
+        for cls in classes:
+            per_class_cv_data.append({
+                'Class': cls,
+                'Sensitivity %': f"{cv_metrics['sensitivity_per_class'][cls]:.2f}",
+                'Specificity %': f"{cv_metrics['specificity_per_class'][cls]:.2f}",
+                'Precision %': f"{cv_metrics['precision_per_class'][cls]:.2f}",
+                'F1 %': f"{cv_metrics['f1_per_class'][cls]:.2f}"
+            })
+        per_class_cv_df = pd.DataFrame(per_class_cv_data)
+        st.dataframe(per_class_cv_df, use_container_width=True, hide_index=True)
+
+        # Sensitivity & Specificity Detailed Table
+        st.markdown("#### Sensitivity & Specificity by Class")
+        st.info("Detailed breakdown of True Positive Rate (Sensitivity) and True Negative Rate (Specificity)")
+
+        # Calculate class support (number of samples per class)
+        class_support = {}
+        for cls in classes:
+            class_support[cls] = int(np.sum(y_for_cv == cls))
+
+        # Create detailed sensitivity/specificity table
+        sens_spec_data = []
+        for cls in classes:
+            sens = cv_metrics['sensitivity_per_class'][cls]
+            spec = cv_metrics['specificity_per_class'][cls]
+
+            # Determine status based on both metrics
+            if sens > 80 and spec > 80:
+                status = "🟢 Good"
+            elif sens > 70 and spec > 70:
+                status = "🟡 OK"
+            else:
+                status = "🔴 Low"
+
+            sens_spec_data.append({
+                'Class': cls,
+                'Sensitivity %': sens,
+                'Specificity %': spec,
+                'Support': class_support[cls],
+                'Status': status
+            })
+
+        sens_spec_df = pd.DataFrame(sens_spec_data)
+
+        # Apply color coding with styling
+        def color_metrics(row):
+            colors = []
+            for col in row.index:
+                if col == 'Status':
+                    if '🟢' in str(row[col]):
+                        colors.append('background-color: #d4edda')  # Light green
+                    elif '🟡' in str(row[col]):
+                        colors.append('background-color: #fff3cd')  # Light yellow
+                    elif '🔴' in str(row[col]):
+                        colors.append('background-color: #f8d7da')  # Light red
+                    else:
+                        colors.append('')
+                elif col in ['Sensitivity %', 'Specificity %']:
+                    val = row[col]
+                    if val > 80:
+                        colors.append('background-color: #d4edda')  # Light green
+                    elif val > 70:
+                        colors.append('background-color: #fff3cd')  # Light yellow
+                    else:
+                        colors.append('background-color: #f8d7da')  # Light red
+                else:
+                    colors.append('')
+            return colors
+
+        styled_sens_spec_df = sens_spec_df.style.apply(color_metrics, axis=1).format({
+            'Sensitivity %': '{:.2f}',
+            'Specificity %': '{:.2f}'
+        })
+
+        st.dataframe(styled_sens_spec_df, use_container_width=True, hide_index=True)
+
+        # Add explanatory footnote
+        st.caption(
+            "**Sensitivity (True Positive Rate)**: Percentage of actual positives correctly identified for each class. "
+            "**Specificity (True Negative Rate)**: Percentage of actual negatives correctly identified. "
+            "**Thresholds**: 🟢 Good (>80%), 🟡 OK (70-80%), 🔴 Low (<70%)"
+        )
+
+        # Classification report heatmap
+        st.markdown("#### Classification Report Heatmap")
+        fig_report = plot_classification_report(
+            cv_metrics,
+            classes.tolist(),
+            title=f"{cv_classifier} CV Performance"
+        )
+        st.plotly_chart(fig_report, use_container_width=True)
+
+        # Misclassified samples
+        st.divider()
+        st.markdown("#### 🔍 Misclassified Samples Analysis")
+
+        misclassified_indices = np.where(y_for_cv != y_pred_cv)[0]
+        n_misclassified = len(misclassified_indices)
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Misclassified", n_misclassified)
+        with col2:
+            st.metric("Correct", len(y_for_cv) - n_misclassified)
+        with col3:
+            accuracy = (len(y_for_cv) - n_misclassified) / len(y_for_cv) * 100
+            st.metric("Accuracy", f"{accuracy:.1f}%")
+
+        if n_misclassified > 0:
+            misclass_data = []
+            for idx in misclassified_indices[:20]:
+                misclass_data.append({
+                    'Sample Index': idx + 1,
+                    'True Class': y_for_cv[idx],
+                    'Predicted Class': y_pred_cv[idx],
+                    'Error': 'Misclassification'
+                })
+
+            misclass_df = pd.DataFrame(misclass_data)
+            st.dataframe(misclass_df, use_container_width=True, hide_index=True)
+
+            if n_misclassified > 20:
+                st.caption(f"Showing first 20 of {n_misclassified} misclassified samples")
+        else:
+            st.success("✅ All samples correctly classified!")
+
+        # Distance distributions
+        st.divider()
+        st.markdown("#### 📈 Distance Distributions")
+
+        # Check if we have a trained model (required for detailed distance analysis)
+        if trained is None:
+            st.info("ℹ️ **Distance Distributions** require a trained model.")
+            st.caption(
+                "These detailed analyses use the trained model to compute distances. "
+                "In CV-only mode (with PCA preprocessing), the model is trained internally during CV but not stored. "
+                "To view detailed distance distributions and sample-level analysis, train a model in Tab 1 first."
+            )
+        elif trained['name'] in ['SIMCA', 'UNEQ']:
+            st.info("Distance to class models - shows sample distribution relative to each class model")
+
+            if trained['name'] == 'SIMCA':
+                pred_detailed = predict_simca_detailed(X_for_cv_scaled, trained['model'])
+                distances_array = pred_detailed['distances_per_class']
+            elif trained['name'] == 'UNEQ':
+                pred_detailed = predict_uneq_detailed(X_for_cv_scaled, trained['model'])
+                distances_array = pred_detailed['distances_per_class']
+
+            for i, cls in enumerate(classes):
+                distances_dict = {cls: distances_array[:, i]}
+
+                if trained['name'] == 'SIMCA':
+                    threshold = trained['model']['class_models'][cls]['f_critical']
+                else:
+                    threshold = trained['model']['class_models'][cls]['t2_critical']
+
+                fig_dist = plot_distance_distributions(
+                    distances_dict,
+                    y_for_cv,
+                    selected_class=cls,
+                    threshold=threshold,
+                    title=f"{trained['name']} Distance to Class {cls}"
+                )
+                st.plotly_chart(fig_dist, use_container_width=True)
+
+        elif trained['name'] in ['LDA', 'QDA']:
+            st.info("📊 Mahalanobis distance distributions to each class centroid")
+
+            if trained['name'] == 'LDA':
+                y_pred, distances_array = predict_lda(X_for_cv_scaled, trained['model'])
+            elif trained['name'] == 'QDA':
+                y_pred, distances_array = predict_qda(X_for_cv_scaled, trained['model'])
+
+            for i, cls in enumerate(classes):
+                distances_dict = {cls: distances_array[:, i]}
+
+                fig_dist = plot_distance_distributions(
+                    distances_dict,
+                    y_for_cv,
+                    selected_class=cls,
+                    threshold=None,
+                    title=f"{trained['name']} Distance to Class {cls}"
+                )
+                st.plotly_chart(fig_dist, use_container_width=True)
+
+        elif trained['name'] == 'kNN':
+            st.info(f"📊 Within-class {trained['parameters']['metric']} distance statistics for kNN classifier")
+
+            st.markdown("**Average distances within each class:**")
+
+            distance_summary = []
+            for cls in classes:
+                cls_mask = y_for_cv == cls
+                X_cls = X_for_cv_scaled[cls_mask]
+
+                if X_cls.shape[0] > 1:
+                    within_dist = calculate_distance_matrix(
+                        X_cls, X_cls,
+                        metric=trained['parameters']['metric']
+                    )
+                    within_mean = np.mean(within_dist[np.triu_indices_from(within_dist, k=1)])
+                else:
+                    within_mean = 0.0
+
+                distance_summary.append({
+                    'Class': cls,
+                    'Within-Class Avg Distance': f"{within_mean:.3f}",
+                    'Samples': int(np.sum(cls_mask))
+                })
+
+            summary_df = pd.DataFrame(distance_summary)
+            st.dataframe(summary_df, use_container_width=True, hide_index=True)
+            st.caption(f"Distance metric: {trained['parameters']['metric']}")
+
+        # Category-Specific Analysis Section
+        st.divider()
+        st.markdown("### 🎯 Category-Specific Analysis")
+
+        # Class selector
+        selected_class_tab2 = st.selectbox(
+            "Select class to analyze",
+            options=classes.tolist(),
+            key="class_selector_tab2"
+        )
+
+        st.markdown(f"#### Performance Metrics for {selected_class_tab2}")
+
+        # Show metrics for selected class
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            sensitivity = cv_metrics['sensitivity_per_class'][selected_class_tab2]
+            st.metric(f"Sensitivity ({selected_class_tab2})", f"{sensitivity:.1f}%")
+        with col2:
+            specificity = cv_metrics['specificity_per_class'][selected_class_tab2]
+            st.metric(f"Specificity ({selected_class_tab2})", f"{specificity:.1f}%")
+        with col3:
+            f1 = cv_metrics['f1_per_class'][selected_class_tab2]
+            st.metric(f"F1 Score ({selected_class_tab2})", f"{f1:.1f}%")
+
+        # Distance distribution for this class (requires trained model)
+        if trained is None:
+            st.info("ℹ️ **Per-Class Distance Analysis** requires a trained model. Train a model in Tab 1 to view detailed distance distributions.")
+        elif trained['name'] in ['LDA', 'QDA', 'SIMCA', 'UNEQ']:
+            st.markdown(f"#### Distance Distribution to Class {selected_class_tab2}")
+        elif trained['name'] == 'kNN':
+            st.markdown(f"#### Within-Class Distance Statistics for {selected_class_tab2}")
+
+        try:
             if trained['name'] in ['SIMCA', 'UNEQ']:
-                st.info("Distance to class models - shows sample distribution relative to each class model")
-
+                # Get distances array and threshold for SIMCA/UNEQ
                 if trained['name'] == 'SIMCA':
                     pred_detailed = predict_simca_detailed(X_for_cv_scaled, trained['model'])
                     distances_array = pred_detailed['distances_per_class']
-                elif trained['name'] == 'UNEQ':
+                    threshold = trained['model']['class_models'][selected_class_tab2]['f_critical']
+                else:  # UNEQ
                     pred_detailed = predict_uneq_detailed(X_for_cv_scaled, trained['model'])
                     distances_array = pred_detailed['distances_per_class']
+                    threshold = trained['model']['class_models'][selected_class_tab2]['t2_critical']
 
-                for i, cls in enumerate(classes):
-                    distances_dict = {cls: distances_array[:, i]}
+                # Find the index of the selected class
+                class_idx = list(classes).index(selected_class_tab2)
+                distances_dict = {selected_class_tab2: distances_array[:, class_idx]}
 
-                    if trained['name'] == 'SIMCA':
-                        threshold = trained['model']['class_models'][cls]['f_critical']
-                    else:
-                        threshold = trained['model']['class_models'][cls]['t2_critical']
-
-                    fig_dist = plot_distance_distributions(
-                        distances_dict,
-                        y_for_cv,
-                        selected_class=cls,
-                        threshold=threshold,
-                        title=f"{trained['name']} Distance to Class {cls}"
-                    )
-                    st.plotly_chart(fig_dist, use_container_width=True)
+                fig_dist = plot_distance_distributions(
+                    distances_dict,
+                    y_for_cv,
+                    selected_class=selected_class_tab2,
+                    threshold=threshold,
+                    title=f"{trained['name']} Distance to Class {selected_class_tab2}"
+                )
+                st.plotly_chart(fig_dist, use_container_width=True)
 
             elif trained['name'] in ['LDA', 'QDA']:
-                st.info("📊 Mahalanobis distance distributions to each class centroid")
-
+                # Get distances array for LDA/QDA
                 if trained['name'] == 'LDA':
                     y_pred, distances_array = predict_lda(X_for_cv_scaled, trained['model'])
-                elif trained['name'] == 'QDA':
+                else:  # QDA
                     y_pred, distances_array = predict_qda(X_for_cv_scaled, trained['model'])
 
-                for i, cls in enumerate(classes):
-                    distances_dict = {cls: distances_array[:, i]}
+                # Find the index of the selected class
+                class_idx = list(classes).index(selected_class_tab2)
+                distances_dict = {selected_class_tab2: distances_array[:, class_idx]}
 
-                    fig_dist = plot_distance_distributions(
-                        distances_dict,
-                        y_for_cv,
-                        selected_class=cls,
-                        threshold=None,
-                        title=f"{trained['name']} Distance to Class {cls}"
-                    )
-                    st.plotly_chart(fig_dist, use_container_width=True)
+                fig_dist = plot_distance_distributions(
+                    distances_dict,
+                    y_for_cv,
+                    selected_class=selected_class_tab2,
+                    threshold=None,
+                    title=f"{trained['name']} Mahalanobis Distance to Class {selected_class_tab2}"
+                )
+                st.plotly_chart(fig_dist, use_container_width=True)
 
             elif trained['name'] == 'kNN':
-                st.info(f"📊 Within-class {trained['parameters']['metric']} distance statistics for kNN classifier")
+                # For kNN, show within-class distance statistics
+                cls_mask = y_for_cv == selected_class_tab2
+                X_cls = X_for_cv_scaled[cls_mask]
 
-                st.markdown("**Average distances within each class:**")
-
-                distance_summary = []
-                for cls in classes:
-                    cls_mask = y_for_cv == cls
-                    X_cls = X_for_cv_scaled[cls_mask]
-
-                    if X_cls.shape[0] > 1:
-                        within_dist = calculate_distance_matrix(
-                            X_cls, X_cls,
-                            metric=trained['parameters']['metric']
-                        )
-                        within_mean = np.mean(within_dist[np.triu_indices_from(within_dist, k=1)])
-                    else:
-                        within_mean = 0.0
-
-                    distance_summary.append({
-                        'Class': cls,
-                        'Within-Class Avg Distance': f"{within_mean:.3f}",
-                        'Samples': int(np.sum(cls_mask))
-                    })
-
-                summary_df = pd.DataFrame(distance_summary)
-                st.dataframe(summary_df, use_container_width=True, hide_index=True)
-                st.caption(f"Distance metric: {trained['parameters']['metric']}")
-
-            # Category-Specific Analysis Section
-            st.divider()
-            st.markdown("### 🎯 Category-Specific Analysis")
-
-            # Class selector
-            selected_class_tab2 = st.selectbox(
-                "Select class to analyze",
-                options=classes.tolist(),
-                key="class_selector_tab2"
-            )
-
-            st.markdown(f"#### Performance Metrics for {selected_class_tab2}")
-
-            # Show metrics for selected class
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                sensitivity = cv_metrics['sensitivity_per_class'][selected_class_tab2]
-                st.metric(f"Sensitivity ({selected_class_tab2})", f"{sensitivity:.1f}%")
-            with col2:
-                specificity = cv_metrics['specificity_per_class'][selected_class_tab2]
-                st.metric(f"Specificity ({selected_class_tab2})", f"{specificity:.1f}%")
-            with col3:
-                f1 = cv_metrics['f1_per_class'][selected_class_tab2]
-                st.metric(f"F1 Score ({selected_class_tab2})", f"{f1:.1f}%")
-
-            # Distance distribution for this class
-            if trained['name'] in ['LDA', 'QDA', 'SIMCA', 'UNEQ']:
-                st.markdown(f"#### Distance Distribution to Class {selected_class_tab2}")
-            elif trained['name'] == 'kNN':
-                st.markdown(f"#### Within-Class Distance Statistics for {selected_class_tab2}")
-
-            try:
-                if trained['name'] in ['SIMCA', 'UNEQ']:
-                    # Get distances array and threshold for SIMCA/UNEQ
-                    if trained['name'] == 'SIMCA':
-                        pred_detailed = predict_simca_detailed(X_for_cv_scaled, trained['model'])
-                        distances_array = pred_detailed['distances_per_class']
-                        threshold = trained['model']['class_models'][selected_class_tab2]['f_critical']
-                    else:  # UNEQ
-                        pred_detailed = predict_uneq_detailed(X_for_cv_scaled, trained['model'])
-                        distances_array = pred_detailed['distances_per_class']
-                        threshold = trained['model']['class_models'][selected_class_tab2]['t2_critical']
-
-                    # Find the index of the selected class
-                    class_idx = list(classes).index(selected_class_tab2)
-                    distances_dict = {selected_class_tab2: distances_array[:, class_idx]}
-
-                    fig_dist = plot_distance_distributions(
-                        distances_dict,
-                        y_for_cv,
-                        selected_class=selected_class_tab2,
-                        threshold=threshold,
-                        title=f"{trained['name']} Distance to Class {selected_class_tab2}"
+                if X_cls.shape[0] > 1:
+                    within_dist = calculate_distance_matrix(
+                        X_cls, X_cls,
+                        metric=trained['parameters']['metric']
                     )
-                    st.plotly_chart(fig_dist, use_container_width=True)
+                    within_mean = np.mean(within_dist[np.triu_indices_from(within_dist, k=1)])
+                    within_std = np.std(within_dist[np.triu_indices_from(within_dist, k=1)])
 
-                elif trained['name'] in ['LDA', 'QDA']:
-                    # Get distances array for LDA/QDA
-                    if trained['name'] == 'LDA':
-                        y_pred, distances_array = predict_lda(X_for_cv_scaled, trained['model'])
-                    else:  # QDA
-                        y_pred, distances_array = predict_qda(X_for_cv_scaled, trained['model'])
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Avg Within-Class Distance", f"{within_mean:.3f}")
+                    with col2:
+                        st.metric("Std Deviation", f"{within_std:.3f}")
+                    with col3:
+                        st.metric("Class Samples", int(np.sum(cls_mask)))
 
-                    # Find the index of the selected class
-                    class_idx = list(classes).index(selected_class_tab2)
-                    distances_dict = {selected_class_tab2: distances_array[:, class_idx]}
+                    st.info(f"Within-class distance statistics for {selected_class_tab2} using {trained['parameters']['metric']} metric")
+                else:
+                    st.warning(f"Not enough samples in class {selected_class_tab2} for distance analysis")
 
-                    fig_dist = plot_distance_distributions(
-                        distances_dict,
-                        y_for_cv,
-                        selected_class=selected_class_tab2,
-                        threshold=None,
-                        title=f"{trained['name']} Mahalanobis Distance to Class {selected_class_tab2}"
-                    )
-                    st.plotly_chart(fig_dist, use_container_width=True)
+        except Exception as e:
+            st.warning(f"Could not generate distance plot for {selected_class_tab2}: {str(e)}")
 
-                elif trained['name'] == 'kNN':
-                    # For kNN, show within-class distance statistics
-                    cls_mask = y_for_cv == selected_class_tab2
-                    X_cls = X_for_cv_scaled[cls_mask]
+        # Single Sample Analysis Section
+        st.divider()
+        st.markdown("### 📌 Single Sample Analysis (CV)")
 
-                    if X_cls.shape[0] > 1:
-                        within_dist = calculate_distance_matrix(
-                            X_cls, X_cls,
-                            metric=trained['parameters']['metric']
-                        )
-                        within_mean = np.mean(within_dist[np.triu_indices_from(within_dist, k=1)])
-                        within_std = np.std(within_dist[np.triu_indices_from(within_dist, k=1)])
+        # Convert to arrays for consistent indexing
+        y_for_cv_arr = y_for_cv.values if hasattr(y_for_cv, 'values') else np.array(y_for_cv)
 
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            st.metric("Avg Within-Class Distance", f"{within_mean:.3f}")
-                        with col2:
-                            st.metric("Std Deviation", f"{within_std:.3f}")
-                        with col3:
-                            st.metric("Class Samples", int(np.sum(cls_mask)))
+        # Reorder samples: misclassified first, then correct
+        misclassified_idx = np.where(y_for_cv_arr != y_pred_cv)[0]
+        correct_idx = np.where(y_for_cv_arr == y_pred_cv)[0]
+        ordered_indices = np.concatenate([misclassified_idx, correct_idx])
 
-                        st.info(f"Within-class distance statistics for {selected_class_tab2} using {trained['parameters']['metric']} metric")
-                    else:
-                        st.warning(f"Not enough samples in class {selected_class_tab2} for distance analysis")
-
-            except Exception as e:
-                st.warning(f"Could not generate distance plot for {selected_class_tab2}: {str(e)}")
-
-            # Single Sample Analysis Section
-            st.divider()
-            st.markdown("### 📌 Single Sample Analysis (CV)")
-
-            # Convert to arrays for consistent indexing
-            y_for_cv_arr = y_for_cv.values if hasattr(y_for_cv, 'values') else np.array(y_for_cv)
-
-            # Reorder samples: misclassified first, then correct
-            misclassified_idx = np.where(y_for_cv_arr != y_pred_cv)[0]
-            correct_idx = np.where(y_for_cv_arr == y_pred_cv)[0]
-            ordered_indices = np.concatenate([misclassified_idx, correct_idx])
-
-            # Create sample names dictionary
-            if hasattr(X_for_cv, 'index'):
+        # Create sample names dictionary
+        # ✅ Use saved train_sample_names if using 70% split, otherwise use full dataset names
+        if st.session_state.get('split_done', False):
+            # Using 70-30 split, get train sample names
+            saved_train_names = st.session_state.get('train_sample_names')
+            if saved_train_names is not None:
+                sample_names_dict = {i: saved_train_names[i] for i in range(len(X_for_cv))}
+            elif hasattr(X_for_cv, 'index') and not isinstance(X_for_cv.index, pd.RangeIndex):
+                sample_names_dict = {i: X_for_cv.index[i] for i in range(len(X_for_cv))}
+            else:
+                sample_names_dict = {i: str(i+1) for i in range(len(X_for_cv))}
+        else:
+            # Using full dataset, get names directly from X_for_cv
+            if hasattr(X_for_cv, 'index') and not isinstance(X_for_cv.index, pd.RangeIndex):
                 sample_names_dict = {i: X_for_cv.index[i] for i in range(len(X_for_cv))}
             else:
                 sample_names_dict = {i: str(i+1) for i in range(len(X_for_cv))}
 
-            # Sample selector with formatted display
-            selected_sample_idx_tab2 = st.selectbox(
-                "Select sample to analyze",
-                options=ordered_indices,
-                format_func=lambda x: f"Sample {sample_names_dict[x]}: True={y_for_cv_arr[x]}, Pred={y_pred_cv[x]}",
-                key="sample_selector_tab2"
-            )
+        # Sample selector with formatted display
+        selected_sample_idx_tab2 = st.selectbox(
+            "Select sample to analyze",
+            options=ordered_indices,
+            format_func=lambda x: f"Sample {sample_names_dict[x]}: True={y_for_cv_arr[x]}, Pred={y_pred_cv[x]}",
+            key="sample_selector_tab2"
+        )
 
-            # Sample details
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("True Class", y_for_cv_arr[selected_sample_idx_tab2])
-            with col2:
-                st.metric("Predicted", y_pred_cv[selected_sample_idx_tab2])
-            with col3:
-                match = "✅ Correct" if y_for_cv_arr[selected_sample_idx_tab2] == y_pred_cv[selected_sample_idx_tab2] else "❌ Error"
-                st.metric("Result", match)
+        # Sample details
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("True Class", y_for_cv_arr[selected_sample_idx_tab2])
+        with col2:
+            st.metric("Predicted", y_pred_cv[selected_sample_idx_tab2])
+        with col3:
+            match = "✅ Correct" if y_for_cv_arr[selected_sample_idx_tab2] == y_pred_cv[selected_sample_idx_tab2] else "❌ Error"
+            st.metric("Result", match)
 
-            # Feature values for selected sample
-            st.markdown("#### Feature Values")
-            # Get feature values from X_for_cv
-            if hasattr(X_for_cv, 'iloc'):
-                feature_vals = X_for_cv.iloc[selected_sample_idx_tab2]
-            else:
-                feature_vals = X_for_cv[selected_sample_idx_tab2]
+        # Feature values for selected sample
+        st.markdown("#### Feature Values")
+        # Get feature values from X_for_cv
+        if hasattr(X_for_cv, 'iloc'):
+            feature_vals = X_for_cv.iloc[selected_sample_idx_tab2]
+        else:
+            feature_vals = X_for_cv[selected_sample_idx_tab2]
 
-            # Get feature names
-            x_columns = st.session_state.get('x_columns', [f'Feature {i}' for i in range(len(feature_vals))])
+        # Get feature names
+        x_columns = st.session_state.get('x_columns', [f'Feature {i}' for i in range(len(feature_vals))])
 
-            feature_df = pd.DataFrame({
-                'Feature': x_columns,
-                'Value': feature_vals
-            })
-            st.dataframe(feature_df, use_container_width=True, hide_index=True)
+        feature_df = pd.DataFrame({
+            'Feature': x_columns,
+            'Value': feature_vals
+        })
+        st.dataframe(feature_df, use_container_width=True, hide_index=True)
 
-            # Distance to each class (classifier-specific)
-            st.markdown("#### Distance to Each Class")
+        # Distance to each class (classifier-specific, requires trained model)
+        st.markdown("#### Distance to Each Class")
 
+        if trained is None:
+            st.info("ℹ️ **Distance to Each Class** analysis requires a trained model. Train a model in Tab 1 to view this analysis.")
+        else:
             try:
                 distances_to_classes = []
 
@@ -1930,11 +3459,50 @@ def show():
         st.markdown("## 📋 Test Set Validation")
         st.markdown("*Final holdout test evaluation*")
 
-        if st.session_state.trained_model is None:
+        # ═══════════════════════════════════════════════════════════════════════
+        # GET TRAINED MODEL (with fallback for kNN)
+        # ═══════════════════════════════════════════════════════════════════════
+
+        trained = st.session_state.get('trained_model')
+        cv_results_info = st.session_state.get('cv_results')
+
+        # Fallback: If trained is None, reconstruct from cv_results (same as Tab 2)
+        if trained is None and cv_results_info is not None:
+            cv_classifier = st.session_state.get('cv_classifier', 'Unknown')
+
+            if cv_classifier == 'kNN' and 'X_train' in cv_results_info:
+                X_train_cv = cv_results_info.get('X_train')
+                y_train_cv = cv_results_info.get('y_train')
+                metric_cv = cv_results_info.get('metric', 'euclidean')
+
+                # Calculate covariance if using Mahalanobis
+                cov_cv = None
+                if metric_cv == 'mahalanobis' and X_train_cv is not None:
+                    cov_cv = np.cov(X_train_cv, rowvar=False) + np.eye(X_train_cv.shape[1]) * 1e-10
+
+                # ✅ CORRECT: For kNN, the model IS the training data dict
+                trained = {
+                    'name': 'kNN',
+                    'n_features': X_train_cv.shape[1] if X_train_cv is not None else 0,
+                    'classes': np.unique(y_train_cv).tolist() if y_train_cv is not None else [],
+                    'scaling_method': st.session_state.get('scaling_method', 'autoscale'),
+                    'parameters': {
+                        'k': cv_results_info.get('k_value', 5),
+                        'metric': metric_cv,
+                    },
+                    'model': {  # ← THIS is the actual kNN "model"
+                        'X_train': X_train_cv,
+                        'y_train': y_train_cv,
+                        'metric': metric_cv,
+                        'cov': cov_cv,  # ← REQUIRED by predict_knn
+                    }
+                }
+                st.info("✓ Reconstructed kNN model from cv_results for testing")
+
+        if trained is None:
             st.warning("⚠️ Train a model first in Tab 1 before testing")
-            st.info("💡 Go to **Tab 1: Setup & Configuration** and click 'Train Model'")
+            st.info("💡 Go to **Tab 1: Setup & Configuration** and click 'Run Cross-Validation'")
         else:
-            trained = st.session_state.trained_model
 
             # --- CHECK FOR OPTIONAL TRAIN/TEST SPLIT FROM TAB 1 ---
             st.markdown("## 📥 Section 1: Select Test Data")
@@ -2693,6 +4261,328 @@ def show():
                                     import traceback
                                     st.error(traceback.format_exc())
 
+                        # ═══════════════════════════════════════════════════════════════════════════
+                        # kNN: SINGLE SAMPLE ANALYSIS (TEST DATA)
+                        # ═══════════════════════════════════════════════════════════════════════════
+                        if trained['name'] == 'kNN':
+                            st.divider()
+                            st.markdown("### 📌 Single Sample Analysis (Test) - kNN")
+
+                            try:
+                                # Create sample names dictionary for test set
+                                saved_test_names = st.session_state.get('test_sample_names')
+                                sample_names_dict_test_knn = {}
+
+                                if saved_test_names is not None and len(saved_test_names) == len(X_test):
+                                    sample_names_dict_test_knn = {i: str(saved_test_names[i]) for i in range(len(X_test))}
+                                    st.caption(f"✓ Using {len(saved_test_names)} sample names from 70-30 split")
+
+                                elif hasattr(X_test, 'index') and not isinstance(X_test.index, pd.RangeIndex):
+                                    sample_names_dict_test_knn = {i: str(X_test.index[i]) for i in range(len(X_test))}
+                                    st.caption(f"✓ Using sample names from X_test.index")
+
+                                else:
+                                    test_start_offset = locals().get('test_start', 1)
+                                    sample_names_dict_test_knn = {i: f"Test_{test_start_offset + i}" for i in range(len(X_test))}
+                                    st.warning(f"⚠️ Using numeric indices (no sample names found)")
+
+                                # Reorder samples: misclassified first, then correct
+                                misclassified_idx_test_knn = np.where(y_test != y_pred_test)[0]
+                                correct_idx_test_knn = np.where(y_test == y_pred_test)[0]
+                                ordered_indices_test_knn = np.concatenate([misclassified_idx_test_knn, correct_idx_test_knn])
+
+                                # Sample selector
+                                selected_sample_idx_tab4_knn = st.selectbox(
+                                    "Select sample to analyze",
+                                    options=ordered_indices_test_knn,
+                                    format_func=lambda x: f"Sample {sample_names_dict_test_knn[x]}: True={y_test[x]}, Pred={y_pred_test[x]}",
+                                    key="sample_selector_tab4_knn"
+                                )
+
+                                # Sample info metrics
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric("True Class", y_test[selected_sample_idx_tab4_knn])
+                                with col2:
+                                    st.metric("Predicted", y_pred_test[selected_sample_idx_tab4_knn])
+                                with col3:
+                                    match = "✅ Correct" if y_test[selected_sample_idx_tab4_knn] == y_pred_test[selected_sample_idx_tab4_knn] else "❌ Error"
+                                    st.metric("Result", match)
+
+                                # ═══════════════════════════════════════════════════════════════════════
+                                # k-NEAREST NEIGHBORS ANALYSIS
+                                # ═══════════════════════════════════════════════════════════════════════
+
+                                st.markdown("#### 🔍 k-Nearest Neighbors Analysis")
+
+                                # Get the test sample
+                                test_sample = X_test_scaled[selected_sample_idx_tab4_knn].reshape(1, -1)
+
+                                # Get distances to all training samples
+                                from classification_utils.calculations import calculate_distance_matrix
+                                k_value = cv_results.get('k_value', 5)
+                                metric = cv_results.get('metric', 'euclidean')
+
+                                distances_to_train = calculate_distance_matrix(
+                                    test_sample,
+                                    trained['model']['X_train'],
+                                    metric=metric,
+                                    cov=trained['model'].get('cov')
+                                )[0]
+
+                                # Get k nearest neighbors
+                                k_nearest_indices = np.argsort(distances_to_train)[:k_value]
+                                k_nearest_distances = distances_to_train[k_nearest_indices]
+                                y_train_model = trained['model']['y_train']
+                                k_nearest_labels = y_train_model[k_nearest_indices]
+
+                                # Create neighbors table
+                                neighbors_data = []
+                                train_sample_names = st.session_state.get('train_sample_names')
+                                for rank, (neighbor_idx, distance, label) in enumerate(zip(k_nearest_indices, k_nearest_distances, k_nearest_labels), 1):
+                                    # Get training sample name
+                                    if train_sample_names is not None and neighbor_idx < len(train_sample_names):
+                                        sample_name = train_sample_names[neighbor_idx]
+                                    else:
+                                        sample_name = f"Train_{neighbor_idx}"
+
+                                    neighbors_data.append({
+                                        'Rank': rank,
+                                        'Training Sample': sample_name,
+                                        'Class': label,
+                                        'Distance': f"{distance:.4f}",
+                                        'Vote': "🗳️"
+                                    })
+
+                                neighbors_df = pd.DataFrame(neighbors_data)
+                                st.dataframe(neighbors_df, use_container_width=True, hide_index=True)
+
+                                # Voting summary
+                                st.markdown("#### 🗳️ Neighbor Voting Summary")
+
+                                vote_counts = {}
+                                for label in k_nearest_labels:
+                                    vote_counts[label] = vote_counts.get(label, 0) + 1
+
+                                # Create voting display
+                                cols = st.columns(len(vote_counts))
+                                for col_idx, (class_label, count) in enumerate(sorted(vote_counts.items())):
+                                    with cols[col_idx]:
+                                        confidence = 100 * count / k_value
+                                        winner = "👑 WINNER" if class_label == y_pred_test[selected_sample_idx_tab4_knn] else ""
+                                        st.metric(
+                                            f"Class {class_label}",
+                                            f"{count}/{k_value}",
+                                            f"{confidence:.0f}% {winner}",
+                                            delta_color="off"
+                                        )
+
+                                # Prediction confidence
+                                pred_votes = vote_counts.get(y_pred_test[selected_sample_idx_tab4_knn], 0)
+                                pred_confidence = 100 * pred_votes / k_value
+
+                                st.markdown("#### 🎯 Prediction Confidence")
+                                st.progress(pred_confidence / 100, text=f"{pred_confidence:.0f}% Confidence")
+
+                                if pred_confidence == 100:
+                                    st.success("✅ All neighbors vote for predicted class - High confidence!")
+                                elif pred_confidence >= 60:
+                                    st.info("ℹ️ Most neighbors vote for predicted class - Good confidence")
+                                else:
+                                    st.warning(f"⚠️ Weak consensus - Only {pred_votes}/{k_value} neighbors vote for {y_pred_test[selected_sample_idx_tab4_knn]}")
+
+                                # Feature values
+                                st.markdown("#### 📊 Feature Values (Test Sample)")
+
+                                if isinstance(X_test, pd.DataFrame):
+                                    feature_vals_test = X_test.iloc[selected_sample_idx_tab4_knn].values
+                                else:
+                                    feature_vals_test = X_test[selected_sample_idx_tab4_knn]
+
+                                feature_df_test = pd.DataFrame({
+                                    'Feature': x_columns,
+                                    'Value': feature_vals_test
+                                })
+                                st.dataframe(feature_df_test, use_container_width=True, hide_index=True)
+
+                                # Distance distribution visualization
+                                st.markdown("#### 📈 Distance to k Neighbors")
+
+                                fig_knn_dist = go.Figure()
+
+                                # Color neighbors by whether they match true class
+                                colors = ['green' if k_nearest_labels[i] == y_test[selected_sample_idx_tab4_knn] else 'red'
+                                         for i in range(k_value)]
+
+                                fig_knn_dist.add_trace(go.Bar(
+                                    x=[f"Neighbor {i+1}<br>{neighbors_data[i]['Training Sample']}" for i in range(k_value)],
+                                    y=k_nearest_distances,
+                                    marker_color=colors,
+                                    text=[f"{d:.3f}" for d in k_nearest_distances],
+                                    textposition="outside",
+                                    hovertemplate="<b>%{x}</b><br>Distance: %{y:.4f}<extra></extra>"
+                                ))
+                                fig_knn_dist.update_layout(
+                                    title=f"Distance to k-Nearest Neighbors (k={k_value}, metric={metric})",
+                                    xaxis_title="Neighbor",
+                                    yaxis_title="Distance",
+                                    height=400,
+                                    showlegend=False,
+                                    plot_bgcolor='white',
+                                    xaxis=dict(showgrid=False),
+                                    yaxis=dict(showgrid=True, gridwidth=1, gridcolor='lightgray')
+                                )
+                                st.plotly_chart(fig_knn_dist, use_container_width=True)
+
+                                st.caption("🟢 Green: Neighbor has same class as true label | 🔴 Red: Different class")
+
+                                # Debug expander
+                                with st.expander("🔍 Debug: kNN Sample Analysis Details", expanded=False):
+                                    st.write(f"**Selected Sample Index:** {selected_sample_idx_tab4_knn}")
+                                    st.write(f"**Sample Name:** {sample_names_dict_test_knn.get(selected_sample_idx_tab4_knn, 'N/A')}")
+                                    st.write(f"**True Class:** {y_test[selected_sample_idx_tab4_knn]}")
+                                    st.write(f"**Predicted Class:** {y_pred_test[selected_sample_idx_tab4_knn]}")
+                                    st.write(f"**k Value:** {k_value}")
+                                    st.write(f"**Metric:** {metric}")
+                                    st.write(f"\n**k Nearest Neighbors:**")
+                                    st.write(f"- Indices: {k_nearest_indices.tolist()}")
+                                    st.write(f"- Distances: {k_nearest_distances.tolist()}")
+                                    st.write(f"- Labels: {k_nearest_labels.tolist()}")
+                                    st.write(f"\n**Voting:**")
+                                    for cls, count in sorted(vote_counts.items()):
+                                        st.write(f"- {cls}: {count} votes ({100*count/k_value:.0f}%)")
+
+                            except Exception as e:
+                                st.error(f"❌ Error in kNN sample analysis: {str(e)}")
+                                import traceback
+                                st.error(traceback.format_exc())
+
+                        # ═══════════════════════════════════════════════════════════════════════════
+                        # LDA/QDA: MAHALANOBIS DISTANCE ANALYSIS (TEST DATA)
+                        # ═══════════════════════════════════════════════════════════════════════════
+                        if trained['name'] in ['LDA', 'QDA']:
+                            st.divider()
+                            st.markdown("### 📏 Mahalanobis Distance Analysis (Test Data)")
+                            st.info(
+                                "Mahalanobis distances from each test sample to class centroids. "
+                                "Proper class separation shows distinct distribution patterns."
+                            )
+
+                            try:
+                                # Get Mahalanobis distances for test set
+                                if trained['name'] == 'LDA':
+                                    _, mahal_distances_test = predict_lda(X_test_scaled, trained['model'])
+                                else:  # QDA
+                                    _, mahal_distances_test = predict_qda(X_test_scaled, trained['model'])
+
+                                # ═══════════════════════════════════════════════════════════════════
+                                # CREATE SAMPLE NAMES DICT (before tabs, for all 3 plots)
+                                # ═══════════════════════════════════════════════════════════════════
+
+                                saved_test_names = st.session_state.get('test_sample_names')
+                                sample_names_dict_test_lda = {}
+
+                                if saved_test_names is not None and len(saved_test_names) == len(X_test):
+                                    sample_names_dict_test_lda = {i: str(saved_test_names[i]) for i in range(len(X_test))}
+                                    # st.caption(f"✓ Using {len(saved_test_names)} sample names from 70-30 split")
+
+                                elif hasattr(X_test, 'index') and not isinstance(X_test.index, pd.RangeIndex):
+                                    sample_names_dict_test_lda = {i: str(X_test.index[i]) for i in range(len(X_test))}
+                                    # st.caption(f"✓ Using sample names from X_test.index")
+
+                                else:
+                                    sample_names_dict_test_lda = {i: f"Sample_{i}" for i in range(len(X_test))}
+
+                                # Convert to list for passing to plot functions
+                                sample_names_list_test = [sample_names_dict_test_lda[i] for i in range(len(X_test))]
+
+                                # Create 3-tab interface for Mahalanobis distance analysis
+                                tab_closest_test, tab_category_test, tab_sample_test = st.tabs([
+                                    "📊 Closest Category",
+                                    "🎯 Distance to Specific Class",
+                                    "🔍 Sample Analysis"
+                                ])
+
+                                class_names_list_test = [str(c) for c in classes]
+
+                                # TAB 1: Distance to closest category
+                                with tab_closest_test:
+                                    st.markdown("**Distance from each test sample to its closest class**")
+                                    st.caption("Shows the minimum distance to any class model. Bars colored by true class.")
+
+                                    from classification_utils.plots import plot_mahalanobis_distance_closest_category
+                                    fig_closest_test = plot_mahalanobis_distance_closest_category(
+                                        mahal_distances_test,
+                                        y_test,
+                                        class_names=class_names_list_test,
+                                        sample_names=sample_names_list_test,  # ✅ ADD sample names
+                                        title=f"{trained['name']} - Distance to Closest Category (Test Data)"
+                                    )
+                                    st.plotly_chart(fig_closest_test, use_container_width=True)
+
+                                # TAB 2: Distance to specific class
+                                with tab_category_test:
+                                    st.markdown("**Distance from all test samples to one specific class model**")
+                                    st.caption("Select a class to see how all test samples relate to that class's model.")
+
+                                    col1, col2 = st.columns([1, 3])
+                                    with col1:
+                                        target_class_test = st.selectbox(
+                                            "Select Target Class",
+                                            options=classes,
+                                            key="mahal_test_target_class"
+                                        )
+
+                                    from classification_utils.plots import plot_mahalanobis_distance_category
+                                    fig_category_test = plot_mahalanobis_distance_category(
+                                        mahal_distances_test,
+                                        y_test,
+                                        target_class=target_class_test,
+                                        class_names=class_names_list_test,
+                                        sample_names=sample_names_list_test,  # ✅ ADD sample names
+                                        title=f"{trained['name']} - Distance to Class {target_class_test} (Test Data)"
+                                    )
+                                    st.plotly_chart(fig_category_test, use_container_width=True)
+
+                                # TAB 3: Sample-specific analysis
+                                with tab_sample_test:
+                                    st.markdown("**Distance from one test sample to all class models**")
+                                    st.caption("Examine a specific test sample to understand its classification.")
+
+                                    # ═══════════════════════════════════════════════════════════════════
+                                    # USE SELECTBOX INSTEAD OF number_input
+                                    # ═══════════════════════════════════════════════════════════════════
+
+                                    col1, col2 = st.columns([1, 3])
+                                    with col1:
+                                        # Reorder: misclassified first, then correct
+                                        misclassified_idx_test_lda = np.where(y_test != y_pred_test)[0]
+                                        correct_idx_test_lda = np.where(y_test == y_pred_test)[0]
+                                        ordered_indices_test_lda = np.concatenate([misclassified_idx_test_lda, correct_idx_test_lda])
+
+                                        sample_idx_test = st.selectbox(
+                                            "Select Sample",
+                                            options=ordered_indices_test_lda,
+                                            format_func=lambda x: f"{sample_names_dict_test_lda[x]} (T:{y_test[x]}, P:{y_pred_test[x]})",
+                                            key="mahal_test_sample_idx"
+                                        )
+
+                                    from classification_utils.plots import plot_mahalanobis_distance_object
+                                    fig_sample_test = plot_mahalanobis_distance_object(
+                                        mahal_distances_test,
+                                        sample_idx=sample_idx_test,
+                                        y_true=y_test,
+                                        class_names=class_names_list_test,
+                                        sample_names=sample_names_list_test,  # ✅ ADD sample names
+                                        title=f"{trained['name']} - Test Sample {sample_names_dict_test_lda[sample_idx_test]} Distance Analysis"
+                                    )
+                                    st.plotly_chart(fig_sample_test, use_container_width=True)
+
+                            except Exception as e:
+                                st.warning(f"Could not display Mahalanobis distance analysis: {str(e)}")
+                                import traceback
+                                st.error(traceback.format_exc())
+
                         st.divider()
 
                         # Per-class metrics
@@ -2931,13 +4821,33 @@ def show():
                         correct_idx_test = np.where(y_test == y_pred_test)[0]
                         ordered_indices_test = np.concatenate([misclassified_idx_test, correct_idx_test])
 
-                        # Create sample names dictionary for test set
-                        if hasattr(X_test, 'index'):
-                            sample_names_dict_test = {i: X_test.index[i] for i in range(len(X_test))}
-                        else:
-                            # Use test_start if available (workspace data), else just sequential numbering
+                        # ✅ FIX 2: Create sample names dictionary with improved fallbacks
+                        saved_test_names = st.session_state.get('test_sample_names')
+                        sample_names_dict_test = {}
+
+                        if saved_test_names is not None and len(saved_test_names) == len(X_test):
+                            # Use the saved sample names from 70-30 split (BEST)
+                            sample_names_dict_test = {i: str(saved_test_names[i]) for i in range(len(X_test))}
+                            st.caption(f"✓ Using {len(saved_test_names)} sample names from 70-30 split")
+
+                        elif hasattr(X_test, 'index') and not isinstance(X_test.index, pd.RangeIndex):
+                            # X_test is a DataFrame with a non-default index
+                            sample_names_dict_test = {i: str(X_test.index[i]) for i in range(len(X_test))}
+                            st.caption(f"✓ Using {len(X_test)} sample names from X_test.index")
+
+                        elif hasattr(y_test, 'index') and not isinstance(y_test.index, pd.RangeIndex):
+                            # y_test has a non-default index
+                            try:
+                                sample_names_dict_test = {i: str(y_test.index[i]) for i in range(len(y_test))}
+                                st.caption(f"✓ Using {len(y_test)} sample names from y_test.index")
+                            except:
+                                pass
+
+                        if not sample_names_dict_test:
+                            # Fallback: use numeric indexing
                             test_start_offset = locals().get('test_start', 1)
-                            sample_names_dict_test = {i: str(test_start_offset + i) for i in range(len(X_test))}
+                            sample_names_dict_test = {i: f"Test_{test_start_offset + i}" for i in range(len(X_test))}
+                            st.warning(f"⚠️ Using numeric indices (no sample names found)")
 
                         # Sample selector for Tab4
                         selected_sample_idx_tab4 = st.selectbox(
@@ -2946,6 +4856,39 @@ def show():
                             format_func=lambda x: f"Sample {sample_names_dict_test[x]}: True={y_test[x]}, Pred={y_pred_test[x]}",
                             key="sample_selector_tab4"
                         )
+
+                        # ✅ FIX 3: Debug expander to verify sample names
+                        with st.expander("🔍 Debug: Sample Names Status", expanded=False):
+                            st.write("**Session State:**")
+                            saved_names = st.session_state.get('test_sample_names')
+                            st.write(f"- test_sample_names exists: {saved_names is not None}")
+                            if saved_names:
+                                st.write(f"- Length: {len(saved_names)}")
+                                st.write(f"- First 5: {saved_names[:5]}")
+                            else:
+                                st.write("- test_sample_names is None")
+
+                            st.write("\n**X_test Info:**")
+                            st.write(f"- Type: {type(X_test)}")
+                            if hasattr(X_test, 'index'):
+                                st.write(f"- Has index: True")
+                                st.write(f"- Index type: {type(X_test.index)}")
+                                st.write(f"- Is RangeIndex: {isinstance(X_test.index, pd.RangeIndex)}")
+                                st.write(f"- Index values (first 5): {X_test.index[:5].tolist()}")
+                            else:
+                                st.write(f"- Has index: False (numpy array)")
+
+                            st.write("\n**y_test Info:**")
+                            st.write(f"- Type: {type(y_test)}")
+                            if hasattr(y_test, 'index'):
+                                st.write(f"- Has index: True")
+                                st.write(f"- Index type: {type(y_test.index)}")
+                                st.write(f"- Index values (first 5): {y_test.index[:5].tolist()}")
+
+                            st.write("\n**Sample Names Dict:**")
+                            st.write(f"- Length: {len(sample_names_dict_test)}")
+                            st.write(f"- First 5 entries: {dict(list(sample_names_dict_test.items())[:5])}")
+                            st.write(f"- Last 5 entries: {dict(list(sample_names_dict_test.items())[-5:])}")
 
                         # Sample details for test set
                         col1, col2, col3 = st.columns(3)
