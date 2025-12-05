@@ -530,7 +530,78 @@ def _parse_clipboard_data(clipboard_text, separator, decimal, has_header, has_in
 
 def show():
     """Display the Data Handling page"""
-    
+
+# ========== PRIVACY DISCLAIMER - ONE TIME ONLY ==========
+    # STEP 1: Check if user has accepted terms (first time entering)
+    if 'data_upload_terms_accepted' not in st.session_state:
+        with st.expander("⚠️ Privacy Confirmation (REQUIRED)", expanded=True):
+            st.warning("""
+            **You are uploading to Streamlit Community Cloud (Free Tier)**
+
+            Confirm your data is:
+            ✓ Anonymized or non-proprietary
+            ✓ Not regulated (FDA, HIPAA, etc.)
+            ✓ Not containing customer/client names
+            ✓ Not containing exact batch IDs or timestamps
+            ✓ Not confidential or business-critical
+            """)
+
+            # ==== OPZIONE: LOCAL vs CLOUD ====
+            st.info("""
+            ### 🖥️ Alternative: Use Local Version
+
+            **Prefer to keep data on your computer?**
+
+            You can run ChemometricSolutions locally without uploading to the cloud:
+
+            ```bash
+            # Clone repository
+            git clone https://github.com/EFarinini/chemometricsolutions-demo.git
+            cd chemometricsolutions-demo
+
+            # Create virtual environment
+            python -m venv venv
+            source venv/bin/activate  # On Windows: venv\\Scripts\\activate
+
+            # Install dependencies
+            pip install -r requirements.txt
+            ```
+
+            **Local version benefits:**
+            ✓ 100% data privacy (stays on your machine)
+            ✓ No internet required
+            ✓ Unlimited data size
+            ✓ Full control
+
+            📖 [Full setup instructions →](https://github.com/EFarinini/chemometricsolutions-demo)
+            """)
+
+            st.markdown("---")
+
+            # ==== CONFIRMA PER VERSIONE CLOUD ====
+            confirm_privacy = st.checkbox(
+                "✓ I confirm this data is suitable for Community Cloud",
+                value=False,
+                key="data_privacy_confirm_initial"
+            )
+
+            if confirm_privacy:
+                st.session_state.data_upload_terms_accepted = True
+                st.rerun()
+            else:
+                st.error("❌ Please confirm to continue, or use the Local Version")
+                st.info("""
+                **Legal Note:** By confirming above, you acknowledge you've read 
+                and accept our terms. [Read full terms →](https://github.com/EFarinini/chemometricsolutions-demo/blob/main/TERMS.html)
+                """)
+                st.stop()
+
+    # STEP 2: After acceptance, show success message (terms already accepted)
+    else:
+        st.success("✓ Privacy terms accepted - Ready to upload")
+        
+    # ========== NORMAL DATA HANDLING CONTINUES BELOW ==========
+    st.markdown("---")
     st.markdown("# Data Handling")
     st.markdown("*Import, export, and manage your datasets*")
     

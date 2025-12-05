@@ -2696,12 +2696,17 @@ def _show_advanced_diagnostics_tab():
             # Show component-wise contributions for first sample
             st.markdown("#### Sample 1 - Component-wise T² Contributions")
             sample1_scores = scores_diag[0, :]
-            sample1_t2_components = sample1_scores**2 / eigenvalues_diag
+
+            # Calculate sample variance eigenvalues for component-wise T² (CORRECTED)
+            n_samples = len(scores_diag)
+            eigenvalues_sample_var = eigenvalues_diag / (n_samples - 1)
+
+            sample1_t2_components = sample1_scores**2 / eigenvalues_sample_var
             contrib_df = pd.DataFrame({
                 'Component': [f'PC{i+1}' for i in range(n_comp_diag)],
                 'Score': sample1_scores,
                 'Score²': sample1_scores**2,
-                'Eigenvalue (λ)': eigenvalues_diag,
+                'Eigenvalue (λ_sample)': eigenvalues_sample_var,
                 'T² Contribution (score²/λ)': sample1_t2_components
             })
             st.dataframe(contrib_df.style.format({
@@ -3210,9 +3215,11 @@ def _show_advanced_diagnostics_tab():
                 )
                 sample_idx = list(scores.index).index(selected_sample)
 
-                # Get contributions
+                # Get contributions (CORRECTED - use sample variance eigenvalues)
                 sample_score = scores_diag[sample_idx]
-                sample_t2_contrib = (sample_score**2 / eigenvalues_diag)
+                n_samples = len(scores_diag)
+                eigenvalues_sample_var = eigenvalues_diag / (n_samples - 1)
+                sample_t2_contrib = (sample_score**2 / eigenvalues_sample_var)
 
                 # Calculate Q contributions only if no missing values
                 if not has_missing_values:

@@ -184,6 +184,12 @@ if "my_dataset" in datasets:
 
 **Backend Connection:** `modules/data_handling/` (loaders.py, exporters.py, transformations.py)
 
+**Key Prompts for Development:**
+
+> **Prompt 1:** "In `data_handling.py`, Tab1 "Load Data", add a feature to detect file encoding automatically. Modify: section "File Upload", function should call `loaders.detect_file_encoding()` and display detected encoding to user before loading."
+
+> **Prompt 2:** "In `data_handling.py`, Tab3 "Export Data", add batch export capability. When user selects multiple datasets from workspace, export all to separate files in a ZIP. Modify `exporters.py` to add `export_batch_to_zip(datasets_dict, output_path)` function."
+
 ---
 
 ### **2. pca.py** - Principal Component Analysis
@@ -201,6 +207,12 @@ if "my_dataset" in datasets:
 
 **Backend Connection:** `modules/pca/` (calculations.py, plots.py, diagnostics.py, statistics.py)
 
+**Key Prompts for Development:**
+
+> **Prompt 3:** "In `pca.py`, Tab2 "Model Diagnostics", add a new section "Outlier Detection" that displays: (1) T² vs Q scatter plot with control limits, (2) list of samples exceeding limits. Call `diagnostics.get_outliers_t2_q(scores, loadings, confidence=0.95)` and `plots.plot_t2_vs_q(t2_scores, q_scores)` from modules/pca/."
+
+> **Prompt 4:** "In `pca.py`, Tab3 "Loadings", add interactive feature: when user clicks on a variable name in a table, highlight that variable in the loading plot. Use Plotly's `customdata` and event handling to implement this."
+
 ---
 
 ### **3. mlr_doe.py** - Multiple Linear Regression & Design of Experiments
@@ -216,6 +228,12 @@ if "my_dataset" in datasets:
 - Automatic model equation generation
 
 **Backend Connection:** `modules/mlr_doe/` (doe_generator.py, mlr_model.py, response_surface.py, diagnostics.py, candidate_points.py, confidence_intervals.py)
+
+**Key Prompts for Development:**
+
+> **Prompt 5:** "In `mlr_doe.py`, Tab1 "Candidate Points", Section "Point Optimization", add Pareto front visualization for multi-objective optimization. User selects 2-3 response variables → display 2D/3D Pareto front. Call `pareto_optimization.compute_pareto_front(response_surfaces, objectives)` and `plots.plot_pareto_front_3d(pareto_points)`."
+
+> **Prompt 6:** "In `mlr_doe.py`, Tab2 "Response Surface", modify Section "Model Equation" to include model validation statistics. Display: R², Adjusted R², PRESS, Lack-of-fit F-statistic. Call `diagnostics.get_model_validation_stats(residuals, n_samples, n_factors)` from modules/mlr_doe/diagnostics.py."
 
 ---
 
@@ -319,6 +337,8 @@ if "my_dataset" in datasets:
 
 **Backend Connection:** `modules/classification/` (models.py, training.py, evaluation.py, plots.py)
 
+**Key Prompts for Development:**
+
 ---
 
 ### **9. calibration_page.py** - PLS Multivariate Calibration
@@ -333,6 +353,8 @@ if "my_dataset" in datasets:
 - Sample predictions with confidence bands
 
 **Backend Connection:** `modules/calibration/` (pls_regression.py, calibration.py, predictions.py, diagnostics.py)
+
+**Key Prompts for Development:**
 
 ---
 

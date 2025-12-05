@@ -21,14 +21,40 @@ from color_utils import (
     is_quantitative_variable
 )
 
-def calculate_t2_statistic(scores, n_components=None):
-    """Calculate T² (Hotelling's T²) statistic for PCA scores"""
+# Import corrected T² calculation function
+from pca_utils.pca_statistics import calculate_hotelling_t2
+
+def calculate_t2_statistic(scores, eigenvalues, n_components=None):
+    """
+    Calculate T² (Hotelling's T²) statistic for PCA scores.
+
+    CORRECTED: Now uses the properly corrected function from pca_statistics.
+    This ensures T² values match CAT/R exactly.
+
+    Parameters
+    ----------
+    scores : pd.DataFrame
+        PCA scores matrix
+    eigenvalues : np.ndarray
+        Eigenvalues from NIPALS (t't - sum of squared scores)
+    n_components : int, optional
+        Number of components to use. If None, uses all available.
+
+    Returns
+    -------
+    np.ndarray
+        T² values for each sample
+    """
     if n_components is None:
         n_components = scores.shape[1]
-    
+
+    # Use subset of scores and eigenvalues
     scores_subset = scores.iloc[:, :n_components]
-    t2_values = np.sum(scores_subset.values**2, axis=1)
-    
+    eigenvalues_subset = eigenvalues[:n_components]
+
+    # Use the corrected function
+    t2_values, _ = calculate_hotelling_t2(scores_subset, eigenvalues_subset, alpha=0.95)
+
     return t2_values
 
 
@@ -318,10 +344,17 @@ def show_advanced_diagnostics_tab(processed_data, scores, pca_params, timestamps
     # Calculate diagnostics
     with st.spinner("Calculating T² and Q statistics..."):
         try:
-            # Calculate T² statistic
-            t2_values = calculate_t2_statistic(scores, n_components)
-            
-            # Calculate Q statistic  
+            # Get eigenvalues from PCA parameters
+            if 'eigenvalues' not in pca_params:
+                st.error("❌ PCA eigenvalues not found in model parameters")
+                return
+
+            eigenvalues = pca_params['eigenvalues']
+
+            # Calculate T² statistic (CORRECTED - now uses eigenvalues)
+            t2_values = calculate_t2_statistic(scores, eigenvalues, n_components)
+
+            # Calculate Q statistic
             if 'loadings' in pca_params:
                 loadings = pca_params['loadings']
                 q_values = calculate_q_statistic(processed_data, scores, loadings, n_components)

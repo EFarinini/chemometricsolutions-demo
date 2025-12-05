@@ -1479,15 +1479,15 @@ def show():
                     # Get eigenvalues for the selected components
                     eigenvalues_diag = pca_results['eigenvalues'][:n_components_use]
 
-                    # ===== CALCULATE T² FOR ALL SAMPLES =====
-                    # Use correct formula: T² = Σ(score_k² / λ_k)
-                    t2_values = np.sum((scores_plot ** 2) / eigenvalues_diag[np.newaxis, :], axis=1)
+                    # ===== CALCULATE T² FOR ALL SAMPLES (Using Corrected Function) =====
+                    # Use the already-corrected function for consistency
+                    # This automatically applies the correct formula: T² = Σ(score_k² × (n-1) / λ_k)
+                    # where λ_k = t't (sum of squared scores from NIPALS)
+                    t2_values, _ = calculate_hotelling_t2(scores_plot, eigenvalues_diag, alpha=0.95)
 
-                    # ===== CALCULATE Q FOR ALL SAMPLES =====
-                    # Correct formula: Q = ||residuals||² = ||X - X_reconstructed||²
-                    X_reconstructed = scores_plot @ loadings.T
-                    residuals = X_plot_scaled - X_reconstructed
-                    q_values = np.sum(residuals ** 2, axis=1)
+                    # ===== CALCULATE Q FOR ALL SAMPLES (Using Corrected Function) =====
+                    # Use the already-corrected function for consistency
+                    q_values, _ = calculate_q_residuals(X_plot_scaled, scores_plot, loadings, alpha=0.95)
 
                     # ===== CALCULATE CONTROL LIMITS (3 levels) =====
                     # For Independent approach (97.5%, 99.5%, 99.95%)
@@ -1498,24 +1498,12 @@ def show():
                     q_limits = []
 
                     for alpha in alpha_levels:
-                        # T² limit using F-distribution
-                        df1 = n_components_use
-                        df2 = n_samples_train - n_components_use
-                        f_value = f.ppf(alpha, df1, df2)
-                        t2_lim = ((n_samples_train - 1) * n_components_use / (n_samples_train - n_components_use)) * f_value
+                        # Get T² and Q limits from corrected pca_utils functions
+                        # This ensures consistency with all other calculations
+                        _, t2_lim = calculate_hotelling_t2(scores_plot, eigenvalues_diag, alpha=alpha)
                         t2_limits.append(t2_lim)
 
-                        # Q limit using chi-square approximation (Box 1954)
-                        q_mean = np.mean(q_values)
-                        q_var = np.var(q_values, ddof=1)
-
-                        if q_var > 0 and q_mean > 0:
-                            g = q_var / (2 * q_mean)
-                            h = (2 * q_mean ** 2) / q_var
-                            q_lim = g * chi2.ppf(alpha, h)
-                        else:
-                            # Fallback to percentile if variance is zero
-                            q_lim = np.percentile(q_values, alpha * 100)
+                        _, q_lim = calculate_q_residuals(X_plot_scaled, scores_plot, loadings, alpha=alpha)
                         q_limits.append(q_lim)
 
                     # Prepare params for plotting
