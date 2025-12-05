@@ -591,15 +591,17 @@ def show():
             else:
                 st.error("❌ Please confirm to continue, or use the Local Version")
                 st.info("""
-                **Legal Note:** By confirming above, you acknowledge you've read 
-                and accept our terms. [Read full terms →](https://github.com/EFarinini/chemometricsolutions-demo/blob/main/TERMS.html)
+                **Legal Note:** By confirming above, you acknowledge you've read
+                and accept our terms.
+
+                [Read full terms →](https://htmlpreview.github.io/?https://github.com/EFarinini/chemometricsolutions-demo/blob/main/TERMS.html)
                 """)
                 st.stop()
 
     # STEP 2: After acceptance, show success message (terms already accepted)
     else:
         st.success("✓ Privacy terms accepted - Ready to upload")
-        
+
     # ========== NORMAL DATA HANDLING CONTINUES BELOW ==========
     st.markdown("---")
     st.markdown("# Data Handling")
