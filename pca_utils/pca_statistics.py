@@ -26,9 +26,7 @@ def calculate_hotelling_t2(
     in the principal component space. It indicates how far a sample is from
     the multivariate mean, accounting for variance in each PC direction.
 
-    CRITICAL: NIPALS eigenvalues use population variance (t't/n), but T²
-    requires sample variance (t't/(n-1)). We apply the correction factor
-    to match R/CAT and standard statistical references.
+    CORRECTED: Matches MATLAB nipals.m - Eigenvalues are t't (sum of squared scores)
 
     Parameters
     ----------
@@ -36,8 +34,9 @@ def calculate_hotelling_t2(
         PCA scores matrix of shape (n_samples, n_components).
         Each row is a sample projected into PC space.
     eigenvalues : np.ndarray
-        Eigenvalues from NIPALS (population variance: t't/n).
+        Eigenvalues from NIPALS = t't (sum of squared scores).
         Shape: (n_components,).
+        NOTE: These are NOT divided by n, contrary to old comments
     alpha : float, optional
         Confidence level for critical limit (0 < alpha < 1).
         Default is 0.95 (95% confidence).
@@ -53,26 +52,25 @@ def calculate_hotelling_t2(
 
     Notes
     -----
-    **NIPALS vs Sample Variance Correction:**
+    **NIPALS Eigenvalue Format:**
 
-    NIPALS computes: λ_NIPALS = t't / n  (population variance)
+    NIPALS computes eigenvalues as: λ_NIPALS = t't (sum of squared scores)
 
-    T² requires:     λ_sample = t't / (n-1)  (sample variance)
+    This is the RAW eigenvalue, NOT divided by n (population variance).
 
-    Correction: λ_sample = λ_NIPALS × n/(n-1)
+    For T² formula, we need SAMPLE variance: λ_sample = (t't) / (n-1)
 
-    This ensures T² values match R/CAT exactly. Without this correction,
-    Python T² values would be systematically lower by factor (n-1)/n.
-
-    **T2 statistic formula:**
+    **T² statistic formula (MATLAB-aligned):**
 
     .. math::
-        T^2_i = \sum_{j=1}^{a} \frac{t_{ij}^2}{\lambda_{sample,j}}
+        T^2_i = \sum_{j=1}^{a} t_{ij}^2 / \lambda_{sample,j}
+              = \sum_{j=1}^{a} t_{ij}^2 \cdot (n-1) / t't_j
 
     where:
-    - :math:`t_{ij}` is the score for sample i on PC j
-    - :math:`\lambda_{sample,j}` is the sample variance eigenvalue of PC j
-    - :math:`a` is the number of components
+    - t_ij is the score for sample i on PC j
+    - λ_sample_j = (t't_j) / (n-1) is the sample variance eigenvalue
+    - a is the number of components
+    - n is the number of samples
 
     **Critical limit (F-distribution approximation):**
 
@@ -80,13 +78,12 @@ def calculate_hotelling_t2(
         T^2_{crit} = \frac{(n-1) \cdot a}{n-a} \cdot F_{a,n-a,\\alpha}
 
     where:
-    - :math:`n` is the number of samples
-    - :math:`F_{a,n-a,\\alpha}` is the F-distribution critical value
+    - F_a,n-a,α is the F-distribution critical value
 
     Examples
     --------
     >>> scores = np.array([[1.2, 0.5], [0.8, -0.3], [3.5, 2.1]])
-    >>> eigenvalues_nipals = np.array([2.5, 1.2])  # From NIPALS
+    >>> eigenvalues_nipals = np.array([2.5, 1.2])  # From NIPALS (not pre-corrected)
     >>> t2, limit = calculate_hotelling_t2(scores, eigenvalues_nipals, alpha=0.95)
     >>> outliers = t2 > limit
     >>> print(f"Outliers: {np.where(outliers)[0]}")
@@ -96,7 +93,8 @@ def calculate_hotelling_t2(
     .. [1] Jackson, J.E. (1991). A User's Guide to Principal Components.
     .. [2] Nomikos & MacGregor (1995). Multivariate SPC charts for
            monitoring batch processes. Technometrics, 37(1), 41-59.
-    .. [3] R/CAT: PCA_t2vsq_Dataset.r (uses sDev^2 = sample variance)
+    .. [3] MATLAB nipals.m: varexp(t) = xmax'*xmax (line 57)
+           vvv(i,i) = varexp(i)/(r-1) (line 89)
     """
     # Convert to numpy array if DataFrame
     if isinstance(scores, pd.DataFrame):
@@ -111,18 +109,23 @@ def calculate_hotelling_t2(
     # Ensure eigenvalues are positive (numerical stability)
     eigenvalues = np.maximum(eigenvalues, 1e-10)
 
-    # === CRITICAL CORRECTION ===
-    # Convert NIPALS eigenvalues (population variance) to sample variance
-    # λ_sample = λ_NIPALS × n/(n-1)
-    # This correction factor ensures T² values match R/CAT standard
-    if n_samples > 1:
-        eigenvalues_corrected = eigenvalues * (n_samples / (n_samples - 1))
-    else:
-        eigenvalues_corrected = eigenvalues
+    # === CORRECTED (Previously Wrong) ===
+    # NIPALS eigenvalues = t't (sum of squared scores, NOT divided by n)
+    # For T² formula we need: (t't) / (n-1) [sample variance]
+    # Simply divide by (n-1), do NOT multiply by n/(n-1)!
+    #
+    # Previous (buggy) code: eigenvalues * (n_samples / (n_samples - 1))
+    # This incorrectly introduced an extra division by n
 
-    # === T² CALCULATION (R/CAT STANDARD) ===
-    # T²_i = Σ(t_ij² / λ_sample_j)
-    t2_values = np.sum((scores_array ** 2) / eigenvalues_corrected, axis=1)
+    if n_samples > 1:
+        eigenvalues_for_t2 = eigenvalues / (n_samples - 1)  # ✅ CORRECTED
+    else:
+        eigenvalues_for_t2 = eigenvalues
+
+    # === T² CALCULATION (MATLAB-ALIGNED) ===
+    # T²_i = Σ_j t_ij² / (t't_j / (n-1))
+    #      = Σ_j t_ij² × (n-1) / t't_j
+    t2_values = np.sum((scores_array ** 2) / eigenvalues_for_t2, axis=1)
 
     # Calculate critical value using F-distribution
     # T2_limit = [(n-1)  * a / (n-a)]  * F(a, n-a, alpha)
@@ -928,17 +931,17 @@ def calculate_hotelling_t2_matricial(
     # R/CAT line 14:
     # MT <- P %*% (diag(length(L)) * (1/L)) %*% t(P)
 
-    # === CRITICAL CORRECTION ===
-    # Convert NIPALS eigenvalues (population variance) to sample variance
-    # λ_sample = λ_NIPALS × n_train/(n_train-1)
-    # This matches the correction in calculate_hotelling_t2()
+    # === CORRECTED (Previously Wrong) ===
+    # NIPALS eigenvalues = t't (sum of squared scores, NOT divided by n)
+    # For T² formula we need: (t't) / (n_train-1) [sample variance]
+    # Simply divide by (n_train-1), do NOT multiply by n_train/(n_train-1)!
     if n_train is not None and n_train > 1:
-        eigenvalues_corrected = eigenvalues * (n_train / (n_train - 1))
+        eigenvalues_for_t2 = eigenvalues / (n_train - 1)  # ✅ CORRECTED
     else:
-        eigenvalues_corrected = eigenvalues
+        eigenvalues_for_t2 = eigenvalues
 
     # Ensure eigenvalues are positive (numerical stability)
-    eigenvalues_safe = np.maximum(eigenvalues_corrected, 1e-10)
+    eigenvalues_safe = np.maximum(eigenvalues_for_t2, 1e-10)
 
     # Create diagonal matrix: diag(1/λ_sample)
     inv_eigenvalues_diag = np.diag(1.0 / eigenvalues_safe)
