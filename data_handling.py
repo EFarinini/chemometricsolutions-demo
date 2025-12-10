@@ -546,34 +546,31 @@ def show():
             ✓ Not confidential or business-critical
             """)
 
-            # ==== OPZIONE: LOCAL vs CLOUD ====
+            # ==== UPGRADE & CONSULTING SECTION ====
             st.info("""
-            ### 🖥️ Alternative: Use Local Version
+            ### 💡 Professional Solutions
 
-            **Prefer to keep data on your computer?**
+            **This is a DEMO version.** Included features:
+            ✓ Core data analysis and preprocessing
+            ✓ Basic statistical tools
+            ✓ Standard visualization suite
+            ✓ Community-supported features
 
-            You can run ChemometricSolutions locally without uploading to the cloud:
+            **Professional versions include:**
+            ✓ Advanced transformations for specialized analytical techniques
+            ✓ On-premise deployment (100% data privacy)
+            ✓ Custom workflows for your specific applications
+            ✓ Priority technical support
+            ✓ Integration with your existing systems
+            ✓ Compliance-ready solutions (FDA, ISO, GDPR)
 
-            ```bash
-            # Clone repository
-            git clone https://github.com/EFarinini/chemometricsolutions-demo.git
-            cd chemometricsolutions-demo
+            📧 **Interested in upgrading or consulting?**
+            Let's discuss your analytical needs and find the perfect solution.
 
-            # Create virtual environment
-            python -m venv venv
-            source venv/bin/activate  # On Windows: venv\\Scripts\\activate
-
-            # Install dependencies
-            pip install -r requirements.txt
-            ```
-
-            **Local version benefits:**
-            ✓ 100% data privacy (stays on your machine)
-            ✓ No internet required
-            ✓ Unlimited data size
-            ✓ Full control
-
-            📖 [Full setup instructions →](https://github.com/EFarinini/chemometricsolutions-demo)
+            **Contact us:**
+            - 📧 Email: [chemometricsolutions@gmail.com](mailto:chemometricsolutions@gmail.com)
+            - 🌐 Website: [chemometricsolutions.com](https://chemometricsolutions.com/)
+            - 💼 LinkedIn: [ChemometricSolutions](https://www.linkedin.com/company/chemometricsolutions/)
             """)
 
             st.markdown("---")
@@ -589,7 +586,7 @@ def show():
                 st.session_state.data_upload_terms_accepted = True
                 st.rerun()
             else:
-                st.error("❌ Please confirm to continue, or use the Local Version")
+                st.error("❌ Please confirm to continue, or contact us")
                 st.info("""
                 **Legal Note:** By confirming above, you acknowledge you've read
                 and accept our terms.
