@@ -371,3 +371,94 @@ def clear_all_split_datasets() -> int:
     count = len(st.session_state.split_datasets)
     st.session_state.split_datasets = {}
     return count
+
+
+def save_interpretation_session(session_name: str, session_data: Dict[str, Any]) -> bool:
+    """
+    Save interpretation session to file.
+
+    Parameters
+    ----------
+    session_name : str
+        Name for the session (used as filename)
+    session_data : dict
+        Dictionary containing session data with keys:
+        - 'pc_x': str
+        - 'pc_y': str
+        - 'sample_colors': dict
+        - 'sample_labels': dict
+        - 'variable_annotations': dict
+        - 'interpretation_notes': str
+        - 'created_date': str (ISO format)
+
+    Returns
+    -------
+    bool
+        True if successful, False otherwise
+
+    Examples
+    --------
+    >>> session = {
+    ...     'pc_x': 'PC1',
+    ...     'pc_y': 'PC2',
+    ...     'sample_colors': {0: '#FF0000'},
+    ...     'sample_labels': {0: 'Sample A'},
+    ...     'variable_annotations': {'Var1': 'Important variable'},
+    ...     'interpretation_notes': 'Analysis notes',
+    ...     'created_date': pd.Timestamp.now().isoformat()
+    ... }
+    >>> save_interpretation_session('PC1_vs_PC2_analysis', session)
+    True
+    """
+    try:
+        # Create interpretation sessions directory if not exists
+        sessions_dir = Path('interpretation_sessions')
+        sessions_dir.mkdir(exist_ok=True)
+
+        # Save to JSON
+        filepath = sessions_dir / f"{session_name}.json"
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(session_data, f, indent=2)
+
+        return True
+
+    except Exception as e:
+        print(f"Error saving interpretation session: {e}")
+        return False
+
+
+def load_interpretation_session(session_name: str) -> Optional[Dict[str, Any]]:
+    """
+    Load interpretation session from file.
+
+    Parameters
+    ----------
+    session_name : str
+        Name of the session to load
+
+    Returns
+    -------
+    dict or None
+        Dictionary containing session data, or None if not found
+
+    Examples
+    --------
+    >>> session = load_interpretation_session('PC1_vs_PC2_analysis')
+    >>> if session:
+    ...     print(f"Loaded session for {session['pc_x']} vs {session['pc_y']}")
+    """
+    try:
+        sessions_dir = Path('interpretation_sessions')
+        filepath = sessions_dir / f"{session_name}.json"
+
+        if not filepath.exists():
+            return None
+
+        with open(filepath, 'r', encoding='utf-8') as f:
+            session_data = json.load(f)
+
+        return session_data
+
+    except Exception as e:
+        print(f"Error loading interpretation session: {e}")
+        return None

@@ -1044,7 +1044,10 @@ def add_sample_trajectory_lines(
     color_variable: Optional[str] = None,
     original_data: Optional[pd.DataFrame] = None,
     trajectory_color_vector: Optional[Dict[str, Any]] = None,
-    color_discrete_map: Optional[Dict[Any, str]] = None  # DEPRECATED: Not used
+    color_discrete_map: Optional[Dict[Any, str]] = None,  # DEPRECATED: Not used
+    metadata_column: Optional[pd.Series] = None,  # NEW: Metadata for categorical coloring
+    use_category_colors: bool = False,  # NEW: Use category colors instead of sequential
+    show_trajectory_arrow: bool = True  # NEW: Show directional arrow at end
 ) -> go.Figure:
     """
     Add sample trajectory lines to a score plot with gradient coloring.
@@ -1089,6 +1092,16 @@ def add_sample_trajectory_lines(
     trajectory_color_vector : dict, optional
         Dict with keys: 'category', 'variable', 'values', 'min', 'max'
         When provided, applies custom coloring to specific batch. Default is None.
+    metadata_column : pd.Series, optional
+        Metadata column for category-based coloring (NEW). When provided with
+        use_category_colors=True, each trajectory segment is colored by its category.
+        Default is None.
+    use_category_colors : bool, optional
+        If True, use category colors from metadata_column instead of sequential coloring.
+        Default is False.
+    show_trajectory_arrow : bool, optional
+        If True, add a vector arrow at the end of each trajectory line to indicate
+        direction of progression. Default is True.
 
     Returns
     -------
@@ -1122,6 +1135,73 @@ def add_sample_trajectory_lines(
     ... )
     """
     try:
+        def add_trajectory_arrow(fig, start_x, start_y, end_x, end_y, color, size=15, width=2):
+            """
+            Add a simple classic arrow (vector style) at the end of trajectory.
+            Two lines forming a V tip (like mathematical arrow).
+
+            Parameters:
+            - fig: Plotly figure
+            - start_x, start_y: Arrow base (start point)
+            - end_x, end_y: Arrow tip (end point)
+            - color: Arrow color (RGB string)
+            - size: Arrow tip size
+            - width: Arrow line width
+
+            Returns:
+            - Modified figure with arrow added
+            """
+            import math
+
+            # Calculate arrow direction
+            dx = end_x - start_x
+            dy = end_y - start_y
+            distance = math.sqrt(dx**2 + dy**2)
+
+            if distance < 0.01:  # Skip if start and end are too close
+                return fig
+
+            # Normalize direction vector
+            dx_norm = dx / distance
+            dy_norm = dy / distance
+
+            # Perpendicular vector (for arrow branches)
+            perp_x = -dy_norm
+            perp_y = dx_norm
+
+            # Arrow head size
+            arrow_length = distance * 0.1  # 10% of trajectory length
+            arrow_width = arrow_length * 0.4  # Width of the V
+
+            # Calculate two points for the arrow V
+            left_x = end_x - dx_norm * arrow_length + perp_x * arrow_width
+            left_y = end_y - dy_norm * arrow_length + perp_y * arrow_width
+
+            right_x = end_x - dx_norm * arrow_length - perp_x * arrow_width
+            right_y = end_y - dy_norm * arrow_length - perp_y * arrow_width
+
+            # === Add left line of arrow V ===
+            fig.add_trace(go.Scatter(
+                x=[left_x, end_x],
+                y=[left_y, end_y],
+                mode='lines',
+                line=dict(color=color, width=width),
+                showlegend=False,
+                hoverinfo='skip'
+            ))
+
+            # === Add right line of arrow V ===
+            fig.add_trace(go.Scatter(
+                x=[right_x, end_x],
+                y=[right_y, end_y],
+                mode='lines',
+                line=dict(color=color, width=width),
+                showlegend=False,
+                hoverinfo='skip'
+            ))
+
+            return fig
+
         # === CASE 0: No lines ===
         if line_strategy.lower() == "none":
             return fig
@@ -1162,6 +1242,24 @@ def add_sample_trajectory_lines(
                 )
                 fig.add_trace(line_trace)
 
+            # === Add arrow at the end of sequential trajectory ===
+            if show_trajectory_arrow and len(x_vals) >= 2:
+                # Get last two points to define arrow direction
+                prev_x = x_vals[-2]
+                prev_y = y_vals[-2]
+                last_x = x_vals[-1]
+                last_y = y_vals[-1]
+                last_color = colors[-1]  # Use color of last segment
+
+                fig = add_trajectory_arrow(
+                    fig,
+                    prev_x, prev_y,  # Start point
+                    last_x, last_y,  # End point (arrow tip)
+                    last_color,      # Arrow color
+                    size=12,
+                    width=line_width
+                )
+
             return fig
 
         # === CASE 2: Categorical trajectories (one line per group) ===
@@ -1189,8 +1287,23 @@ def add_sample_trajectory_lines(
                 # No valid categories found
                 return fig
 
-            # NOTE: color_discrete_map is DEPRECATED and not used
-            # Lines always use sequential index or variable coloring (independent from points)
+            # === NEW: Prepare category color mapping if metadata provided ===
+            category_color_map = None
+            if use_category_colors and metadata_column is not None:
+                # Prepare metadata series
+                if isinstance(metadata_column, pd.Series):
+                    meta_series = metadata_column.copy()
+                else:
+                    meta_series = pd.Series(metadata_column, index=scores.index)
+
+                # Align with scores index
+                meta_series = meta_series.reindex(scores.index)
+
+                # Get unique values from metadata
+                unique_meta_values = meta_series.dropna().unique()
+
+                # Create categorical color map using color_utils
+                category_color_map = create_categorical_color_map(unique_meta_values)
 
             # Draw line for each category
             for category in unique_categories:
@@ -1228,8 +1341,18 @@ def add_sample_trajectory_lines(
                 # Other batches: use fixed 0.15 (very dim, almost invisible)
                 current_opacity = line_opacity if is_selected_batch else 0.15
 
-                # Determine coloring for this category
-                if is_selected_batch and trajectory_color_vector.get('mode') == 'numeric_color':
+                # === NEW: Determine coloring for this category ===
+                if use_category_colors and category_color_map is not None and metadata_column is not None:
+                    # Get metadata values for this category's points
+                    meta_vals = meta_series.loc[category_indices].values
+
+                    # Map each metadata value to its color
+                    colors = [category_color_map.get(val, 'rgb(128, 128, 128)') for val in meta_vals]
+
+                    # Use full opacity for category-colored trajectories
+                    current_opacity = line_opacity
+
+                elif is_selected_batch and trajectory_color_vector.get('mode') == 'numeric_color':
                     # Selected batch with numeric variable coloring (BRIGHT & PROMINENT)
                     color_vals = trajectory_color_vector['values'].reindex(category_indices).values
                     min_val = trajectory_color_vector['min']
@@ -1255,6 +1378,10 @@ def add_sample_trajectory_lines(
                     colors = ['rgb(200, 200, 200)'] * len(x_vals)
 
                 # Draw line segments with appropriate opacity
+                last_x = None
+                last_y = None
+                last_color = None
+
                 for i in range(len(x_vals) - 1):
                     line_trace = go.Scatter(
                         x=[x_vals[i], x_vals[i+1]],
@@ -1268,6 +1395,27 @@ def add_sample_trajectory_lines(
                         legendgroup=f'trajectory_{category}'
                     )
                     fig.add_trace(line_trace)
+
+                    # Store last point for arrow
+                    last_x = x_vals[i+1]
+                    last_y = y_vals[i+1]
+                    last_color = colors[i]
+
+                # === NEW: Add arrow at the end of trajectory ===
+                if show_trajectory_arrow and last_x is not None and last_y is not None and last_color is not None:
+                    if len(x_vals) >= 2:
+                        # Get second-to-last point to define arrow direction
+                        prev_x = x_vals[-2]
+                        prev_y = y_vals[-2]
+
+                        fig = add_trajectory_arrow(
+                            fig,
+                            prev_x, prev_y,  # Start point
+                            last_x, last_y,  # End point (arrow tip)
+                            last_color,      # Arrow color
+                            size=12,
+                            width=line_width
+                        )
 
             return fig
 
@@ -1396,6 +1544,9 @@ def plot_line_scores(
         pc_idx = int(pc_name.replace('PC', '')) - 1
         pc_scores = scores.iloc[:, pc_idx].values
 
+        # Determine marker symbol based on PC index
+        marker_symbol = ['circle', 'square', 'diamond'][pc_idx % 3]
+
         # If encode_by set: draw segments grouped by category
         if encode_by != 'None' and data is not None and encode_by in data.columns:
             encode_values = data[encode_by].values
@@ -1430,7 +1581,7 @@ def plot_line_scores(
                     name=f"{pc_name}: {segment_cat}",
                     mode='lines+markers+text' if text_labels is not None else 'lines+markers',
                     line=dict(color=seg_color, width=2, dash='solid'),
-                    marker=dict(size=6),
+                    marker=dict(size=6, symbol=marker_symbol),
                     text=text_labels,
                     textposition="top center",
                     textfont=dict(size=8),
@@ -1461,7 +1612,7 @@ def plot_line_scores(
                     name=pc_name,
                     mode='lines+markers',
                     line=dict(color='blue', width=2),
-                    marker=dict(size=5),
+                    marker=dict(size=5, symbol=marker_symbol),
                     hovertemplate=f'{pc_name}<br>Sample: %{{x}}<br>Score: %{{y:.3f}}<extra></extra>'
                 ))
 
@@ -1475,6 +1626,7 @@ def plot_line_scores(
                     line=dict(width=2),
                     marker=dict(
                         size=5,
+                        symbol=marker_symbol,
                         color=sample_index,
                         colorscale='Blues',
                         showscale=True,
@@ -1497,7 +1649,7 @@ def plot_line_scores(
                         name=pc_name,
                         mode='lines+markers',
                         line=dict(width=2),
-                        marker=dict(size=5, color=color_vals),
+                        marker=dict(size=5, symbol=marker_symbol, color=color_vals),
                         hovertemplate=f'{pc_name}<br>Sample: %{{x}}<br>Score: %{{y:.3f}}<extra></extra>'
                     ))
                 else:
@@ -1510,6 +1662,7 @@ def plot_line_scores(
                         line=dict(width=2),
                         marker=dict(
                             size=5,
+                            symbol=marker_symbol,
                             color=data[color_by].values,
                             colorscale=[(0.0, 'rgb(0, 0, 255)'), (0.5, 'rgb(128, 0, 128)'), (1.0, 'rgb(255, 0, 0)')],
                             showscale=True,
@@ -1532,6 +1685,430 @@ def plot_line_scores(
         hovermode='x unified',
         height=500,
         template='plotly_white'
+    )
+
+    return fig
+
+
+def plot_loadings_scores_side_by_side(
+    loadings: pd.DataFrame,
+    scores: pd.DataFrame,
+    pc_x: str,
+    pc_y: str,
+    explained_variance_ratio: np.ndarray,
+    sample_colors: Optional[Dict[int, str]] = None,
+    sample_labels: Optional[Dict[int, str]] = None,
+    variable_annotations: Optional[Dict[str, str]] = None,
+    arrow_scale: float = 1.0,
+    # === NEW PARAMETERS ===
+    color_data: Optional[pd.Series] = None,
+    text_labels: Optional[Union[pd.Series, List[str]]] = None,
+    show_convex_hull: bool = False,
+    hull_opacity: float = 0.2,
+    trajectory_strategy: str = "None",
+    trajectory_groupby_column: Optional[pd.Series] = None,
+    trajectory_metadata_for_coloring: Optional[pd.Series] = None,
+    trajectory_color_vector: Optional[Dict] = None,
+    trajectory_width: int = 2,
+    trajectory_opacity: float = 0.6,
+    trajectory_color_by_index: bool = True,
+    trajectory_color_variable: Optional[str] = None,
+    marker_size: int = 8
+) -> go.Figure:
+    """
+    Create side-by-side subplots for joint loadings-scores interpretation.
+
+    Parameters
+    ----------
+    loadings : pd.DataFrame
+        Loading matrix with variables as rows, PCs as columns
+    scores : pd.DataFrame
+        Score matrix with samples as rows, PCs as columns
+    pc_x : str
+        X-axis principal component name (e.g., 'PC1')
+    pc_y : str
+        Y-axis principal component name (e.g., 'PC2')
+    explained_variance_ratio : np.ndarray
+        Array of variance explained ratios
+    sample_colors : dict, optional
+        Sample index to hex color mapping {sample_idx: '#RRGGBB'}
+    sample_labels : dict, optional
+        Sample index to label text mapping {sample_idx: 'label'}
+    variable_annotations : dict, optional
+        Variable name to interpretation notes mapping {var_name: 'notes'}
+    arrow_scale : float, optional
+        Scaling factor for loading arrow lengths (default: 1.0)
+
+    Returns
+    -------
+    go.Figure
+        Plotly Figure with 2 subplots (loadings + scores)
+
+    Examples
+    --------
+    >>> loadings_df = pd.DataFrame({'PC1': [0.8, 0.2], 'PC2': [0.1, 0.9]}, index=['var1', 'var2'])
+    >>> scores_df = pd.DataFrame({'PC1': [1, 2], 'PC2': [3, 4]}, index=[0, 1])
+    >>> var_ratio = np.array([0.6, 0.3])
+    >>> fig = plot_loadings_scores_side_by_side(loadings_df, scores_df, 'PC1', 'PC2', var_ratio)
+    """
+    from plotly.subplots import make_subplots
+
+    # Get component indices and variance
+    pc_cols = loadings.columns.tolist()
+    pc_x_idx = pc_cols.index(pc_x)
+    pc_y_idx = pc_cols.index(pc_y)
+    var_x = explained_variance_ratio[pc_x_idx] * 100
+    var_y = explained_variance_ratio[pc_y_idx] * 100
+
+    # Create subplot figure
+    fig = make_subplots(
+        rows=1, cols=2,
+        subplot_titles=(
+            f"Loadings: {pc_x} vs {pc_y}",
+            f"Scores: {pc_x} vs {pc_y}"
+        ),
+        horizontal_spacing=0.12
+    )
+
+    # ========== LEFT SUBPLOT: LOADINGS ==========
+
+    # Add loading arrows
+    for var_name in loadings.index:
+        x_load = loadings.loc[var_name, pc_x] * arrow_scale
+        y_load = loadings.loc[var_name, pc_y] * arrow_scale
+
+        # Annotation text
+        annotation_text = variable_annotations.get(var_name, 'N/A') if variable_annotations else 'N/A'
+
+        # Arrow line (from origin to loading point) - ROSSO PURO
+        fig.add_trace(
+            go.Scatter(
+                x=[0, x_load],
+                y=[0, y_load],
+                mode='lines',
+                line=dict(color='rgb(220, 20, 60)', width=1),  # Rosso crimson, sottile
+                showlegend=False,
+                hoverinfo='text',
+                hovertext=f"{var_name}<br>Loading {pc_x}: {loadings.loc[var_name, pc_x]:.3f}<br>Loading {pc_y}: {loadings.loc[var_name, pc_y]:.3f}<br>Annotation: {annotation_text}",
+                name=var_name
+            ),
+            row=1, col=1
+        )
+
+        # Arrow head (Plotly annotation arrow) - ROSSO PURO
+        fig.add_annotation(
+            x=x_load,
+            y=y_load,
+            ax=0,
+            ay=0,
+            xref='x',
+            yref='y',
+            axref='x',
+            ayref='y',
+            showarrow=True,
+            arrowhead=2,                      # Freccia standard Plotly
+            arrowsize=1,
+            arrowwidth=1,                     # Sottile
+            arrowcolor='rgb(220, 20, 60)',    # Rosso crimson
+            row=1, col=1
+        )
+
+        # Variable label at arrow endpoint
+        fig.add_trace(
+            go.Scatter(
+                x=[x_load],
+                y=[y_load],
+                mode='text',
+                text=[var_name],
+                textposition='top center',
+                textfont=dict(size=8, color='rgb(60, 60, 60)'),
+                showlegend=False,
+                hoverinfo='skip'
+            ),
+            row=1, col=1
+        )
+
+    # Add zero reference lines (loadings subplot)
+    fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=1, col=1)
+    fig.add_vline(x=0, line_dash="dash", line_color="gray", opacity=0.5, row=1, col=1)
+
+    # ========== RIGHT SUBPLOT: SCORES ==========
+
+    # Prepare sample display data
+    sample_indices = scores.index.tolist()
+    score_x_vals = scores[pc_x].values
+    score_y_vals = scores[pc_y].values
+
+    # === NEW: Determine colors (priority: color_data > sample_colors > default) ===
+    if color_data is not None:
+        # Use new color_data parameter (flexible coloring)
+        if is_quantitative_variable(color_data):
+            # Quantitative: blue-to-red gradient
+            color_values = color_data.reindex(scores.index).values
+            point_colors = [get_continuous_color_for_value(v, color_data.min(), color_data.max())
+                          for v in color_values]
+        else:
+            # Categorical: discrete color map
+            unique_vals = color_data.dropna().unique()
+            color_map = create_categorical_color_map(unique_vals)
+            point_colors = [color_map.get(color_data.loc[idx], 'rgb(128, 128, 128)')
+                          if idx in color_data.index else 'rgb(128, 128, 128)'
+                          for idx in sample_indices]
+    elif sample_colors:
+        # Legacy parameter (backward compatibility)
+        point_colors = [sample_colors.get(idx, 'rgb(100, 150, 200)') for idx in sample_indices]
+    else:
+        # Default: gradient coloring by index
+        n_samples = len(sample_indices)
+        point_colors = [get_continuous_color_for_value(i, 0, n_samples-1) for i in range(n_samples)]
+
+    # === NEW: Determine text labels (priority: text_labels > sample_labels > default) ===
+    if text_labels is not None:
+        # Use new text_labels parameter
+        if isinstance(text_labels, pd.Series):
+            hover_labels = text_labels.reindex(scores.index).fillna('N/A').astype(str).tolist()
+        else:
+            hover_labels = [str(lbl) for lbl in text_labels]
+    elif sample_labels:
+        # Legacy parameter (backward compatibility)
+        hover_labels = [sample_labels.get(idx, f"Sample {idx}") for idx in sample_indices]
+    else:
+        # Default: use sample indices
+        hover_labels = [f"Sample {idx}" for idx in sample_indices]
+
+    # Hover text
+    hover_texts = [
+        f"{label}<br>Score {pc_x}: {score_x_vals[i]:.3f}<br>Score {pc_y}: {score_y_vals[i]:.3f}"
+        for i, label in enumerate(hover_labels)
+    ]
+
+    # Determine if we should show text labels on plot
+    show_text_labels = text_labels is not None and (
+        (isinstance(text_labels, pd.Series) and len(text_labels) > 0) or
+        (isinstance(text_labels, list) and len(text_labels) > 0)
+    )
+
+    # Check if color_data is categorical
+    is_categorical_color = color_data is not None and not is_quantitative_variable(color_data)
+
+    if is_categorical_color:
+        # === Scores scatter with LEGEND by category ===
+        unique_categories = sorted(color_data.dropna().unique())
+        color_map = create_categorical_color_map(unique_categories)
+
+        for category in unique_categories:
+            category_mask = (color_data == category)
+            cat_indices = [i for i, idx in enumerate(sample_indices) if idx in scores.index[category_mask]]
+
+            # Get data for this category
+            cat_x = [score_x_vals[i] for i in cat_indices]
+            cat_y = [score_y_vals[i] for i in cat_indices]
+            cat_hover_texts = [hover_texts[i] for i in cat_indices]
+            cat_hover_labels = [hover_labels[i] for i in cat_indices] if show_text_labels else None
+
+            # Add trace for this category with legend
+            fig.add_trace(
+                go.Scatter(
+                    x=cat_x,
+                    y=cat_y,
+                    mode='markers+text' if show_text_labels else 'markers',
+                    marker=dict(
+                        size=marker_size,
+                        color=color_map.get(category, 'gray'),
+                        opacity=0.7,
+                        line=dict(color='white', width=1)
+                    ),
+                    text=cat_hover_labels if show_text_labels else None,
+                    textposition='top center' if show_text_labels else None,
+                    textfont=dict(
+                        size=9,
+                        color='rgba(40, 40, 40, 0.8)'
+                    ) if show_text_labels else None,
+                    hovertext=cat_hover_texts,
+                    hoverinfo='text',
+                    name=str(category),  # ← LEGENDA: Nome categoria
+                    showlegend=True,      # ← LEGENDA: Mostra in legenda
+                    legendgroup=str(category),
+                ),
+                row=1, col=2
+            )
+    else:
+        # === Scores scatter WITHOUT legend (single color or quantitative) ===
+        fig.add_trace(
+            go.Scatter(
+                x=score_x_vals,
+                y=score_y_vals,
+                mode='markers+text' if show_text_labels else 'markers',
+                marker=dict(
+                    size=marker_size,
+                    color=point_colors,
+                    opacity=0.7,
+                    line=dict(color='white', width=1)
+                ),
+                text=hover_labels if show_text_labels else None,
+                textposition='top center' if show_text_labels else None,
+                textfont=dict(
+                    size=9,
+                    color='rgba(40, 40, 40, 0.8)'
+                ) if show_text_labels else None,
+                hovertext=hover_texts,
+                hoverinfo='text',
+                showlegend=False
+            ),
+            row=1, col=2
+        )
+
+    # === NEW: Add convex hulls if requested (only for categorical color_data) ===
+    if show_convex_hull and color_data is not None and not is_quantitative_variable(color_data):
+        try:
+            # Get color map for convex hulls
+            unique_vals = color_data.dropna().unique()
+            color_map = create_categorical_color_map(unique_vals)
+
+            # Add convex hulls for each category
+            for category in unique_vals:
+                category_mask = color_data == category
+                n_points = category_mask.sum()
+
+                if n_points < 3:
+                    continue  # Need at least 3 points for a hull
+
+                # Extract coordinates for this category
+                cat_x = scores.loc[category_mask, pc_x].values
+                cat_y = scores.loc[category_mask, pc_y].values
+                cat_points = np.column_stack([cat_x, cat_y])
+
+                try:
+                    hull = ConvexHull(cat_points)
+                    hull_vertices = hull.vertices
+                    hull_points = cat_points[hull_vertices]
+
+                    # Close the polygon
+                    hull_x = np.append(hull_points[:, 0], hull_points[0, 0])
+                    hull_y = np.append(hull_points[:, 1], hull_points[0, 1])
+
+                    # Get color for this group
+                    group_color = color_map.get(category, 'gray')
+
+                    # Add hull trace to RIGHT subplot (row=1, col=2)
+                    fig.add_trace(go.Scatter(
+                        x=hull_x,
+                        y=hull_y,
+                        mode='lines',
+                        line=dict(color=group_color, width=1),
+                        opacity=hull_opacity,
+                        fill=None,
+                        name=f'{category}_hull',
+                        showlegend=False,
+                        hoverinfo='skip'
+                    ), row=1, col=2)
+
+                except Exception:
+                    continue  # Skip if hull computation fails
+
+        except Exception:
+            pass  # Silently skip if convex hull fails
+
+    # === NEW: Add trajectory lines if requested ===
+    if trajectory_strategy.lower() != "none":
+        try:
+            # Create a temporary single-plot figure for trajectory computation
+            temp_fig = go.Figure()
+
+            # Add trajectory lines using the existing function
+            temp_fig = add_sample_trajectory_lines(
+                temp_fig,
+                scores,
+                pc_x,
+                pc_y,
+                line_strategy=trajectory_strategy,
+                groupby_column=trajectory_groupby_column,
+                line_width=trajectory_width,
+                line_opacity=trajectory_opacity,
+                color_by_index=trajectory_color_by_index,
+                color_variable=trajectory_color_variable,
+                trajectory_color_vector=trajectory_color_vector,
+                metadata_column=trajectory_metadata_for_coloring,
+                use_category_colors=(trajectory_metadata_for_coloring is not None)
+            )
+
+            # Transfer trajectory traces to RIGHT subplot (row=1, col=2)
+            for trace in temp_fig.data:
+                fig.add_trace(trace, row=1, col=2)
+
+        except Exception:
+            pass  # Silently skip if trajectory lines fail
+
+    # Add zero reference lines (scores subplot)
+    fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, row=1, col=2)
+    fig.add_vline(x=0, line_dash="dash", line_color="gray", opacity=0.5, row=1, col=2)
+
+    # ========== LAYOUT CONFIGURATION ==========
+
+    # Calculate symmetric axis ranges for loadings
+    loading_x_range = [loadings[pc_x].min() * arrow_scale, loadings[pc_x].max() * arrow_scale]
+    loading_y_range = [loadings[pc_y].min() * arrow_scale, loadings[pc_y].max() * arrow_scale]
+    max_loading_abs = max(abs(min(loading_x_range + loading_y_range)), abs(max(loading_x_range + loading_y_range)))
+    loading_axis_range = [-max_loading_abs * 1.2, max_loading_abs * 1.2]
+
+    # Calculate symmetric axis ranges for scores
+    score_x_range = [scores[pc_x].min(), scores[pc_x].max()]
+    score_y_range = [scores[pc_y].min(), scores[pc_y].max()]
+    max_score_abs = max(abs(min(score_x_range + score_y_range)), abs(max(score_x_range + score_y_range)))
+    score_axis_range = [-max_score_abs * 1.2, max_score_abs * 1.2]
+
+    # Update layout
+    fig.update_layout(
+        title=dict(
+            text=f"Joint Loadings-Scores Analysis: {pc_x} vs {pc_y}",
+            x=0.5,
+            xanchor='center'
+        ),
+        height=500,
+        showlegend=True,  # ← Enable legend for categories
+        legend=dict(
+            x=1.05,
+            y=1.0,
+            xanchor='left',
+            yanchor='top',
+            bgcolor='rgba(255, 255, 255, 0.9)',
+            bordercolor='rgba(0, 0, 0, 0.2)',
+            borderwidth=1
+        ),
+        template='plotly_white',
+        hovermode='closest'
+    )
+
+    # Update axes for LEFT subplot (loadings)
+    fig.update_xaxes(
+        title=f"{pc_x} ({var_x:.1f}%)",
+        range=loading_axis_range,
+        scaleanchor="y",
+        scaleratio=1,
+        constrain="domain",
+        row=1, col=1
+    )
+    fig.update_yaxes(
+        title=f"{pc_y} ({var_y:.1f}%)",
+        range=loading_axis_range,
+        constrain="domain",
+        row=1, col=1
+    )
+
+    # Update axes for RIGHT subplot (scores)
+    fig.update_xaxes(
+        title=f"{pc_x} ({var_x:.1f}%)",
+        range=score_axis_range,
+        scaleanchor="y2",
+        scaleratio=1,
+        constrain="domain",
+        row=1, col=2
+    )
+    fig.update_yaxes(
+        title=f"{pc_y} ({var_y:.1f}%)",
+        range=score_axis_range,
+        constrain="domain",
+        row=1, col=2
     )
 
     return fig

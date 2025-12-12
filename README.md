@@ -3,7 +3,6 @@
 Professional chemometric analysis tools brought to the web. A comprehensive Streamlit-based platform for PCA, MLR/DoE, data handling, and classification with a fully modular architecture featuring root-level menu modules and shared workspace utilities.
 
 **Live Demo:** https://chemometricsolutions-demo.streamlit.app/
-
 **GitHub:** https://github.com/EFarinini/chemometricsolutions-demo
 
 ---

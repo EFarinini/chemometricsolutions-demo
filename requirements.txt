@@ -17,6 +17,7 @@ plotly>=5.0.0                  # Interactive plots (main visualization library)
 plotly-express>=0.4.1          # High-level Plotly interface (usually with plotly)
 matplotlib>=3.5.0              # Static plotting (fallback/compatibility)
 seaborn>=0.11.0                # Statistical visualization
+python-ternary>=1.0.8          # Ternary contour plots for mixture designs
 
 # ===== MACHINE LEARNING & STATISTICS =====
 scikit-learn>=1.0.0            # ML algorithms (classification, preprocessing)

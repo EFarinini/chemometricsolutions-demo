@@ -913,26 +913,24 @@ def show_model_computation_ui(data, dataset_name):
 
         # Y variable (OPTIONAL - for design analysis mode)
         remaining_cols = [col for col in numeric_columns if col not in x_vars]
-        if remaining_cols:
-            y_options = ["(None - Design Analysis Only)"] + remaining_cols
-            y_var_selected = st.selectbox(
-                "Select Y variable (response - optional):",
-                y_options,
-                key="mlr_y_var_widget",
-                help="Select '(None)' for design screening without response variable"
-            )
+
+        # Always show Y variable selector (even if no remaining cols - for Design Analysis Mode)
+        y_options = ["(None - Design Analysis Only)"] + remaining_cols
+        y_var_selected = st.selectbox(
+            "Select Y variable (response - optional):",
+            y_options,
+            key="mlr_y_var_widget",
+            help="Select '(None)' for design screening without response variable"
+        )
 
 
-            # Parse selection
-            if y_var_selected == "(None - Design Analysis Only)":
-                y_var = None
-                st.info("**Design Analysis Mode**: No Y variable - will analyze design matrix only (VIF, Leverage, Dispersion)")
+        # Parse selection
+        if y_var_selected == "(None - Design Analysis Only)":
+            y_var = None
+            st.info("**Design Analysis Mode**: No Y variable - will analyze design matrix only (VIF, Leverage, Dispersion)")
 
-            else:
-                y_var = y_var_selected
         else:
-            st.warning("⚠️ Select at least one X variable")
-            return
+            y_var = y_var_selected
 
         # Show selected variables info
         if x_vars and y_var:
@@ -1030,24 +1028,24 @@ def show_model_computation_ui(data, dataset_name):
 
     with st.spinner("Analyzing design structure..."):
         try:
-            design_analysis = analyze_design_structure(X_for_analysis)
+            design_structure_info = analyze_design_structure(X_for_analysis)
 
 
             # Display design analysis results
             col_analysis1, col_analysis2 = st.columns([2, 1])
 
             with col_analysis1:
-                st.info(design_analysis['interpretation'])
+                st.info(design_structure_info['interpretation'])
 
             with col_analysis2:
-                st.metric("Design Type", design_analysis['design_type'])
+                st.metric("Design Type", design_structure_info['design_type'])
 
-                st.metric("Center Points", len(design_analysis['center_points_indices']))
+                st.metric("Center Points", len(design_structure_info['center_points_indices']))
 
 
             # Show warnings if any
-            if design_analysis['warnings']:
-                for warning_msg in design_analysis['warnings']:
+            if design_structure_info['warnings']:
+                for warning_msg in design_structure_info['warnings']:
                     st.warning(warning_msg)
 
 
@@ -1057,9 +1055,9 @@ def show_model_computation_ui(data, dataset_name):
                 {
                     'Variable': var_name,
                     'Levels': n_levels,
-                    'Type': 'Quantitative' if design_analysis['is_quantitative'].get(var_name, True) else 'Categorical'
+                    'Type': 'Quantitative' if design_structure_info['is_quantitative'].get(var_name, True) else 'Categorical'
                 }
-                for var_name, n_levels in design_analysis['n_levels_per_var'].items()
+                for var_name, n_levels in design_structure_info['n_levels_per_var'].items()
             ])
 
             st.dataframe(levels_df, use_container_width=True, hide_index=True)
@@ -1071,7 +1069,7 @@ def show_model_computation_ui(data, dataset_name):
             st.info("Using default configuration (intercept + linear terms)")
 
             # Fallback defaults
-            design_analysis = {
+            design_structure_info = {
                 'design_type': 'unknown',
                 'recommended_terms': {
                     'intercept': True,
@@ -1094,15 +1092,15 @@ def show_model_computation_ui(data, dataset_name):
 
 
     # Show design analysis info as compact caption
-    if design_analysis['design_type'] == "2-level":
+    if design_structure_info['design_type'] == "2-level":
         st.caption("✅ 2-Level Design - Interactions OK, no quadratic")
-    elif design_analysis['design_type'] == ">2-level":
+    elif design_structure_info['design_type'] == ">2-level":
         st.caption("✅ >2-Level Design - All terms available")
-    elif design_analysis['design_type'] == "qualitative_only":
+    elif design_structure_info['design_type'] == "qualitative_only":
         st.caption("⚠️ Qualitative Only - Linear terms only")
 
     else:
-        st.caption(f"ℹ️ Design: {design_analysis['design_type']}")
+        st.caption(f"ℹ️ Design: {design_structure_info['design_type']}")
 
 
     # ════════════════════════════════════════════════════════════════════
@@ -1122,11 +1120,11 @@ def show_model_computation_ui(data, dataset_name):
 
     with col_top2:
         # Disable for qualitative-only designs
-        should_disable_higher_order = (design_analysis['design_type'] == "qualitative_only")
+        should_disable_higher_order = (design_structure_info['design_type'] == "qualitative_only")
 
         include_higher_order = st.checkbox(
             "Include higher-order terms",
-            value=(design_analysis['recommended_terms']['interactions'] or design_analysis['recommended_terms']['quadratic']),
+            value=(design_structure_info['recommended_terms']['interactions'] or design_structure_info['recommended_terms']['quadratic']),
             disabled=should_disable_higher_order,
             help="Interactions and/or quadratic" if not should_disable_higher_order else "Not available for qualitative-only"
         )
@@ -1140,7 +1138,7 @@ def show_model_computation_ui(data, dataset_name):
 
     # ════════════════════════════════════════════════════════════════════
 
-    if include_higher_order and design_analysis['design_type'] != "qualitative_only":
+    if include_higher_order and design_structure_info['design_type'] != "qualitative_only":
 
         st.markdown("### 📊 Select Model Terms")
 
@@ -1148,11 +1146,11 @@ def show_model_computation_ui(data, dataset_name):
 
 
         # Get the term selection matrix UI
-        # Pass design_analysis so function can apply rules intelligently
+        # Pass design_structure_info so function can apply rules intelligently
         term_matrix, selected_terms = display_term_selection_ui(
             x_vars,
             key_prefix="model_config",
-            design_analysis=design_analysis  # ← Pass this!
+            design_analysis=design_structure_info  # ← Pass this!
         )
 
 
@@ -1426,9 +1424,9 @@ def show_model_computation_ui(data, dataset_name):
             else:
                 # ===== DESIGN ANALYSIS MODE (No Y variable) =====
                 with st.spinner("Analyzing design matrix..."):
-                    # Detect replicates in X data only (for experimental variance)
-                    replicate_info = detect_replicates(X_data, pd.Series(np.zeros(len(X_data)), index=X_data.index))
-
+                    # In design analysis mode, we don't have Y values to detect replicates
+                    # Pass None to skip experimental variance calculations
+                    replicate_info = None
 
                     # Run design analysis
                     design_results = design_analysis(X_model, X_data, replicate_info)
@@ -1446,7 +1444,8 @@ def show_model_computation_ui(data, dataset_name):
         except Exception as e:
             st.error(f"❌ Error fitting model: {str(e)}")
             import traceback
-            if st.checkbox("Show debug info"):
+            # Always show traceback for debugging
+            with st.expander("🐛 Debug Info (click to expand)"):
                 st.code(traceback.format_exc())
 
 

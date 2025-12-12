@@ -79,6 +79,18 @@ try:
 except ImportError:
     UNIVARIATE_AVAILABLE = False
 
+try:
+    import generate_doe
+    GENERATE_DOE_AVAILABLE = True
+except ImportError:
+    GENERATE_DOE_AVAILABLE = False
+
+try:
+    import mixture_design
+    MIXTURE_DESIGN_AVAILABLE = True
+except ImportError:
+    MIXTURE_DESIGN_AVAILABLE = False
+
 def show_home():
     """Show the main homepage"""
     
@@ -227,7 +239,7 @@ def show_home():
 
     # Additional row for Transformations and Classification
     st.markdown("---")
-    col_trans1, col_trans2, col_trans3, col_trans4, col_trans5 = st.columns(5)
+    col_trans1, col_trans2, col_trans3, col_trans3b, col_trans4, col_trans5 = st.columns(6)
 
     with col_trans1:
         st.markdown("""
@@ -288,6 +300,27 @@ def show_home():
                 st.rerun()
         else:
             st.info("🚧 Univariate Analysis coming soon")
+
+    with col_trans3b:
+        st.markdown("""
+        ### 🧬 Mixture Design
+        *Simplex Centroid Design & Scheffe Polynomials*
+
+        **Features:**
+        - Simplex centroid design generation
+        - Pseudo-component constraints handling
+        - Scheffe polynomial model computation
+        - Ternary/quaternary response surfaces
+        - D-optimal design integration
+        - Multi-criteria optimization
+        """)
+
+        if MIXTURE_DESIGN_AVAILABLE:
+            if st.button("🚀 Launch Mixture Design", key="launch_mixture_design"):
+                st.session_state.current_page = "Mixture Design"
+                st.rerun()
+        else:
+            st.info("🚧 Mixture Design coming soon")
 
     with col_trans4:
         st.markdown("""
@@ -535,6 +568,22 @@ def main():
         st.sidebar.button("📊 Univariate Analysis", disabled=True, use_container_width=True, key="nav_univariate_disabled")
         st.sidebar.caption("Module not found")
 
+    if GENERATE_DOE_AVAILABLE:
+        if st.sidebar.button("⚡ Generate DoE", use_container_width=True, key="nav_generate_doe"):
+            st.session_state.current_page = "Generate DoE"
+            st.rerun()
+    else:
+        st.sidebar.button("⚡ Generate DoE", disabled=True, use_container_width=True, key="nav_generate_doe_disabled")
+        st.sidebar.caption("Module not found")
+
+    if MIXTURE_DESIGN_AVAILABLE:
+        if st.sidebar.button("🧬 Mixture Design", use_container_width=True, key="nav_mixture_design"):
+            st.session_state.current_page = "Mixture Design"
+            st.rerun()
+    else:
+        st.sidebar.button("🧬 Mixture Design", disabled=True, use_container_width=True, key="nav_mixture_design_disabled")
+        st.sidebar.caption("Module not found")
+
     st.sidebar.markdown("---")
     
     # Current dataset info in sidebar with selector
@@ -630,6 +679,10 @@ def main():
         calibration_page.show()
     elif st.session_state.current_page == "Univariate Analysis" and UNIVARIATE_AVAILABLE:
         univariate_page.show()
+    elif st.session_state.current_page == "Generate DoE" and GENERATE_DOE_AVAILABLE:
+        generate_doe.show()
+    elif st.session_state.current_page == "Mixture Design" and MIXTURE_DESIGN_AVAILABLE:
+        mixture_design.show()
     else:
         st.error(f"Page '{st.session_state.current_page}' not found or module not available")
         st.session_state.current_page = "Home"

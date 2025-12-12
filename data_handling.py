@@ -1082,39 +1082,363 @@ Paracetamol,96.8,6.9,25.8,89.2""")
                 st.info("• For large datasets, start with a small sample to test settings")
         
         elif load_method == "Sample Data":
-            st.markdown("### Sample Datasets")
-            
-            sample_datasets = {
-                "NIR Spectra (100×1557)": "nir_spectra",
-                "Wine Classification (178×13)": "wine_data", 
-                "Chemical Mixture (20×5)": "mixture_design",
-                "PCA Example (50×10)": "pca_example",
-                "Calibration Data (30×8)": "calibration_data"
-            }
-            
-            selected_sample = st.selectbox("Choose sample dataset:", list(sample_datasets.keys()))
-            
-            if st.button("Load Sample Dataset"):
-                # Generate sample data
-                if "NIR" in selected_sample:
-                    data = pd.DataFrame(np.random.randn(100, 1557), 
-                                    columns=[f"Wave_{i}" for i in range(1557)])
-                elif "Wine" in selected_sample:
-                    data = pd.DataFrame(np.random.randn(178, 13),
-                                      columns=[f"Feature_{i}" for i in range(13)])
-                    data['Class'] = np.random.randint(1, 4, 178)
-                else:
-                    rows, cols = map(int, selected_sample.split('(')[1].split(')')[0].split('×'))
-                    data = pd.DataFrame(np.random.randn(rows, cols),
-                                      columns=[f"Var_{i}" for i in range(cols)])
-                
-                st.session_state.current_data = data
-                st.session_state.current_dataset = selected_sample
+            st.markdown("### 📚 Load Example Datasets")
+            st.markdown("*Explore the software with pre-loaded sample data from real chemometric studies*")
 
-                _save_original_to_history(data, selected_sample)
-    
-                st.success(f"Sample data loaded: {data.shape[0]} rows × {data.shape[1]} columns")
-                st.dataframe(data.head(), use_container_width=True)
+            # Path to sample datasets
+            sample_data_path = Path(__file__).parent / "sample_data" / "datasets"
+
+            # Dataset descriptions with file mappings
+            sample_datasets = {
+                "Wines - Classification (178×13)": {
+                    "file": "wines.xls",
+                    "sheet": "0",
+                    "description": "178 wine samples from Piedmont (3 types: Barolo, Grignolino, Barbera) with 13 chemico-physical analyses. Perfect for PCA and classification."
+                },
+                "Moisture - NIR Spectroscopy (54×175)": {
+                    "file": "moisture.xls",
+                    "sheet": "0",
+                    "description": "54 soy wheat samples with moisture content and NIR spectra (1104-2496 nm). Includes training (40) and test (14) sets."
+                },
+                "Colorants - UV-Vis Spectra (22×47)": {
+                    "file": "colorants.xls",
+                    "sheet": "0",
+                    "description": "Mixtures of two food colorants (E-102 and E-110) with UV-Vis absorbances (340-570 nm). Great for calibration."
+                },
+                "Washing - Quality Control (356×46)": {
+                    "file": "washing.xls",
+                    "sheet": "train",
+                    "description": "Quality control data of washing machines (noise characteristics at different wavelengths). Training set: 356 samples."
+                },
+                "Washing - Quality Control Test (50×46)": {
+                    "file": "washing.xls",
+                    "sheet": "test",
+                    "description": "Quality control data of washing machines (noise characteristics at different wavelengths). Test set: 50 samples."
+                },
+                "Four Whiskeys - Authentication (93×57)": {
+                    "file": "four whiskeys.xls",
+                    "sheet": "0",
+                    "description": "93 samples from 4 Irish whiskey brands with 57 chemico-physical variables. Excellent for product authentication."
+                },
+                "Milk - Fatty Acids Training (150×71)": {
+                    "file": "milk.xls",
+                    "sheet": "train",
+                    "description": "150 sheep milk samples with fatty acid composition (71 variables) - Training set for geographical origin discrimination."
+                },
+                "Milk - Fatty Acids Test (100×71)": {
+                    "file": "milk.xls",
+                    "sheet": "test",
+                    "description": "100 sheep milk samples - Test set for model validation."
+                },
+                "Vinegars - Autoscaled (84×20)": {
+                    "file": "vinegars.xls",
+                    "sheet": "0",
+                    "description": "84 Spanish vinegars from 4 types with 20 compositional variables (already autoscaled)."
+                },
+                "Venice - Environmental (192×13)": {
+                    "file": "Venice.xls",
+                    "sheet": "data",
+                    "description": "Pollution data from Venice lagoon - 16 sampling sites, 13 variables, monthly measurements."
+                },
+                "Wheat - Granulometry (41×38)": {
+                    "file": "wheat.xls",
+                    "sheet": "0",
+                    "description": "41 wheat samples from 3 producers with granulometric profiles (38 class diameters)."
+                },
+                "Cognac - Sensory Analysis (30×12)": {
+                    "file": "cognac.xls",
+                    "sheet": "0",
+                    "description": "5 cognacs tasted by 6 assessors, scoring 12 sensory characteristics. Ideal for sensory data analysis."
+                },
+                "Classification - Tutorial (40×10)": {
+                    "file": "classification.xls",
+                    "sheet": "0",
+                    "description": "Artificial dataset for classification practice (40 samples, 10 variables). Great for learning."
+                },
+                "Forensic - Anthropometry (44×15)": {
+                    "file": "forensic.xls",
+                    "sheet": "0",
+                    "description": "44 human skeletal measurements (height + 14 bone measurements). Forensic anthropology dataset."
+                },
+                "Fraud - Chromatography (17×5)": {
+                    "file": "fraud.xls",
+                    "sheet": "0",
+                    "description": "17 lard samples (pure or adulterated with tallow) with 5 fatty acid percentages. Fraud detection."
+                },
+                "Whisky - UV Spectroscopy (29×91)": {
+                    "file": "whisky.xls",
+                    "sheet": "0",
+                    "description": "29 whisky mixtures (high quality + poor quality + water) with UV spectra (220-400 nm)."
+                },
+                "API - Granulometry (10×25)": {
+                    "file": "API.xls",
+                    "sheet": "0",
+                    "description": "10 batches of Active Pharmaceutical Ingredient with 25 particle size distribution classes."
+                },
+                "DoE - Chemical Reaction": {
+                    "file": "DoE.XLS",
+                    "sheet": "2a Chemical Reaction",
+                    "description": "Experimental design for chemical reaction optimization (Temperature, Reactant, Catalyst → Yield)."
+                },
+                "DoE - Bicycle Performance": {
+                    "file": "DoE.XLS",
+                    "sheet": "2b Bicycle",
+                    "description": "Factorial design for bicycle performance (Seat, Generator, Tire → Time)."
+                },
+                "DoE - Thickener Viscosity": {
+                    "file": "DoE.XLS",
+                    "sheet": "2d Thickener",
+                    "description": "Mixture design for thickener formulation (Reagent A, Reagent B → Viscosity)."
+                },
+                "DoE - Polymerization": {
+                    "file": "DoE.XLS",
+                    "sheet": "2e Polymerization",
+                    "description": "Experimental design for polymerization process optimization."
+                },
+                "DoE - NASA Experiment": {
+                    "file": "DoE.XLS",
+                    "sheet": "2f NASA",
+                    "description": "NASA experimental design data for aerospace applications."
+                },
+                "DoE - Disc Brake Pads": {
+                    "file": "DoE.XLS",
+                    "sheet": "3a Disc brake pads",
+                    "description": "Factorial design for brake pad material optimization."
+                },
+                "DoE - Catalysis": {
+                    "file": "DoE.XLS",
+                    "sheet": "3a Catalysis",
+                    "description": "Experimental design for catalytic process optimization."
+                },
+                "DoE - Beer Brewing": {
+                    "file": "DoE.XLS",
+                    "sheet": "4 beer",
+                    "description": "Experimental design for beer brewing process optimization."
+                },
+                "DoE - Coal Mill": {
+                    "file": "DoE.XLS",
+                    "sheet": "5a Coal mill",
+                    "description": "Industrial design for coal mill process optimization."
+                },
+                "DoE - TiO2 Production": {
+                    "file": "DoE.XLS",
+                    "sheet": "5b TiO2",
+                    "description": "Experimental design for titanium dioxide production process."
+                },
+                "DoE - Furnace Optimization": {
+                    "file": "DoE.XLS",
+                    "sheet": "6b Furnace",
+                    "description": "Factorial design for furnace operation optimization."
+                },
+                "DoE - Fluidized Bed Combustor": {
+                    "file": "DoE.XLS",
+                    "sheet": "7a Fluidized bed combustor",
+                    "description": "Experimental design for fluidized bed combustion optimization."
+                },
+                "DoE - Brake Pads (Advanced)": {
+                    "file": "DoE.XLS",
+                    "sheet": "8b Brake pads",
+                    "description": "Advanced experimental design for brake pad formulation."
+                },
+                "DoE - ACE Process": {
+                    "file": "DoE.XLS",
+                    "sheet": "9d ACE",
+                    "description": "Experimental design for ACE process optimization."
+                },
+                "DoE - Passatelli Pasta": {
+                    "file": "DoE.XLS",
+                    "sheet": "9e Passatelli",
+                    "description": "Food science experimental design for pasta formulation (Passatelli)."
+                },
+                "DoE - Bread Making": {
+                    "file": "DoE.XLS",
+                    "sheet": "10 bread",
+                    "description": "Experimental design for bread making process optimization."
+                }
+            }
+
+            # Info expander
+            with st.expander("ℹ️ **About Sample Datasets**"):
+                st.markdown("""
+                These are **real datasets** from published chemometric studies and research projects.
+
+                **Dataset Types:**
+                - 🧬 **Spectroscopy**: NIR, UV-Vis, IR data for calibration and classification
+                - 🍷 **Food Analysis**: Wine, milk, whiskey authentication and quality control
+                - 🏭 **Industrial**: Quality control, process monitoring
+                - 🧪 **DoE (Design of Experiments)**: 16 experimental designs from various industries
+                - 🔬 **Research**: Environmental, forensic, pharmaceutical applications
+
+                **DoE Examples Include:**
+                - Chemical reactions, polymerization, catalysis
+                - Food science (beer, bread, pasta)
+                - Industrial processes (furnace, coal mill, TiO2)
+                - Material science (brake pads, thickeners)
+                - Advanced applications (NASA experiments, fluidized bed)
+
+                **Perfect for:**
+                ✓ Learning chemometric techniques (PCA, MLR, classification)
+                ✓ Testing software features before uploading your data
+                ✓ Understanding data structure and format requirements
+                ✓ Exploring different analysis workflows
+                ✓ **Practicing DoE analysis and MLR modeling**
+                ✓ **Learning mixture design optimization**
+
+                **All datasets include:**
+                - Proper headers and row names
+                - Real measurement data
+                - Metadata (categories, experimental conditions)
+                - Multiple sheets where applicable (train/test splits, different designs)
+                """)
+
+            # Dataset selector
+            selected_sample = st.selectbox(
+                "📊 **Select Sample Dataset**:",
+                list(sample_datasets.keys()),
+                key="sample_dataset_selector"
+            )
+
+            # Show description
+            if selected_sample:
+                dataset_info = sample_datasets[selected_sample]
+                st.info(f"**Description**: {dataset_info['description']}")
+
+                # Additional metadata
+                col_meta1, col_meta2 = st.columns(2)
+                with col_meta1:
+                    st.write(f"📁 **File**: `{dataset_info['file']}`")
+                with col_meta2:
+                    st.write(f"📑 **Sheet**: `{dataset_info['sheet']}`")
+
+            # Load button
+            if st.button("🚀 **Load Sample Dataset**", type="primary", key="load_sample_btn"):
+                try:
+                    dataset_info = sample_datasets[selected_sample]
+                    file_path = sample_data_path / dataset_info['file']
+
+                    # Check if file exists
+                    if not file_path.exists():
+                        st.error(f"❌ Dataset file not found: {dataset_info['file']}")
+                        st.info("Please check the sample_data/datasets folder")
+                        st.stop()
+
+                    # Load Excel file
+                    with st.spinner(f"Loading {selected_sample}..."):
+                        # Determine sheet to load
+                        sheet_to_load = dataset_info['sheet']
+
+                        # Special handling for specific datasets
+                        if dataset_info['file'] == "moisture.xls":
+                            # Moisture dataset: special format (no header for test set rows)
+                            data = pd.read_excel(file_path, sheet_name=int(sheet_to_load), header=None)
+                            # Use first row as header
+                            data.columns = data.iloc[0]
+                            data = data.drop(0).reset_index(drop=True)
+                            data.index = range(1, len(data) + 1)
+
+                            # ✅ FIX: Force numeric conversion for all columns
+                            for col in data.columns:
+                                try:
+                                    data[col] = pd.to_numeric(data[col], errors='coerce')
+                                except:
+                                    pass  # Keep as is if not numeric
+                        elif dataset_info['file'] == "washing.xls":
+                            # Washing dataset: no header, no row names
+                            data = pd.read_excel(file_path, sheet_name=sheet_to_load, header=None)
+                            data.columns = [f"Var_{i+1}" for i in range(len(data.columns))]
+                            data.index = range(1, len(data) + 1)
+                        elif dataset_info['file'] == "economic data.xls":
+                            # Economic data: skip first row, use second as header
+                            data = pd.read_excel(file_path, sheet_name=int(sheet_to_load), header=1, index_col=0)
+                        else:
+                            # Standard loading: first row = header, first column = index
+                            if sheet_to_load.isdigit():
+                                data = pd.read_excel(file_path, sheet_name=int(sheet_to_load), header=0, index_col=0)
+                            else:
+                                data = pd.read_excel(file_path, sheet_name=sheet_to_load, header=0, index_col=0)
+
+                        # Clean up column names (remove extra spaces, newlines)
+                        data.columns = [str(col).strip().replace('\n', ' ').replace('\r', '') for col in data.columns]
+
+                        # Store in session state - IMPROVED NAME GENERATION
+                        # Extract parts from selected_sample for unique naming
+                        parts = selected_sample.split(' - ')
+                        base_part = parts[0].replace(' ', '_').replace('/', '_')
+
+                        # Check for specific keywords in subsequent parts to create unique names
+                        suffix = ""
+                        if len(parts) > 1:
+                            second_part = parts[1].lower()
+                            if 'test' in second_part:
+                                suffix = "_test"
+                            elif 'training' in second_part or 'train' in dataset_info['sheet'].lower():
+                                suffix = "_train"
+
+                        dataset_name = f"SAMPLE_{base_part}{suffix}"
+                        st.session_state.current_data = data
+                        st.session_state.current_dataset = dataset_name
+
+                        # Save original to transformation history
+                        _save_original_to_history(data, dataset_name)
+
+                    # Success message
+                    st.success(f"✅ **Sample dataset loaded successfully!**")
+
+                    # Data Overview
+                    st.markdown("### 📊 Dataset Overview")
+
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Samples", data.shape[0])
+                    with col2:
+                        st.metric("Variables", data.shape[1])
+                    with col3:
+                        numeric_cols = data.select_dtypes(include=[np.number]).columns
+                        st.metric("Numeric Vars", len(numeric_cols))
+                    with col4:
+                        missing = data.isnull().sum().sum()
+                        st.metric("Missing Values", missing)
+
+                    # Data preview
+                    st.markdown("### 📄 Data Preview")
+                    st.dataframe(data.head(10), use_container_width=True)
+
+                    # Basic statistics for numeric columns
+                    if len(numeric_cols) > 0:
+                        with st.expander("📈 **Quick Statistics**"):
+                            stats_df = data[numeric_cols].describe().T
+                            st.dataframe(stats_df.head(20), use_container_width=True)
+                            if len(numeric_cols) > 20:
+                                st.info(f"Showing first 20 of {len(numeric_cols)} numeric variables")
+
+                    # Suggestions based on dataset
+                    st.markdown("### 🎯 Suggested Analysis")
+
+                    if "DoE" in selected_sample or "Experimental design" in dataset_info['description']:
+                        st.info("🧪 **Design of Experiments detected** → Try **MLR - Multiple Linear Regression** module for model building")
+                        st.info("📊 **DoE workflow**: Build MLR model → Analyze coefficients → Generate response surfaces → Optimize conditions")
+                        if "Mixture" in dataset_info['description'] or "Thickener" in selected_sample:
+                            st.info("🎨 **Mixture Design** → Use **Mixture Design** module for constrained optimization")
+
+                    if "Spectroscopy" in dataset_info['description'] or "NIR" in dataset_info['description'] or "UV" in dataset_info['description']:
+                        st.info("🧬 **Spectroscopic data detected** → Try **PCA Analysis** for dimensionality reduction and pattern exploration")
+
+                    if "Classification" in dataset_info['description'] or "types" in dataset_info['description']:
+                        st.info("🎯 **Classification dataset** → Use **PCA** to visualize class separation, then build **Classification Models**")
+
+                    if "train" in dataset_info['sheet'].lower() or "Training" in dataset_info['description']:
+                        st.info("📚 **Training set loaded** → Don't forget to load the corresponding **Test set** for validation")
+
+                    if "Quality Control" in dataset_info['description']:
+                        st.info("🏭 **QC data** → Perfect for **PCA Monitoring** and **Hotelling T² / Q statistics**")
+
+                except Exception as e:
+                    st.error(f"❌ **Error loading dataset**: {str(e)}")
+                    st.info("**Troubleshooting:**")
+                    st.info(f"• File path: {file_path}")
+                    st.info(f"• Sheet: {dataset_info['sheet']}")
+                    st.info("• Check if the file exists in sample_data/datasets/")
+                    st.info("• Verify Excel file is not corrupted")
 
     # ===== EXPORT DATA TAB =====
     with tab2:
