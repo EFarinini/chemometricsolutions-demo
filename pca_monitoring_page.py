@@ -1246,8 +1246,9 @@ def show():
                         help="Center only = mean centering, Auto = standardization"
                     )
 
-                    center = True
-                    scale = (scaling_method == "Center + Scale (Auto)")
+                    
+                    scale = True
+                    center = (scaling_method == "Center + Scale (Auto)")
 
                 with config_col3:
                     st.markdown("**Control Limits:**")

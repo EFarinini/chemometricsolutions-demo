@@ -1048,18 +1048,28 @@ def show():
         st.markdown("### 📊 Profile Statistics")
 
         if len(X_matrix) > 0 and len(X_matrix.columns) > 0:
-            stats_dict = {
-                'Statistic': ['Count', 'Mean', 'Median', 'Std Dev', 'Min', 'Max', 'Range'],
-                'Value': [
-                    len(X_matrix),
-                    X_matrix.values.mean(),
-                    np.median(X_matrix.values),
-                    X_matrix.values.std(),
-                    X_matrix.values.min(),
-                    X_matrix.values.max(),
-                    X_matrix.values.max() - X_matrix.values.min()
-                ]
-            }
+            # Filter only NUMERIC columns for statistics
+            X_numeric = X_matrix.select_dtypes(include=[np.number])
+
+            if len(X_numeric.columns) > 0:
+                stats_dict = {
+                    'Statistic': ['Count', 'Mean', 'Median', 'Std Dev', 'Min', 'Max', 'Range'],
+                    'Value': [
+                        len(X_numeric),
+                        X_numeric.values.mean(),
+                        np.median(X_numeric.values),
+                        X_numeric.values.std(),
+                        X_numeric.values.min(),
+                        X_numeric.values.max(),
+                        X_numeric.values.max() - X_numeric.values.min()
+                    ]
+                }
+            else:
+                # No numeric columns available
+                stats_dict = {
+                    'Statistic': ['Count'],
+                    'Value': [len(X_matrix)]
+                }
 
             stats_df = pd.DataFrame(stats_dict)
             st.dataframe(

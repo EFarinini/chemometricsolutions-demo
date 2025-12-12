@@ -25,7 +25,8 @@ try:
         plot_scores, plot_loadings, plot_scree,
         plot_cumulative_variance, plot_biplot, plot_loadings_line,
         plot_loadings_line_antiderivative, plot_loadings_antiderivative,
-        add_convex_hulls, add_sample_trajectory_lines, plot_line_scores
+        add_convex_hulls, add_sample_trajectory_lines, plot_line_scores,
+        plot_loadings_scores_side_by_side
     )
     PLOTS_AVAILABLE = True
 except ImportError as e:
@@ -148,8 +149,8 @@ def show():
         _show_score_plots_tab()
     
     # TAB 5: Interpretation
-    #with tabs[4]:
-    #    _show_interpretation_tab()
+    with tabs[4]:
+        _show_interpretation_tab()
     
     # TAB 6: Advanced Diagnostics
     with tabs[5]:
@@ -1499,33 +1500,41 @@ def _show_score_plots_tab():
             key="marker_size_2d"
         )
 
-        # If categorical strategy is selected, we'll use the color_by variable for grouping
+        # === Trajectory Grouping ===
+        # For Categorical trajectory, use the same variable as "Color points by"
         trajectory_groupby_column = None
-        if trajectory_strategy == "Categorical" and color_by != "None" and color_by != "Index":
-            if data is not None and color_by in data.columns:
-                try:
-                    trajectory_groupby_column = data.loc[scores.index, color_by]
-                    st.info(f"ℹ️ Trajectory lines will be grouped by: {color_by}")
-                except:
-                    st.warning(f"⚠️ Could not use '{color_by}' for trajectory grouping")
+        trajectory_metadata_for_coloring = None
+
+        if trajectory_strategy == "Categorical":
+            if color_by != "None" and color_by != "Index":
+                # Use the same variable as point coloring
+                if data is not None and color_by in data.columns:
+                    try:
+                        trajectory_groupby_column = data.loc[scores.index, color_by]
+                        trajectory_metadata_for_coloring = trajectory_groupby_column
+                        st.info(f"✅ Trajectory lines grouped by: **{color_by}** (same as point colors)")
+                    except Exception as e:
+                        st.warning(f"⚠️ Could not use '{color_by}' for trajectory: {str(e)}")
+                        trajectory_strategy = "None"
+                else:
+                    st.warning("⚠️ Selected variable is not available in data")
                     trajectory_strategy = "None"
             else:
-                st.warning("⚠️ Categorical trajectory requires a valid categorical color variable")
+                st.warning("⚠️ Please select a categorical variable in 'Color points by' to use Categorical trajectories")
                 trajectory_strategy = "None"
-        elif trajectory_strategy == "Categorical":
-            st.warning("⚠️ Please select a categorical color variable to use categorical trajectories")
-            trajectory_strategy = "None"
 
-        # === TIER 3: Line Coloring (NEW!) ===
-        # DEFAULT: Always use sequential index coloring (independent from point colors!)
+        # === TIER 3: Trajectory Coloring Options ===
         trajectory_color_variable = None
-        trajectory_color_by_index = True  # ← FIXED: Default to True (sequential 1→N)
+        trajectory_color_by_index = True  # Default for Sequential
         trajectory_color_vector = None
 
-        if trajectory_strategy != "None":
+        if trajectory_strategy == "Sequential":
+            # ========================================
+            # SEQUENTIAL: Show gradient coloring
+            # ========================================
             st.markdown("---")
-            st.markdown("**🎨 Trajectory Line Coloring**")
-            st.caption("Color lines by sample sequence or numeric variable (BLUE → PURPLE → RED gradient)")
+            st.markdown("**🎨 Trajectory Line Coloring (Sequential)**")
+            st.caption("Colors flow from BLUE (first point) → RED (last point)")
 
             # Get numeric columns for coloring options
             numeric_cols = []
@@ -1534,87 +1543,82 @@ def _show_score_plots_tab():
 
             # Color by selector
             color_trajectory_by = st.selectbox(
-                "Color trajectory by:",
-                ["Sequential Index (default)"] + numeric_cols,
+                "Color gradient by:",
+                ["Sample Sequence (1→N)"] + numeric_cols,
                 key="color_trajectory_by_2d",
-                help="Sequential Index: 1→N per batch (BLUE→RED) | Or select numeric variable"
+                help="Sample Sequence: BLUE(1st)→RED(last) | Numeric Variable: BLUE(min)→RED(max)"
             )
 
             # Determine coloring strategy
-            if color_trajectory_by == "Sequential Index (default)":
-                # Keep default: trajectory_color_by_index = True
-                # trajectory_color_variable = None (already set above)
-                st.info("💡 Lines colored by sample sequence: **1→N** (BLUE at start, RED at end)")
+            if color_trajectory_by == "Sample Sequence (1→N)":
+                trajectory_color_by_index = True
+                trajectory_color_variable = None
+                st.info("💡 Gradient: Sample sequence (1→N) | BLUE=first point, RED=last point")
             else:
-                # User selected a numeric variable to override sequential index
                 trajectory_color_variable = color_trajectory_by
-                trajectory_color_by_index = False  # Disable index, use variable instead
-                st.info(f"💡 Lines colored by **{color_trajectory_by}** values (BLUE=low, RED=high)")
+                trajectory_color_by_index = False
+                st.info(f"💡 Gradient: {color_trajectory_by} variable | BLUE=minimum, RED=maximum")
 
-            # [NEW] Per-category custom coloring option (for both Sequential Index and numeric variables)
-            # CHANGED: Removed trajectory_color_variable check - now works for Sequential Index too!
-            if trajectory_strategy == "Categorical":
-                st.markdown("**🔧 Batch-Specific Coloring:**")
+        elif trajectory_strategy == "Categorical":
+            # ========================================
+            # CATEGORICAL: Show two MUTUALLY EXCLUSIVE options
+            # ========================================
+            st.markdown("---")
+            st.markdown("**🎨 Trajectory Coloring (Categorical)**")
 
-                use_custom_color = st.checkbox(
-                    "Apply coloring to specific batch only",
-                    value=False,
-                    key="use_custom_trajectory_color_2d",
-                    help="Highlight one batch (BRIGHT) while dimming others (BACKGROUND)"
-                )
+            # === CHECKBOX: Choose between Option 1 or Option 2 ===
+            use_custom_color = st.checkbox(
+                "Apply coloring to specific batch only",
+                value=False,
+                key="use_custom_trajectory_color_2d",
+                help="Highlight one batch (BRIGHT gradient BLUE→RED) while dimming others (BACKGROUND gray)"
+            )
 
-                if use_custom_color and trajectory_groupby_column is not None:
-                    unique_categories = sorted(trajectory_groupby_column.dropna().unique())
+            if use_custom_color and trajectory_groupby_column is not None:
+                # ========================================
+                # OPTION 2️⃣ ACTIVE: Independent batch highlighting
+                # ========================================
+                unique_categories = sorted(trajectory_groupby_column.dropna().unique())
 
-                    if len(unique_categories) > 0:
-                        selected_batch_for_color = st.selectbox(
-                            "Apply coloring to batch:",
-                            unique_categories,
-                            key="batch_for_color_2d"
-                        )
+                if len(unique_categories) > 0:
+                    selected_batch_for_color = st.selectbox(
+                        "Apply coloring to batch:",
+                        unique_categories,
+                        key="batch_for_color_2d"
+                    )
 
-                        # Handle Sequential Index mode
-                        if color_trajectory_by == "Sequential Index (default)":
-                            # Sequential Index with batch highlighting
-                            st.info(f"✨ **{selected_batch_for_color}** will be BRIGHT (full opacity)\nOther batches will be DIM (background)")
+                    st.info(f"✨ **{selected_batch_for_color}** will be BRIGHT (BLUE→RED gradient)\nOther batches will be DIM (gray background)")
 
-                            # Create marker for dimming mode (no numeric variable needed)
-                            trajectory_color_vector = {
-                                'category': selected_batch_for_color,
-                                'variable': None,  # No numeric variable
-                                'mode': 'sequential_bright',  # Flag for dimming mode
-                                'values': None,
-                                'min': None,
-                                'max': None
-                            }
+                    # *** KEY: Use sequential_bright mode for gradient coloring ***
+                    trajectory_color_vector = {
+                        'category': selected_batch_for_color,
+                        'variable': None,  # Sequential index, no numeric variable
+                        'mode': 'sequential_bright',  # ← Use sequential gradient, NOT category colors
+                        'values': None,
+                        'min': None,
+                        'max': None
+                    }
 
-                        else:
-                            # Numeric variable coloring (original behavior)
-                            try:
-                                batch_mask = trajectory_groupby_column == selected_batch_for_color
-                                batch_indices = scores.index[batch_mask]
-                                batch_color_values = data.loc[batch_indices, trajectory_color_variable].dropna()
+                    # *** DISABLE Option 1 when Option 2 is active ***
+                    trajectory_metadata_for_coloring = None  # No category metadata
+                else:
+                    trajectory_color_vector = None
+                    trajectory_metadata_for_coloring = None
 
-                                if len(batch_color_values) > 0:
-                                    min_val = batch_color_values.min()
-                                    max_val = batch_color_values.max()
+            else:
+                # ========================================
+                # OPTION 1️⃣ ACTIVE (DEFAULT): Color by category
+                # ========================================
+                st.markdown("**Option 1️⃣: Color by Category** (Default)")
+                st.caption(f"Trajectory lines colored by category: **{color_by}**")
+                st.info(f"✅ Each {color_by} category gets a distinct color")
 
-                                    st.success(f"✅ **{selected_batch_for_color}** color scale: 🔵 **{min_val:.2f}** → 🔴 **{max_val:.2f}**")
-                                    st.caption(f"Other batches will be DIM (gray background)")
+                trajectory_color_vector = None  # No batch highlighting
+                # Keep trajectory_metadata_for_coloring as set earlier (line 1513)
 
-                                    # Create trajectory color vector for numeric coloring
-                                    trajectory_color_vector = {
-                                        'category': selected_batch_for_color,
-                                        'variable': trajectory_color_variable,
-                                        'mode': 'numeric_color',  # Flag for numeric coloring
-                                        'values': data.loc[batch_indices, trajectory_color_variable],
-                                        'min': min_val,
-                                        'max': max_val
-                                    }
-                                else:
-                                    st.warning(f"⚠️ No valid values found for {trajectory_color_variable} in {selected_batch_for_color}")
-                            except Exception as e:
-                                st.warning(f"⚠️ Error extracting color values: {str(e)}")
+            # Default coloring: by index (for backward compatibility)
+            trajectory_color_by_index = True
+            trajectory_color_variable = None
 
         # Prepare color data and text labels
         color_data = None
@@ -1725,6 +1729,20 @@ def _show_score_plots_tab():
             except Exception as e:
                 st.warning(f"⚠️ Could not add convex hulls: {str(e)}")
 
+        # === Apply marker size BEFORE adding trajectory (to exclude arrow markers) ===
+        # This ensures only scatter points are resized, not arrow markers
+        # Update scatter traces created by px.scatter (these are the main data points)
+        # They have mode='markers' or 'markers+text' and come BEFORE trajectory/hull traces
+        for i, trace in enumerate(fig.data):
+            # Main scatter points are created by px.scatter and appear first in fig.data
+            # They have markers and are NOT lines (convex hull has mode='lines')
+            # They are NOT arrows (arrows are added later in trajectory)
+            if hasattr(trace, 'mode') and trace.mode in ['markers', 'markers+text']:
+                # This is a main scatter point trace
+                trace.marker.size = marker_size
+                # Ensure scatter points are visible (not hidden)
+                trace.visible = True
+
         # Add sample trajectory lines with gradient coloring
         # IMPORTANT: Lines use their own coloring (sequential index or variable)
         # They are INDEPENDENT from point colors (color_discrete_map NOT passed)
@@ -1743,13 +1761,14 @@ def _show_score_plots_tab():
                     color_by_index=trajectory_color_by_index,
                     color_variable=trajectory_color_variable,
                     original_data=data,
-                    trajectory_color_vector=trajectory_color_vector
+                    trajectory_color_vector=trajectory_color_vector,
+                    # === NEW PARAMETERS FOR CATEGORICAL TRAJECTORY COLORING ===
+                    metadata_column=trajectory_metadata_for_coloring,
+                    use_category_colors=(trajectory_strategy == "Categorical" and trajectory_metadata_for_coloring is not None),
+                    show_trajectory_arrow=True
                 )
             except Exception as e:
                 st.warning(f"⚠️ Could not add trajectory lines: {str(e)}")
-
-        # Apply marker size to scatter points only (not trajectory lines)
-        fig.update_traces(marker=dict(size=marker_size), selector=dict(mode='markers'))
 
         # [NEW] Selective batch highlighting: Dim non-selected batches
         # If batch-specific coloring is active, make selected batch PROMINENT and dim others
@@ -1773,6 +1792,15 @@ def _show_score_plots_tab():
                         )
                     except:
                         pass  # Skip if selector doesn't match
+
+        # === FINAL CHECK: Ensure scatter points remain visible ===
+        # After all trajectory operations, verify scatter points are not hidden
+        for trace in fig.data:
+            # Identify main scatter points (mode='markers' or 'markers+text')
+            if hasattr(trace, 'mode') and trace.mode in ['markers', 'markers+text']:
+                # Scatter points must be visible unless explicitly dimmed by batch highlighting
+                if trace.visible is None or trace.visible == False:
+                    trace.visible = True
 
         # Update text position
         if show_labels_from != "None":
@@ -2513,6 +2541,324 @@ def _create_diagnostic_t2_q_plot(t2_values, q_values, t2_limit, q_limit,
     )
 
     return fig
+
+
+
+
+def _show_interpretation_tab():
+    """
+    Display Interpretation tab for joint loadings-scores analysis.
+
+    Features ALL visualization options from Score Plots tab:
+    - Color points by any variable (categorical or quantitative)
+    - Show text labels
+    - Convex hulls for categorical groups
+    - Trajectory lines (Sequential or Categorical strategies)
+    - Marker size control
+    - Variable annotations panel
+    - General interpretation notes
+    """
+
+    st.markdown("## 📝 Joint Loadings-Scores Interpretation")
+
+    # Check PCA results
+    if 'pca_results' not in st.session_state:
+        st.warning("⚠️ Please compute PCA in **Model Computation** tab first")
+        return
+
+    pca_results = st.session_state['pca_results']
+    loadings = pca_results['loadings']
+    scores = pca_results['scores']
+    explained_var = pca_results['explained_variance_ratio']
+
+    # Get original data for color-by and label options
+    data = st.session_state.get('current_data', None)
+
+    # Initialize session state for variable annotations
+    if 'variable_annotations' not in st.session_state:
+        st.session_state.variable_annotations = {}
+
+    # ========== PC SELECTION ==========
+    st.markdown("### ⚙️ Principal Component Selection")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        pc_x = st.selectbox("X-axis PC:", loadings.columns, index=0, key='interp_pc_x')
+    with col2:
+        pc_y_idx = 1 if len(loadings.columns) > 1 else 0
+        pc_y = st.selectbox("Y-axis PC:", loadings.columns, index=pc_y_idx, key='interp_pc_y')
+
+    # ========== VISUALIZATION OPTIONS (mirrored from Score Plots tab) ==========
+    st.markdown("### 🎨 Visualization Options")
+
+    # === COLOR AND LABEL OPTIONS ===
+    col3, col4 = st.columns(2)
+    with col3:
+        # Show ALL columns plus Index option
+        color_options = ["None"]
+        if data is not None:
+            color_options.extend(list(data.columns))
+        color_options.append("Index")
+
+        color_by = st.selectbox("Color points by:", color_options, key='color_by_interp')
+
+    with col4:
+        # Label options: None, Index, or any column
+        label_options = ["Index", "None"]
+        if data is not None:
+            label_options.extend(list(data.columns))
+
+        show_labels_from = st.selectbox("Show labels:", label_options, key='show_labels_interp')
+
+    # === CONVEX HULLS (only if color_by is set) ===
+    if color_by != "None":
+        col_hull1, col_hull2 = st.columns(2)
+        with col_hull1:
+            show_convex_hull = st.checkbox("Show convex hulls (categorical)", value=False, key='show_hull_interp')
+        with col_hull2:
+            hull_opacity = st.slider(
+                "Hull opacity:",
+                min_value=0.0,
+                max_value=1.0,
+                value=0.2,
+                step=0.05,
+                key='hull_opacity_interp'
+            )
+    else:
+        show_convex_hull = False
+        hull_opacity = 0.2
+
+    # === TRAJECTORY LINES STRATEGY ===
+    st.markdown("---")
+    st.markdown("**🎯 Sample Trajectory Lines**")
+    st.caption("Connect samples in order to visualize temporal or sequential progression")
+
+    col_traj1, col_traj2, col_traj3 = st.columns(3)
+    with col_traj1:
+        trajectory_strategy = st.selectbox(
+            "Trajectory strategy:",
+            ["None", "Sequential", "Categorical"],
+            help="None: no lines | Sequential: one line through all samples | Categorical: separate lines per group",
+            key='trajectory_strategy_interp'
+        )
+
+    with col_traj2:
+        trajectory_width = st.slider(
+            "Line width:",
+            min_value=1,
+            max_value=5,
+            value=2,
+            step=1,
+            key='trajectory_width_interp'
+        )
+
+    with col_traj3:
+        trajectory_opacity = st.slider(
+            "Line opacity:",
+            min_value=0.0,
+            max_value=1.0,
+            value=0.6,
+            step=0.05,
+            key='trajectory_opacity_interp'
+        )
+
+    # === MARKER SIZE CONTROL ===
+    st.markdown("---")
+    st.markdown("### ⚫ Marker Size")
+    marker_size = st.slider(
+        "Point size:",
+        min_value=1,
+        max_value=20,
+        value=8,
+        step=1,
+        key="marker_size_interp"
+    )
+
+    # === TRAJECTORY GROUPING (for Categorical strategy) ===
+    trajectory_groupby_column = None
+    trajectory_metadata_for_coloring = None
+
+    if trajectory_strategy == "Categorical":
+        if color_by != "None" and color_by != "Index":
+            # Use the same variable as point coloring
+            if data is not None and color_by in data.columns:
+                try:
+                    trajectory_groupby_column = data.loc[scores.index, color_by]
+                    trajectory_metadata_for_coloring = trajectory_groupby_column
+                    st.info(f"✅ Trajectory lines grouped by: **{color_by}** (same as point colors)")
+                except Exception as e:
+                    st.warning(f"⚠️ Could not use '{color_by}' for trajectory: {str(e)}")
+                    trajectory_strategy = "None"
+            else:
+                st.warning("⚠️ Selected variable is not available in data")
+                trajectory_strategy = "None"
+        else:
+            st.warning("⚠️ Please select a categorical variable in 'Color points by' to use Categorical trajectories")
+            trajectory_strategy = "None"
+
+    # === TRAJECTORY COLORING OPTIONS ===
+    trajectory_color_variable = None
+    trajectory_color_by_index = True  # Default for Sequential
+    trajectory_color_vector = None
+
+    if trajectory_strategy == "Sequential":
+        # Sequential: Show gradient coloring
+        st.markdown("---")
+        st.markdown("**🎨 Trajectory Line Coloring (Sequential)**")
+        st.caption("Colors flow from BLUE (first point) → RED (last point)")
+
+        # Get numeric columns for coloring options
+        numeric_cols = []
+        if data is not None:
+            numeric_cols = data.select_dtypes(include=[np.number]).columns.tolist()
+
+        # Color by selector
+        color_trajectory_by = st.selectbox(
+            "Color gradient by:",
+            ["Sample Sequence (1→N)"] + numeric_cols,
+            key="color_trajectory_by_interp",
+            help="Sample Sequence: BLUE(1st)→RED(last) | Numeric Variable: BLUE(min)→RED(max)"
+        )
+
+        # Determine coloring strategy
+        if color_trajectory_by == "Sample Sequence (1→N)":
+            trajectory_color_by_index = True
+            trajectory_color_variable = None
+            st.info("💡 Gradient: Sample sequence (1→N) | BLUE=first point, RED=last point")
+        else:
+            trajectory_color_variable = color_trajectory_by
+            trajectory_color_by_index = False
+            st.info(f"💡 Gradient: {color_trajectory_by} variable | BLUE=minimum, RED=maximum")
+
+    elif trajectory_strategy == "Categorical":
+        # Categorical: Show two MUTUALLY EXCLUSIVE options
+        st.markdown("---")
+        st.markdown("**🎨 Trajectory Coloring (Categorical)**")
+
+        # Checkbox: Choose between Option 1 or Option 2
+        use_custom_color = st.checkbox(
+            "Apply coloring to specific batch only",
+            value=False,
+            key="use_custom_trajectory_color_interp",
+            help="Highlight one batch (BRIGHT gradient BLUE→RED) while dimming others (BACKGROUND gray)"
+        )
+
+        if use_custom_color and trajectory_groupby_column is not None:
+            # OPTION 2: Independent batch highlighting
+            unique_categories = sorted(trajectory_groupby_column.dropna().unique())
+
+            if len(unique_categories) > 0:
+                selected_batch_for_color = st.selectbox(
+                    "Apply coloring to batch:",
+                    unique_categories,
+                    key="batch_for_color_interp"
+                )
+
+                st.info(f"✨ **{selected_batch_for_color}** will be BRIGHT (BLUE→RED gradient)\nOther batches will be DIM (gray background)")
+
+                # Use sequential_bright mode for gradient coloring
+                trajectory_color_vector = {
+                    'category': selected_batch_for_color,
+                    'variable': None,
+                    'mode': 'sequential_bright',
+                    'values': None,
+                    'min': None,
+                    'max': None
+                }
+
+                # Disable Option 1 when Option 2 is active
+                trajectory_metadata_for_coloring = None
+            else:
+                trajectory_color_vector = None
+                trajectory_metadata_for_coloring = None
+
+        else:
+            # OPTION 1 (DEFAULT): Color by category
+            st.markdown("**Option 1️⃣: Color by Category** (Default)")
+            st.caption(f"Trajectory lines colored by category: **{color_by}**")
+            st.info(f"✅ Each {color_by} category gets a distinct color")
+
+            trajectory_color_vector = None
+            # Keep trajectory_metadata_for_coloring as set earlier
+
+        # Default coloring: by index (for backward compatibility)
+        trajectory_color_by_index = True
+        trajectory_color_variable = None
+
+    # === PREPARE COLOR DATA AND TEXT LABELS ===
+    color_data = None
+    if color_by != "None":
+        if color_by == "Index":
+            color_data = pd.Series(range(len(scores)), index=scores.index, name="Row Index")
+        elif data is not None:
+            try:
+                color_data = data.loc[scores.index, color_by]
+            except:
+                st.warning(f"⚠️ Could not align color variable '{color_by}' with scores")
+                color_data = None
+
+    # Prepare text labels
+    text_param = None
+    if show_labels_from != "None":
+        # Start with sample names/indices
+        if show_labels_from == "Index":
+            base_labels = [str(idx) for idx in scores.index]
+        elif data is not None:
+            try:
+                if show_labels_from in data.columns:
+                    col_values = data[show_labels_from].reindex(scores.index)
+                    base_labels = [str(val) if pd.notna(val) else str(idx)
+                                  for idx, val in zip(scores.index, col_values)]
+                else:
+                    st.warning(f"⚠️ Column '{show_labels_from}' not found in data")
+                    base_labels = [str(idx) for idx in scores.index]
+            except Exception as e:
+                st.warning(f"⚠️ Could not read labels from '{show_labels_from}': {str(e)}")
+                base_labels = [str(idx) for idx in scores.index]
+        else:
+            base_labels = [str(idx) for idx in scores.index]
+
+        text_param = pd.Series(base_labels, index=scores.index)
+
+    # ========== MAIN PLOT AREA ==========
+    st.markdown("---")
+    st.markdown("### 📊 Loadings-Scores Analysis")
+
+    try:
+        from pca_utils.pca_plots import plot_loadings_scores_side_by_side
+
+        fig = plot_loadings_scores_side_by_side(
+            loadings=loadings,
+            scores=scores,
+            pc_x=pc_x,
+            pc_y=pc_y,
+            explained_variance_ratio=explained_var,
+            variable_annotations=st.session_state.get('variable_annotations', {}),
+            arrow_scale=1.0,
+            # === NEW PARAMETERS ===
+            color_data=color_data,
+            text_labels=text_param,
+            show_convex_hull=show_convex_hull,
+            hull_opacity=hull_opacity,
+            trajectory_strategy=trajectory_strategy,
+            trajectory_groupby_column=trajectory_groupby_column,
+            trajectory_metadata_for_coloring=trajectory_metadata_for_coloring,
+            trajectory_color_vector=trajectory_color_vector,
+            trajectory_width=trajectory_width,
+            trajectory_opacity=trajectory_opacity,
+            trajectory_color_by_index=trajectory_color_by_index,
+            trajectory_color_variable=trajectory_color_variable,
+            marker_size=marker_size
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+    except Exception as e:
+        st.error(f"Error creating plot: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
+        return
+
 
 
 def _show_advanced_diagnostics_tab():
