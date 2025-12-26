@@ -56,12 +56,6 @@ except Exception as e:
     print(f"⚠️ Quality Control module error (non-import): {e}", file=sys.stderr)
 
 try:
-    import bayesian_optimization_page
-    BAYESIAN_OPTIMIZATION_AVAILABLE = True
-except ImportError:
-    BAYESIAN_OPTIMIZATION_AVAILABLE = False
-
-try:
     import classification_page
     CLASSIFICATION_AVAILABLE = True
 except ImportError:
@@ -90,6 +84,12 @@ try:
     MIXTURE_DESIGN_AVAILABLE = True
 except ImportError:
     MIXTURE_DESIGN_AVAILABLE = False
+
+try:
+    import bivariate_page
+    BIVARIATE_AVAILABLE = True
+except ImportError:
+    BIVARIATE_AVAILABLE = False
 
 def show_home():
     """Show the main homepage"""
@@ -135,7 +135,7 @@ def show_home():
     st.markdown("## Available Interactive Demos")
     
     # Demo cards in columns
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3, col4 = st.columns(4)
     
     with col1:
         st.markdown("""
@@ -216,26 +216,6 @@ def show_home():
                 st.rerun()
         else:
             st.info("🚧 MLR/DOE demo coming soon")
-
-    with col5:
-        st.markdown("""
-        ### 🎯 Bayesian Optimization
-        *Experimental Design with BO*
-
-        **Features:**
-        - Gaussian Process predictions
-        - Acquisition function optimization
-        - Automated point suggestion
-        - 1D/2D/nD visualization
-        - Iterative refinement
-        """)
-
-        if BAYESIAN_OPTIMIZATION_AVAILABLE:
-            if st.button("🚀 Launch BO Demo", key="launch_bo_demo"):
-                st.session_state.current_page = "Bayesian Optimization"
-                st.rerun()
-        else:
-            st.warning("BO demo not available")
 
     # Additional row for Transformations and Classification
     st.markdown("---")
@@ -435,17 +415,9 @@ def show_home():
     </div>
     """, unsafe_allow_html=True)
 
-def main():
-    """Main application function"""
-    
-    # Configuration
-    st.set_page_config(
-        page_title="ChemometricSolutions - Interactive Demos",
-        page_icon="🧪",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
-    
+def main_content():
+    """Main application content (without set_page_config)"""
+
     # Initialize session state
     if 'current_page' not in st.session_state:
         st.session_state.current_page = "Home"
@@ -536,14 +508,6 @@ def main():
         st.sidebar.button("🔬 Transformations", disabled=True, use_container_width=True, key="nav_transformations_disabled")
         st.sidebar.caption("Module not found")
 
-    if BAYESIAN_OPTIMIZATION_AVAILABLE:
-        if st.sidebar.button("🎯 Bayesian Optimization", use_container_width=True, key="nav_bayesian_opt"):
-            st.session_state.current_page = "Bayesian Optimization"
-            st.rerun()
-    else:
-        st.sidebar.button("🎯 Bayesian Optimization", disabled=True, use_container_width=True, key="nav_bayesian_opt_disabled")
-        st.sidebar.caption("Module not found")
-
     if CLASSIFICATION_AVAILABLE:
         if st.sidebar.button("🎲 Classification", use_container_width=True, key="nav_classification"):
             st.session_state.current_page = "Classification"
@@ -566,6 +530,14 @@ def main():
             st.rerun()
     else:
         st.sidebar.button("📊 Univariate Analysis", disabled=True, use_container_width=True, key="nav_univariate_disabled")
+        st.sidebar.caption("Module not found")
+
+    if BIVARIATE_AVAILABLE:
+        if st.sidebar.button("📈 Bivariate Analysis", use_container_width=True, key="nav_bivariate"):
+            st.session_state.current_page = "Bivariate Analysis"
+            st.rerun()
+    else:
+        st.sidebar.button("📈 Bivariate Analysis", disabled=True, use_container_width=True, key="nav_bivariate_disabled")
         st.sidebar.caption("Module not found")
 
     if GENERATE_DOE_AVAILABLE:
@@ -671,14 +643,14 @@ def main():
         multi_doe_page.show()
     elif st.session_state.current_page == "Transformations" and TRANSFORMATIONS_AVAILABLE:
         transformations.show()
-    elif st.session_state.current_page == "Bayesian Optimization" and BAYESIAN_OPTIMIZATION_AVAILABLE:
-        bayesian_optimization_page.show_bayesian_optimization_page()
     elif st.session_state.current_page == "Classification" and CLASSIFICATION_AVAILABLE:
         classification_page.show()
     elif st.session_state.current_page == "PLS Calibration" and CALIBRATION_AVAILABLE:
         calibration_page.show()
     elif st.session_state.current_page == "Univariate Analysis" and UNIVARIATE_AVAILABLE:
         univariate_page.show()
+    elif st.session_state.current_page == "Bivariate Analysis" and BIVARIATE_AVAILABLE:
+        bivariate_page.show()
     elif st.session_state.current_page == "Generate DoE" and GENERATE_DOE_AVAILABLE:
         generate_doe.show()
     elif st.session_state.current_page == "Mixture Design" and MIXTURE_DESIGN_AVAILABLE:
@@ -687,6 +659,16 @@ def main():
         st.error(f"Page '{st.session_state.current_page}' not found or module not available")
         st.session_state.current_page = "Home"
         st.rerun()
+
+def main():
+    """Main application function with page config (for backward compatibility)"""
+    st.set_page_config(
+        page_title="ChemometricSolutions - Interactive Demos",
+        page_icon="🧪",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+    main_content()
 
 if __name__ == "__main__":
     main()

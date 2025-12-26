@@ -2890,14 +2890,17 @@ def _show_advanced_diagnostics_tab():
         st.error(f"❌ Too many components: {n_components} components for {n_samples_pca} samples. Reduce components in Model Computation.")
         return
 
-    # Get original data
-    data = st.session_state.get('current_data', None)
+    # Get original data from PCA results (not current_data which may have changed)
+    data = pca_results.get('original_data', None)
     if data is None:
-        st.error("❌ Original data not available")
-        return
+        # Fallback to current_data for backward compatibility
+        data = st.session_state.get('current_data', None)
+        if data is None:
+            st.error("❌ Original data not available")
+            return
 
-    # CHECK for missing values
-    has_missing_values = st.session_state.current_data.isna().sum().sum() > 0
+    # CHECK for missing values (use data from PCA results, not current_data)
+    has_missing_values = data.isna().sum().sum() > 0
 
     if has_missing_values:
         st.warning("⚠️ Dataset contains missing values - Q statistic cannot be calculated. Only T² plots are available.")
@@ -3133,8 +3136,8 @@ def _show_advanced_diagnostics_tab():
         st.markdown("### 📊 Diagnostic Plots")
         st.markdown("*Visualize PCA scores with T² ellipses and influence plots*")
 
-        # Get original dataset for coloring options
-        original_data = st.session_state.current_data
+        # Get original dataset for coloring options (use data from PCA results)
+        original_data = data
 
         # Get custom variables if available
         custom_vars = []
@@ -3144,75 +3147,59 @@ def _show_advanced_diagnostics_tab():
         # Get available color variables (exclude PCA variables)
         available_color_vars = [col for col in original_data.columns if col not in selected_vars]
 
-        # Trajectory Visualization Options
+        # === DIAGNOSTIC PLOTS CONFIGURATION ===
         st.divider()
-        st.markdown("**Trajectory Visualization Options**")
+        st.markdown("### 📊 Diagnostic Plots Configuration")
 
-        traj_col1, traj_col2 = st.columns(2)
+        # Row 1: ONE Trajectory checkbox + Line Opacity slider
+        row1_col1, row1_col2, row1_col3 = st.columns([0.8, 1.2, 0.6])
 
-        with traj_col1:
-            show_trajectory_score = st.checkbox(
+        with row1_col1:
+            show_trajectory = st.checkbox(
                 "Show Trajectory",
                 value=True,
-                key="show_trajectory_score_adv_diag"
+                key="show_trajectory_adv_diag"
             )
-            if show_trajectory_score:
-                trajectory_style_score = st.radio(
-                    "Score Plot Trajectory Style",
-                    options=['simple', 'gradient'],
-                    format_func=lambda x: {
-                        'simple': 'Simple (Light Gray)',
-                        'gradient': 'Gradient (Blue→Red with Star)'
-                    }[x],
-                    index=0,
-                    horizontal=True,
-                    key="trajectory_style_score_adv_diag"
-                )
-            else:
-                trajectory_style_score = 'simple'
+            # Use same flag for BOTH plots
+            show_trajectory_score = show_trajectory
+            show_trajectory_t2q = show_trajectory
+            trajectory_style_score = 'gradient'
+            trajectory_style_t2q = 'gradient'
 
-        with traj_col2:
-            show_trajectory_t2q = st.checkbox(
-                "Show Trajectory",
-                value=True,
-                key="show_trajectory_t2q_adv_diag"
+        with row1_col2:
+            # Empty space for alignment
+            pass
+
+        with row1_col3:
+            trajectory_line_opacity = st.slider(
+                "Line Opacity",
+                min_value=0.2,
+                max_value=1.0,
+                value=1.0,
+                step=0.1,
+                key="trajectory_line_opacity_adv_diag",
+                label_visibility="collapsed"
             )
-            if show_trajectory_t2q:
-                trajectory_style_t2q = st.radio(
-                    "T²-Q Plot Trajectory Style",
-                    options=['simple', 'gradient'],
-                    format_func=lambda x: {
-                        'simple': 'Simple (Light Gray)',
-                        'gradient': 'Gradient (Blue→Red with Star)'
-                    }[x],
-                    index=0,
-                    horizontal=True,
-                    key="trajectory_style_t2q_adv_diag"
-                )
-            else:
-                trajectory_style_t2q = 'simple'
 
-        st.divider()
+        # Row 2: Color and Labels
+        row2_col1, row2_col2 = st.columns([2, 1])
 
-        # Color and label controls
-        col_plot1, col_plot2 = st.columns(2)
-
-        with col_plot1:
+        with row2_col1:
             all_color_options = ["None", "Row Index"] + available_color_vars + custom_vars
             color_by_diag = st.selectbox(
                 "Color Points By:",
                 all_color_options,
-                key="diag_color_points",
-                help="Select variable to color the diagnostic points"
+                key="diag_color_points"
             )
 
-        with col_plot2:
+        with row2_col2:
             show_sample_names_diag = st.checkbox(
-                "Show Sample Labels",
+                "Show Labels",
                 value=False,
-                key="diag_show_labels",
-                help="Display sample IDs on the plots"
+                key="diag_show_labels"
             )
+
+        st.divider()
 
         # Prepare color data using unified color system
         from color_utils import is_quantitative_variable
@@ -3296,8 +3283,8 @@ def _show_advanced_diagnostics_tab():
 
         col_left, col_right = st.columns(2)
 
-        # Import score plot function (T² vs Q uses new function above)
-        from pca_monitoring_page import create_score_plot
+        # Import score plot function and color helper (T² vs Q uses new function above)
+        from pca_monitoring_page import create_score_plot, _color_to_rgba
 
         with col_left:
             st.subheader("Score Plot with T² Ellipses")
@@ -3319,7 +3306,8 @@ def _show_advanced_diagnostics_tab():
                 trajectory_style=trajectory_style_score,
                 trajectory_colors=trajectory_colors_score,
                 color_data=color_data_diag,
-                labels_data=labels_data_diag
+                labels_data=labels_data_diag,
+                trajectory_line_opacity=trajectory_line_opacity
             )
 
             st.plotly_chart(fig_score, use_container_width=True, key="diag_score_plot")
@@ -3395,11 +3383,13 @@ def _show_advanced_diagnostics_tab():
                         if trajectory_style_t2q == "gradient" and trajectory_colors_t2q is not None:
                             # GRADIENT TRAJECTORY: colored segments
                             for i in range(len(t2_values) - 1):
+                                # Convert color to RGBA with opacity
+                                line_color = _color_to_rgba(trajectory_colors_t2q[i], trajectory_line_opacity)
                                 fig_t2q.add_trace(go.Scatter(
                                     x=[t2_values[i], t2_values[i+1]],
                                     y=[q_values[i], q_values[i+1]],
                                     mode='lines',
-                                    line=dict(color=trajectory_colors_t2q[i], width=2),
+                                    line=dict(color=line_color, width=2),
                                     showlegend=False,
                                     hoverinfo='skip'
                                 ))
@@ -3415,12 +3405,14 @@ def _show_advanced_diagnostics_tab():
                             ))
                         else:
                             # SIMPLE LINE: gray dotted
+                            # Convert lightgray to RGBA with opacity
+                            line_color = _color_to_rgba('lightgray', trajectory_line_opacity)
                             fig_t2q.add_trace(go.Scatter(
                                 x=t2_values,
                                 y=q_values,
                                 mode='lines',
                                 name='Trajectory',
-                                line=dict(color='lightgray', width=1, dash='dot'),
+                                line=dict(color=line_color, width=1, dash='dot'),
                                 showlegend=True,
                                 hoverinfo='skip'
                             ))
@@ -3677,20 +3669,72 @@ def _show_advanced_diagnostics_tab():
                     q_contrib_norm = q_contrib_sample / q_contrib_95th
                     t2_contrib_norm = t2_contrib_sample / t2_contrib_95th
 
-                    # Bar plots side by side (ALL variables, red if |contrib|>1, blue otherwise)
-                    contrib_col1, contrib_col2 = st.columns(2)
+                    # Determine which limits the sample exceeds
+                    sample_t2 = t2_values[sample_idx]
+                    sample_q = q_values[sample_idx] if q_values is not None else 0
+                    exceeds_t2 = sample_t2 > t2_limits[alpha_main]
+                    exceeds_q = (sample_q > q_limits[alpha_main]) if q_values is not None else False
 
-                    with contrib_col1:
-                        st.markdown(f"**T² Contributions - Sample {selected_sample}**")
+                    # Dynamic contribution plot selection based on outlier type
+                    if not exceeds_t2 and not exceeds_q:
+                        # Sample is within limits
+                        st.info(f"✅ Sample {selected_sample} is within control limits (T²={sample_t2:.2f}, Q={sample_q:.2f})")
+                    elif exceeds_t2 and exceeds_q:
+                        # Sample exceeds both limits - show both with selection option
+                        st.markdown(f"⚠️ **Sample {selected_sample} exceeds BOTH T² and Q limits**")
+                        contrib_display = st.radio(
+                            "Select contribution plot to display:",
+                            options=["Show Both", "T² Only", "Q Only"],
+                            horizontal=True,
+                            key="contrib_display_choice"
+                        )
+
+                        if contrib_display == "Show Both":
+                            contrib_col1, contrib_col2 = st.columns(2)
+                            with contrib_col1:
+                                st.markdown(f"**T² Contributions - Sample {selected_sample}**")
+                                fig_t2_contrib = create_contribution_plot_all_vars(
+                                    t2_contrib_norm,
+                                    selected_vars,
+                                    statistic='T²'
+                                )
+                                st.plotly_chart(fig_t2_contrib, use_container_width=True)
+                            with contrib_col2:
+                                st.markdown(f"**Q Contributions - Sample {selected_sample}**")
+                                fig_q_contrib = create_contribution_plot_all_vars(
+                                    q_contrib_norm,
+                                    selected_vars,
+                                    statistic='Q'
+                                )
+                                st.plotly_chart(fig_q_contrib, use_container_width=True)
+                        elif contrib_display == "T² Only":
+                            st.markdown(f"**T² Contributions - Sample {selected_sample}**")
+                            fig_t2_contrib = create_contribution_plot_all_vars(
+                                t2_contrib_norm,
+                                selected_vars,
+                                statistic='T²'
+                            )
+                            st.plotly_chart(fig_t2_contrib, use_container_width=True)
+                        else:  # Q Only
+                            st.markdown(f"**Q Contributions - Sample {selected_sample}**")
+                            fig_q_contrib = create_contribution_plot_all_vars(
+                                q_contrib_norm,
+                                selected_vars,
+                                statistic='Q'
+                            )
+                            st.plotly_chart(fig_q_contrib, use_container_width=True)
+                    elif exceeds_t2:
+                        # Sample exceeds T² limit only - show T² contributions
+                        st.markdown(f"**T² Contributions - Sample {selected_sample}** (exceeds T² limit)")
                         fig_t2_contrib = create_contribution_plot_all_vars(
                             t2_contrib_norm,
                             selected_vars,
                             statistic='T²'
                         )
                         st.plotly_chart(fig_t2_contrib, use_container_width=True)
-
-                    with contrib_col2:
-                        st.markdown(f"**Q Contributions - Sample {selected_sample}**")
+                    else:  # exceeds_q
+                        # Sample exceeds Q limit only - show Q contributions
+                        st.markdown(f"**Q Contributions - Sample {selected_sample}** (exceeds Q limit)")
                         fig_q_contrib = create_contribution_plot_all_vars(
                             q_contrib_norm,
                             selected_vars,
@@ -3699,111 +3743,172 @@ def _show_advanced_diagnostics_tab():
                         st.plotly_chart(fig_q_contrib, use_container_width=True)
 
                     # Table: Variables where |contrib|>1 with real values vs training mean
-                    st.markdown("### 🏆 Top Contributing Variables")
-                    st.markdown("*Variables exceeding 95th percentile threshold (|contribution| > 1)*")
+                    # Only show if sample exceeds limits
+                    if exceeds_t2 or exceeds_q:
+                        st.markdown("### 🏆 Top Contributing Variables")
+                        st.markdown("*Variables exceeding 95th percentile threshold (|contribution| > 1)*")
 
-                    # Get training mean for comparison (from original data)
-                    # Use .loc for label-based indexing (scores.index contains sample names like A1, A2, etc.)
-                    try:
-                        X_data_df = data[selected_vars].loc[scores.index]
-                    except KeyError:
-                        # If scores.index doesn't match data.index, try to align by position
-                        if len(scores) == len(data):
-                            X_data_df = data[selected_vars].reset_index(drop=True)
+                        # Get training mean for comparison (from original data)
+                        # Use .loc for label-based indexing (scores.index contains sample names like A1, A2, etc.)
+                        try:
+                            X_data_df = data[selected_vars].loc[scores.index]
+                        except KeyError:
+                            # If scores.index doesn't match data.index, try to align by position
+                            if len(scores) == len(data):
+                                X_data_df = data[selected_vars].reset_index(drop=True)
+                            else:
+                                st.error("❌ Cannot align sample indices between PCA results and original data")
+                                X_data_df = data[selected_vars].iloc[:len(scores)]
+
+                        training_mean = X_data_df.mean()
+
+                        # Get real values for selected sample
+                        sample_values = X_data_df.iloc[sample_idx]
+
+                        # Filter variables based on which limits are exceeded and user choice
+                        high_contrib_t2 = np.abs(t2_contrib_norm) > 1.0
+                        high_contrib_q = np.abs(q_contrib_norm) > 1.0
+
+                        # Determine which contributions to show based on outlier type
+                        if exceeds_t2 and exceeds_q:
+                            # Both exceeded - use user selection
+                            if contrib_display == "Show Both":
+                                high_contrib = high_contrib_t2 | high_contrib_q
+                                show_both_columns = True
+                            elif contrib_display == "T² Only":
+                                high_contrib = high_contrib_t2
+                                show_both_columns = False
+                            else:  # Q Only
+                                high_contrib = high_contrib_q
+                                show_both_columns = False
+                        elif exceeds_t2:
+                            high_contrib = high_contrib_t2
+                            show_both_columns = False
+                        else:  # exceeds_q
+                            high_contrib = high_contrib_q
+                            show_both_columns = False
+
+                        if high_contrib.sum() > 0:
+                            contrib_table_data = []
+                            for i, var in enumerate(selected_vars):
+                                if high_contrib[i]:
+                                    real_val = sample_values[var]
+                                    mean_val = training_mean[var]
+                                    diff = real_val - mean_val
+                                    direction = "Higher ↑" if diff > 0 else "Lower ↓"
+
+                                    row_data = {
+                                        'Variable': var,
+                                        'Real Value': f"{real_val:.3f}",
+                                        'Training Mean': f"{mean_val:.3f}",
+                                        'Difference': f"{diff:.3f}",
+                                        'Direction': direction
+                                    }
+
+                                    # Add contribution columns based on what's being displayed
+                                    if show_both_columns:
+                                        row_data['|T² Contrib|'] = f"{abs(t2_contrib_norm[i]):.2f}"
+                                        row_data['|Q Contrib|'] = f"{abs(q_contrib_norm[i]):.2f}"
+                                    elif exceeds_t2 and not exceeds_q:
+                                        row_data['|T² Contrib|'] = f"{abs(t2_contrib_norm[i]):.2f}"
+                                    elif exceeds_q and not exceeds_t2:
+                                        row_data['|Q Contrib|'] = f"{abs(q_contrib_norm[i]):.2f}"
+                                    elif contrib_display == "T² Only":
+                                        row_data['|T² Contrib|'] = f"{abs(t2_contrib_norm[i]):.2f}"
+                                    else:  # Q Only
+                                        row_data['|Q Contrib|'] = f"{abs(q_contrib_norm[i]):.2f}"
+
+                                    contrib_table_data.append(row_data)
+
+                            contrib_table = pd.DataFrame(contrib_table_data)
+                            # Sort by contribution value
+                            if show_both_columns:
+                                contrib_table['Max_Contrib'] = contrib_table.apply(
+                                    lambda row: max(float(row['|T² Contrib|']), float(row['|Q Contrib|'])),
+                                    axis=1
+                                )
+                                contrib_table = contrib_table.sort_values('Max_Contrib', ascending=False).drop('Max_Contrib', axis=1)
+                            elif '|T² Contrib|' in contrib_table.columns:
+                                contrib_table['Sort_Val'] = contrib_table['|T² Contrib|'].astype(float)
+                                contrib_table = contrib_table.sort_values('Sort_Val', ascending=False).drop('Sort_Val', axis=1)
+                            else:
+                                contrib_table['Sort_Val'] = contrib_table['|Q Contrib|'].astype(float)
+                                contrib_table = contrib_table.sort_values('Sort_Val', ascending=False).drop('Sort_Val', axis=1)
+
+                            st.dataframe(contrib_table, use_container_width=True, hide_index=True)
                         else:
-                            st.error("❌ Cannot align sample indices between PCA results and original data")
-                            X_data_df = data[selected_vars].iloc[:len(scores)]
-
-                    training_mean = X_data_df.mean()
-
-                    # Get real values for selected sample
-                    sample_values = X_data_df.iloc[sample_idx]
-
-                    # Filter variables where |contrib|>1 for either T² or Q
-                    high_contrib_t2 = np.abs(t2_contrib_norm) > 1.0
-                    high_contrib_q = np.abs(q_contrib_norm) > 1.0
-                    high_contrib = high_contrib_t2 | high_contrib_q
-
-                    if high_contrib.sum() > 0:
-                        contrib_table_data = []
-                        for i, var in enumerate(selected_vars):
-                            if high_contrib[i]:
-                                real_val = sample_values[var]
-                                mean_val = training_mean[var]
-                                diff = real_val - mean_val
-                                direction = "Higher ↑" if diff > 0 else "Lower ↓"
-
-                                contrib_table_data.append({
-                                    'Variable': var,
-                                    'Real Value': f"{real_val:.3f}",
-                                    'Training Mean': f"{mean_val:.3f}",
-                                    'Difference': f"{diff:.3f}",
-                                    'Direction': direction,
-                                    '|T² Contrib|': f"{abs(t2_contrib_norm[i]):.2f}",
-                                    '|Q Contrib|': f"{abs(q_contrib_norm[i]):.2f}"
-                                })
-
-                        contrib_table = pd.DataFrame(contrib_table_data)
-                        # Sort by max absolute contribution
-                        contrib_table['Max_Contrib'] = contrib_table.apply(
-                            lambda row: max(float(row['|T² Contrib|']), float(row['|Q Contrib|'])),
-                            axis=1
-                        )
-                        contrib_table = contrib_table.sort_values('Max_Contrib', ascending=False).drop('Max_Contrib', axis=1)
-
-                        st.dataframe(contrib_table, use_container_width=True, hide_index=True)
-                    else:
-                        st.info("No variables exceed the 95th percentile threshold.")
+                            st.info("No variables exceed the 95th percentile threshold.")
 
                     # Correlation scatter: training (grey), sample (red star)
-                    st.markdown("### 📈 Correlation Analysis - Top Q Contributor")
-                    st.markdown("*Select from top Q contributors to see correlation with most correlated variable*")
+                    # Only show if sample exceeds limits
+                    if exceeds_t2 or exceeds_q:
+                        # Determine which contribution type to analyze based on outlier type
+                        if exceeds_t2 and exceeds_q:
+                            # Both exceeded - use user selection
+                            if contrib_display == "T² Only":
+                                analyze_statistic = "T²"
+                                contrib_norm_to_use = t2_contrib_norm
+                            elif contrib_display == "Q Only":
+                                analyze_statistic = "Q"
+                                contrib_norm_to_use = q_contrib_norm
+                            else:  # Show Both - default to Q
+                                analyze_statistic = "Q"
+                                contrib_norm_to_use = q_contrib_norm
+                        elif exceeds_t2:
+                            analyze_statistic = "T²"
+                            contrib_norm_to_use = t2_contrib_norm
+                        else:  # exceeds_q
+                            analyze_statistic = "Q"
+                            contrib_norm_to_use = q_contrib_norm
 
-                    # Get top Q contributors (variables with highest |Q contribution|)
-                    q_contrib_abs = np.abs(q_contrib_norm)
-                    top_q_indices = np.argsort(q_contrib_abs)[::-1][:5]
-                    top_q_contributors = [selected_vars[i] for i in top_q_indices]
+                        st.markdown(f"### 📈 Correlation Analysis - Top {analyze_statistic} Contributor")
+                        st.markdown(f"*Select from top {analyze_statistic} contributors to see correlation with most correlated variable*")
 
-                    # Dropdown to select from top Q contributors
-                    corr_col1, corr_col2 = st.columns([2, 1])
+                        # Get top contributors (variables with highest contribution)
+                        contrib_abs = np.abs(contrib_norm_to_use)
+                        top_indices = np.argsort(contrib_abs)[::-1][:5]
+                        top_contributors = [selected_vars[i] for i in top_indices]
 
-                    with corr_col1:
-                        selected_q_var = st.selectbox(
-                            "Select from top Q contributors:",
-                            options=top_q_contributors,
-                            key="diag_top_q_var"
+                        # Dropdown to select from top contributors
+                        corr_col1, corr_col2 = st.columns([2, 1])
+
+                        with corr_col1:
+                            selected_contrib_var = st.selectbox(
+                                f"Select from top {analyze_statistic} contributors:",
+                                options=top_contributors,
+                                key="diag_top_contrib_var"
+                            )
+
+                        # Calculate correlations for selected variable (from training data)
+                        var1_idx = selected_vars.index(selected_contrib_var)
+                        X_data_array = X_data_df.values
+                        correlations = {}
+                        for i, var in enumerate(selected_vars):
+                            if var != selected_contrib_var:
+                                corr = np.corrcoef(X_data_array[:, var1_idx], X_data_array[:, i])[0, 1]
+                                correlations[var] = (corr, i)
+
+                        # Find most correlated variable
+                        most_corr_var = max(correlations, key=lambda k: abs(correlations[k][0]))
+                        corr_coef, var2_idx = correlations[most_corr_var]
+
+                        with corr_col2:
+                            st.metric("Correlation (training)", f"{corr_coef:.4f}")
+
+                        # Create scatter plot (training=grey, sample=red star)
+                        fig_corr_scatter = create_correlation_scatter(
+                            X_train=X_data_array,
+                            X_test=X_data_array,  # Same as training in pca.py diagnostics
+                            X_sample=X_data_array[sample_idx, :],
+                            var1_idx=var1_idx,
+                            var2_idx=var2_idx,
+                            var1_name=selected_contrib_var,
+                            var2_name=most_corr_var,
+                            correlation_val=corr_coef,
+                            sample_idx=sample_idx
                         )
 
-                    # Calculate correlations for selected variable (from training data)
-                    var1_idx = selected_vars.index(selected_q_var)
-                    X_data_array = X_data_df.values
-                    correlations = {}
-                    for i, var in enumerate(selected_vars):
-                        if var != selected_q_var:
-                            corr = np.corrcoef(X_data_array[:, var1_idx], X_data_array[:, i])[0, 1]
-                            correlations[var] = (corr, i)
-
-                    # Find most correlated variable
-                    most_corr_var = max(correlations, key=lambda k: abs(correlations[k][0]))
-                    corr_coef, var2_idx = correlations[most_corr_var]
-
-                    with corr_col2:
-                        st.metric("Correlation (training)", f"{corr_coef:.4f}")
-
-                    # Create scatter plot (training=grey, sample=red star)
-                    fig_corr_scatter = create_correlation_scatter(
-                        X_train=X_data_array,
-                        X_test=X_data_array,  # Same as training in pca.py diagnostics
-                        X_sample=X_data_array[sample_idx, :],
-                        var1_idx=var1_idx,
-                        var2_idx=var2_idx,
-                        var1_name=selected_q_var,
-                        var2_name=most_corr_var,
-                        correlation_val=corr_coef,
-                        sample_idx=sample_idx
-                    )
-
-                    st.plotly_chart(fig_corr_scatter, use_container_width=True)
+                        st.plotly_chart(fig_corr_scatter, use_container_width=True)
 
         # === SECTION 7 - EXPORT ===
         st.markdown("---")

@@ -1105,6 +1105,11 @@ Paracetamol,96.8,6.9,25.8,89.2""")
                     "sheet": "0",
                     "description": "Mixtures of two food colorants (E-102 and E-110) with UV-Vis absorbances (340-570 nm). Great for calibration."
                 },
+                "Two Whiskeys - Authentication (54×41)": {
+                    "file": "two whiskeys.xls",
+                    "sheet": "0",
+                    "description": "54 samples from 2 Irish whiskey brands with 41 chemico-physical variables. Simpler dataset for authentication compared to Four Whiskeys. Great for binary classification and PCA."
+                },
                 "Washing - Quality Control (356×46)": {
                     "file": "washing.xls",
                     "sheet": "train",
