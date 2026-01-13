@@ -1259,6 +1259,11 @@ Paracetamol,96.8,6.9,25.8,89.2""")
                     "file": "DoE.XLS",
                     "sheet": "10 bread",
                     "description": "Experimental design for bread making process optimization."
+                },
+                "Coffee & Barley - NIR Spectroscopy": {
+                    "file": "coffee_barley.xlsx",
+                    "sheet": "0",
+                    "description": "Coffee and barley samples with near-infrared (NIR) spectroscopy data. Perfect for classification and PCA analysis of agricultural products."
                 }
             }
 
