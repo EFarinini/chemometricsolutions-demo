@@ -91,6 +91,12 @@ try:
 except ImportError:
     BIVARIATE_AVAILABLE = False
 
+try:
+    import ga_variable_selection_page
+    GA_VARIABLE_SELECTION_AVAILABLE = True
+except ImportError:
+    GA_VARIABLE_SELECTION_AVAILABLE = False
+
 def show_home():
     """Show the main homepage"""
     
@@ -131,218 +137,55 @@ def show_home():
     
     st.markdown("---")
     
-    # Available Demos Section
-    st.markdown("## Available Interactive Demos")
+    # Hero call-to-action
+    st.markdown("""
+    ## 📥 Import your data
     
-    # Demo cards in columns
-    col1, col2, col3, col4 = st.columns(4)
+    Start by loading your datasets in **Data Handling**, then boost your analysis with our chemometric tools.
+    """)
     
-    with col1:
-        st.markdown("""
-        ### 📊 Data Handling
-        *Import, export, and manage your datasets*
-        
-        **Features:**
-        - Multi-format file support (CSV, Excel, DAT, SAM, RAW)
-        - Spectroscopy data conversion
-        - Data transformation tools
-        - Export to multiple formats
-        - Workspace management
-        """)
-        
-        if DATA_HANDLING_AVAILABLE:
-            if st.button("🚀 Launch Data Handling Demo", key="launch_data_handling"):
+    if DATA_HANDLING_AVAILABLE:
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            if st.button("📊 Go to Data Handling", use_container_width=True, key="cta_data_handling"):
                 st.session_state.current_page = "Data Handling"
                 st.rerun()
-        else:
-            st.warning("Data Handling demo not available")
+    
+    st.markdown("---")
+    st.markdown("## 🚀 Boost your project with Chemometrics")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("**Analyze your data:**")
+        if PCA_AVAILABLE and st.button("PCA - Principal Component Analysis", use_container_width=True, key="btn_pca"):
+            st.session_state.current_page = "PCA"
+            st.rerun()
+        if MLR_DOE_AVAILABLE and st.button("MLR/DOE - Design of Experiments", use_container_width=True, key="btn_mlr"):
+            st.session_state.current_page = "MLR/DOE"
+            st.rerun()
+        if UNIVARIATE_AVAILABLE and st.button("Univariate - Statistical Analysis", use_container_width=True, key="btn_uni"):
+            st.session_state.current_page = "Univariate Analysis"
+            st.rerun()
+        if BIVARIATE_AVAILABLE and st.button("Bivariate - Statistical Analysis", use_container_width=True, key="btn_bi"):
+            st.session_state.current_page = "Bivariate Analysis"
+            st.rerun()
     
     with col2:
-        st.markdown("""
-        ### 🎯 PCA
-        *Principal Component Analysis suite*
-        
-        **Features:**
-        - Complete PCA workflow
-        - Interactive visualizations
-        - Variance analysis
-        - Scores and loadings plots
-        - Model diagnostics
-        """)
-        
-        if PCA_AVAILABLE:
-            if st.button("🚀 Launch PCA Demo", key="launch_pca_demo"):
-                st.session_state.current_page = "PCA"
-                st.rerun()
-        else:
-            st.warning("PCA demo not available")
+        st.markdown("**Advanced methods:**")
+        if TRANSFORMATIONS_AVAILABLE and st.button("Transformations - Data Preprocessing", use_container_width=True, key="btn_trans"):
+            st.session_state.current_page = "Transformations"
+            st.rerun()
+        if CLASSIFICATION_AVAILABLE and st.button("Classification - Pattern Recognition", use_container_width=True, key="btn_class"):
+            st.session_state.current_page = "Classification"
+            st.rerun()
+        if CALIBRATION_AVAILABLE and st.button("PLS Calibration - Multivariate Calibration", use_container_width=True, key="btn_cal"):
+            st.session_state.current_page = "PLS Calibration"
+            st.rerun()
+        if PCA_MONITORING_AVAILABLE and st.button("Monitoring - Process Monitoring", use_container_width=True, key="btn_qc"):
+            st.session_state.current_page = "Quality Control"
+            st.rerun()
     
-    with col3:
-        st.markdown("""
-        ### 📊 Quality Control
-        *PCA-based Statistical Process Monitoring*
-
-        **Features:**
-        - PCA monitoring models
-        - T² and Q control charts
-        - Automatic pretreatment detection
-        - Contribution analysis
-        - Fault detection and diagnostics
-        """)
-
-        if PCA_MONITORING_AVAILABLE:
-            if st.button("🚀 Launch Quality Control", key="launch_qc"):
-                st.session_state.current_page = "Quality Control"
-                st.rerun()
-        else:
-            st.info("🚧 Quality Control coming soon")
-    
-    with col4:
-        st.markdown("""
-        ### 🧪 MLR/DOE
-        *Multiple Linear Regression & Design of Experiments*
-
-        **Features:**
-        - Candidate points generation
-        - Full factorial designs
-        - Model computation with interactions
-        - Response surface analysis
-        - Lack of fit tests
-        """)
-
-        if MLR_DOE_AVAILABLE:
-            if st.button("🚀 Launch MLR/DOE Demo", key="launch_mlr_doe"):
-                st.session_state.current_page = "MLR/DOE"
-                st.rerun()
-        else:
-            st.info("🚧 MLR/DOE demo coming soon")
-
-    # Additional row for Transformations and Classification
-    st.markdown("---")
-    col_trans1, col_trans2, col_trans3, col_trans3b, col_trans4, col_trans5 = st.columns(6)
-
-    with col_trans1:
-        st.markdown("""
-        ### 🔬 Transformations
-        *Data preprocessing for spectral analysis*
-
-        **Features:**
-        - SNV, derivatives, Savitzky-Golay
-        - DoE coding, autoscaling
-        - Moving averages, binning
-        - Visual comparison plots
-        - Auto-save to workspace
-        """)
-
-        if TRANSFORMATIONS_AVAILABLE:
-            if st.button("🚀 Launch Transformations", key="launch_transformations"):
-                st.session_state.current_page = "Transformations"
-                st.rerun()
-        else:
-            st.info("🚧 Transformations coming soon")
-
-    with col_trans2:
-        st.markdown("""
-        ### 🎲 Classification
-        *Supervised classification methods*
-
-        **Features:**
-        - LDA/QDA discriminant analysis
-        - kNN with multiple metrics
-        - SIMCA class modeling
-        - UNEQ with Mahalanobis
-        - Coomans plots & diagnostics
-        """)
-
-        if CLASSIFICATION_AVAILABLE:
-            if st.button("🚀 Launch Classification", key="launch_classification"):
-                st.session_state.current_page = "Classification"
-                st.rerun()
-        else:
-            st.info("🚧 Classification coming soon")
-
-    with col_trans3:
-        st.markdown("""
-        ### 📊 Univariate Analysis
-        *Comprehensive statistical analysis*
-
-        **Features:**
-        - Descriptive statistics
-        - Dispersion & robust measures
-        - Row profile analysis
-        - Multiple visualization types
-        - Export capabilities
-        """)
-
-        if UNIVARIATE_AVAILABLE:
-            if st.button("🚀 Launch Univariate Analysis", key="launch_univariate"):
-                st.session_state.current_page = "Univariate Analysis"
-                st.rerun()
-        else:
-            st.info("🚧 Univariate Analysis coming soon")
-
-    with col_trans3b:
-        st.markdown("""
-        ### 🧬 Mixture Design
-        *Simplex Centroid Design & Scheffe Polynomials*
-
-        **Features:**
-        - Simplex centroid design generation
-        - Pseudo-component constraints handling
-        - Scheffe polynomial model computation
-        - Ternary/quaternary response surfaces
-        - D-optimal design integration
-        - Multi-criteria optimization
-        """)
-
-        if MIXTURE_DESIGN_AVAILABLE:
-            if st.button("🚀 Launch Mixture Design", key="launch_mixture_design"):
-                st.session_state.current_page = "Mixture Design"
-                st.rerun()
-        else:
-            st.info("🚧 Mixture Design coming soon")
-
-    with col_trans4:
-        st.markdown("""
-        ### 🎯 Multi-DOE
-        *Multi-Response Design of Experiments*
-
-        **Features:**
-        - Simultaneous multi-response modeling
-        - Parallel surface analysis
-        - Multi-criteria optimization (Pareto)
-        - Weighted objective functions
-        - Comprehensive comparison views
-        """)
-
-        if MULTI_DOE_AVAILABLE:
-            if st.button("🚀 Launch Multi-DOE", key="launch_multi_doe"):
-                st.session_state.current_page = "Multi-DOE"
-                st.rerun()
-        else:
-            st.info("🚧 Multi-DOE coming soon")
-
-    with col_trans5:
-        st.markdown("""
-        ### ⚗️ PLS Calibration
-        *Partial Least Squares for Multivariate Calibration*
-
-        **Features:**
-        - Repeated K-fold cross-validation
-        - Intelligent component selection
-        - RMSECV analysis
-        - Predictions vs observed
-        - Test set validation
-        - Model export & comparison
-        """)
-
-        if CALIBRATION_AVAILABLE:
-            if st.button("🚀 Launch PLS Calibration", key="launch_calibration"):
-                st.session_state.current_page = "PLS Calibration"
-                st.rerun()
-        else:
-            st.info("🚧 PLS Calibration coming soon")
-
     st.markdown("---")
     
  
@@ -549,11 +392,19 @@ def main_content():
         st.sidebar.caption("Module not found")
 
     if MIXTURE_DESIGN_AVAILABLE:
-        if st.sidebar.button("🧬 Mixture Design", use_container_width=True, key="nav_mixture_design"):
+        if st.sidebar.button("🧪 Mixture Design", use_container_width=True, key="nav_mixture_design"):
             st.session_state.current_page = "Mixture Design"
             st.rerun()
     else:
-        st.sidebar.button("🧬 Mixture Design", disabled=True, use_container_width=True, key="nav_mixture_design_disabled")
+        st.sidebar.button("🧪 Mixture Design", disabled=True, use_container_width=True, key="nav_mixture_design_disabled")
+        st.sidebar.caption("Module not found")
+
+    if GA_VARIABLE_SELECTION_AVAILABLE:
+        if st.sidebar.button("🧬 GA Variable Selection", use_container_width=True, key="nav_ga_varsel"):
+            st.session_state.current_page = "GA Variable Selection"
+            st.rerun()
+    else:
+        st.sidebar.button("🧬 GA Variable Selection", disabled=True, use_container_width=True, key="nav_ga_varsel_disabled")
         st.sidebar.caption("Module not found")
 
     st.sidebar.markdown("---")
@@ -655,6 +506,8 @@ def main_content():
         generate_doe.show()
     elif st.session_state.current_page == "Mixture Design" and MIXTURE_DESIGN_AVAILABLE:
         mixture_design.show()
+    elif st.session_state.current_page == "GA Variable Selection" and GA_VARIABLE_SELECTION_AVAILABLE:
+        ga_variable_selection_page.show()
     else:
         st.error(f"Page '{st.session_state.current_page}' not found or module not available")
         st.session_state.current_page = "Home"

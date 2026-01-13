@@ -24,6 +24,7 @@ from bivariate_utils.plotting import (
 )
 
 
+@st.cache_data
 def compute_all_pair_correlations(numeric_data: pd.DataFrame) -> pd.DataFrame:
     """
     Compute Pearson correlations for ALL variable pairs.
@@ -164,339 +165,254 @@ def show():
 
     st.success(f"✅ Will analyze {len(numeric_data.columns)} numeric variables")
 
-    # === PEARSON CORRELATION RANKING TABLE ===
-    st.markdown("---")
-    st.markdown("## 📈 Pearson Correlation Ranking")
-    st.markdown("*All variable pairs ranked by correlation strength (|r|)*")
-
-    # Compute correlations for ALL pairs
-    corr_ranking_df = compute_all_pair_correlations(numeric_data)
-
-    if len(corr_ranking_df) == 0:
-        st.warning("⚠️ Could not compute correlations - check for NaN values")
-    else:
-        # Display formatted table
-        st.markdown("### Top Correlations")
-
-        # Format for display
-        display_df = corr_ranking_df.copy()
-        display_df['Pearson r'] = display_df['Pearson r'].apply(lambda x: f"{x:.4f}")
-        display_df['P-value'] = display_df['P-value'].apply(lambda x: f"{x:.2e}")
-        display_df['|r|'] = display_df['|r|'].apply(lambda x: f"{x:.4f}")
-
-        # Display with columns selection
-        st.dataframe(
-            display_df[['Variable 1', 'Variable 2', 'Pearson r', 'P-value', '|r|']],
-            use_container_width=True,
-            hide_index=True
-        )
-
-        st.info(f"📊 Total pairs analyzed: {len(corr_ranking_df)}")
-
-    # === CORRELATION ANALYSIS ===
-    st.markdown("---")
-    st.markdown("## 📊 Correlation Analysis")
-    st.markdown("*Correlation rankings and pairwise relationships*")
-
-    # === SCATTER PLOT VARIABLE PAIR SELECTOR (OPTIONAL) ===
-    st.markdown("---")
-    st.markdown("## 🎨 Scatter Plot Visualization (Optional)")
-    st.markdown("*Select a specific variable pair for detailed scatter plot with metadata coloring*")
-
-    # === TOP CORRELATIONS SUGGESTIONS ===
-    st.markdown("### 💡 Top 10 Strongest Correlations (Suggestions)")
-
-    # Get top 10 pairs
-    top_correlations = corr_ranking_df.head(10).copy()
-
-    if len(top_correlations) > 0:
-        # Create two columns for display
-        col_left, col_right = st.columns([2, 1])
-
-        with col_left:
-            # Display suggestions as clickable cards/rows
-            st.markdown("**Click any pair below to select it:**")
-
-            for idx, row in top_correlations.iterrows():
-                var1 = row['Variable 1']
-                var2 = row['Variable 2']
-                r_value = row['Pearson r']
-                abs_r = row['|r|']
-
-                # Create a formatted row with button
-                col_rank, col_vars, col_r, col_button = st.columns([0.5, 2, 1, 0.8])
-
-                with col_rank:
-                    # Rank number (1-10)
-                    st.markdown(f"**{idx + 1}.**")
-
-                with col_vars:
-                    # Variable pair with arrow
-                    st.markdown(f"`{var1}` → `{var2}`")
-
-                with col_r:
-                    # Correlation value with color indicator
-                    color = "🔴" if abs_r > 0.8 else "🟠" if abs_r > 0.6 else "🟡" if abs_r > 0.4 else "🟢"
-                    st.markdown(f"{color} r = {r_value:.4f}")
-
-                with col_button:
-                    # Button to select this pair
-                    if st.button("Select", key=f"select_pair_{idx}"):
-                        st.session_state.bivariate_var1 = var1
-                        st.session_state.bivariate_var2 = var2
-                        st.rerun()
-
-        with col_right:
-            # Legend for color intensity
-            st.markdown("**Correlation Strength:**")
-            st.markdown("🔴 |r| > 0.8 (Very Strong)")
-            st.markdown("🟠 |r| > 0.6 (Strong)")
-            st.markdown("🟡 |r| > 0.4 (Moderate)")
-            st.markdown("🟢 |r| ≤ 0.4 (Weak)")
-
+    # === MAIN TABS ===
     st.markdown("---")
 
-    # === MANUAL VARIABLE SELECTION ===
-    st.markdown("### 📌 Or Select Variables Manually")
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📊 Scatter Plot Analysis",
+        "📊 Correlation Matrix",
+        "📑 Pairs Plot",
+        "📋 Covariance & Summary"
+    ])
 
-    col1, col2 = st.columns(2)
+    # =========================================================================
+    # TAB 1: SCATTER PLOT ANALYSIS (MAIN) - Ranking + Plot Together
+    # =========================================================================
+    with tab1:
+        st.markdown("## 📊 Scatter Plot Analysis")
 
-    with col1:
-        var1_options = numeric_data.columns.tolist()
-        default_var1_idx = 0
-        if st.session_state.bivariate_var1 is not None and st.session_state.bivariate_var1 in var1_options:
-            default_var1_idx = var1_options.index(st.session_state.bivariate_var1)
+        # ======================================================================
+        # SECTION A: CORRELATION RANKING (for selecting variables)
+        # ======================================================================
+        st.markdown("### 📈 Correlation Ranking - Select Variable Pair")
+        st.markdown("*Click 'Select' to view scatter plot for that pair below*")
 
-        selected_var1 = st.selectbox(
-            "Variable 1 (X-axis):",
-            options=var1_options,
-            index=default_var1_idx,
-            key="bivariate_var1_selector"
-        )
+        # Compute correlations
+        corr_ranking_df = compute_all_pair_correlations(numeric_data)
 
-    with col2:
-        var2_options = [v for v in numeric_data.columns.tolist() if v != st.session_state.bivariate_var1]
-        if len(var2_options) == 0:
-            st.error("❌ Need at least 2 different variables for scatter plot")
-            var2_options = var1_options
+        if len(corr_ranking_df) == 0:
+            st.warning("⚠️ Could not compute correlations")
+        else:
+            # Display full table in expander (optional detail)
+            with st.expander("Show all pairs (complete table)"):
+                display_df = corr_ranking_df.copy()
+                display_df['Pearson r'] = display_df['Pearson r'].apply(lambda x: f"{x:.4f}")
+                display_df['P-value'] = display_df['P-value'].apply(lambda x: f"{x:.2e}")
+                display_df['|r|'] = display_df['|r|'].apply(lambda x: f"{x:.4f}")
 
-        default_var2_idx = 0
-        if st.session_state.bivariate_var2 is not None and st.session_state.bivariate_var2 in var2_options:
-            default_var2_idx = var2_options.index(st.session_state.bivariate_var2)
+                st.dataframe(
+                    display_df[['Variable 1', 'Variable 2', 'Pearson r', 'P-value', '|r|']],
+                    use_container_width=True,
+                    hide_index=True
+                )
 
-        selected_var2 = st.selectbox(
-            "Variable 2 (Y-axis):",
-            options=var2_options,
-            index=default_var2_idx,
-            key="bivariate_var2_selector"
-        )
+            # Top 10 with select buttons
+            st.markdown("#### 💡 Top 10 Strongest Correlations")
+            top_correlations = corr_ranking_df.head(10).copy()
 
-    # Update session state when selections change
-    if selected_var1 != st.session_state.bivariate_var1:
-        st.session_state.bivariate_var1 = selected_var1
-        st.rerun()
+            if len(top_correlations) > 0:
+                col_left, col_right = st.columns([2, 1])
 
-    if selected_var2 != st.session_state.bivariate_var2:
-        st.session_state.bivariate_var2 = selected_var2
-        st.rerun()
+                with col_left:
+                    for idx, row in top_correlations.iterrows():
+                        var1 = row['Variable 1']
+                        var2 = row['Variable 2']
+                        r_value = row['Pearson r']
+                        abs_r = row['|r|']
 
-    # Visualization controls
-    st.markdown("### Visualization Settings")
+                        col_rank, col_vars, col_r, col_button = st.columns([0.5, 2, 1, 0.8])
 
-    col1, col2, col3 = st.columns(3)
+                        with col_rank:
+                            st.markdown(f"**{idx + 1}.**")
+                        with col_vars:
+                            st.markdown(f"`{var1}` → `{var2}`")
+                        with col_r:
+                            color = "🔴" if abs_r > 0.8 else "🟠" if abs_r > 0.6 else "🟡" if abs_r > 0.4 else "🟢"
+                            st.markdown(f"{color} r = {r_value:.4f}")
+                        with col_button:
+                            if st.button("Select", key=f"select_pair_{idx}"):
+                                st.session_state.bivariate_var1 = var1
+                                st.session_state.bivariate_var2 = var2
+                                st.rerun()
 
-    with col1:
-        # Identify metadata columns (non-numeric from original data + custom variables)
-        metadata_cols = data.select_dtypes(exclude=['number']).columns.tolist()
+                with col_right:
+                    st.markdown("**Strength Legend:**")
+                    st.markdown("🔴 |r| > 0.8: Very Strong")
+                    st.markdown("🟠 0.6 < |r| ≤ 0.8: Strong")
+                    st.markdown("🟡 0.4 < |r| ≤ 0.6: Moderate")
+                    st.markdown("🟢 |r| ≤ 0.4: Weak")
+
+        # ======================================================================
+        # SECTION B: SCATTER PLOT VISUALIZATION
+        # ======================================================================
+        st.markdown("---")
+        st.markdown("### 🎨 Scatter Plot Visualization")
+        st.markdown("*(Select pair from ranking above, or choose manually)*")
+
+        numeric_vars = numeric_data.columns.tolist()
+        metadata_cols = selected_data.select_dtypes(exclude=['number']).columns.tolist()
 
         # Add custom variables from session state if available
         if 'custom_variables' in st.session_state:
             custom_vars = list(st.session_state.custom_variables.keys())
             metadata_cols = metadata_cols + custom_vars
 
-        color_options = ["None"] + metadata_cols
-        color_by = st.selectbox(
-            "Color By (Metadata):",
-            options=color_options,
-            index=0,
-            help="Select a categorical column to color-code points",
-            key="bivariate_color_by"
-        )
-
-        label_by = st.selectbox(
-            "Label By (Optional):",
-            options=["None", "Index"] + metadata_cols,
-            index=0,
-            help="Select a column for point labels on hover",
-            key="bivariate_label_by"
-        )
-
-    with col2:
-        point_size = st.slider(
-            "Point Size:",
-            min_value=10,
-            max_value=500,
-            value=100,
-            step=10,
-            help="Size of scatter plot points",
-            key="bivariate_point_size"
-        )
-
-        opacity = st.slider(
-            "Opacity:",
-            min_value=0.1,
-            max_value=1.0,
-            value=0.7,
-            step=0.1,
-            help="Point transparency",
-            key="bivariate_opacity"
-        )
-
-    # === CONVEX HULL OPTIONS ===
-    st.markdown("### Advanced Options")
-
-    col_hull, col_spacer = st.columns([2, 1])
-
-    with col_hull:
-        convex_hull_option = st.checkbox(
-            "🔹 Show Convex Hull",
-            value=False,
-            help="Display convex hull boundaries around categorical groups (requires Color By selection)",
-            key="bivariate_convex_hull"
-        )
-
-    # Show hull customization options only if hull is enabled and color_by is selected
-    if convex_hull_option and color_by != "None":
-        st.markdown("**Convex Hull Settings**")
-
-        col1, col2, col3, col4 = st.columns(4)
+        # Variable selectors (may be pre-filled by ranking selection)
+        col1, col2 = st.columns(2)
 
         with col1:
-            hull_fill = st.checkbox(
-                "Fill Area",
-                value=True,
-                help="Fill the convex hull area with color",
-                key="bivariate_hull_fill"
+            # Try to get from session state (set by ranking buttons)
+            default_var1_idx = 0
+            if hasattr(st.session_state, 'bivariate_var1') and st.session_state.bivariate_var1 in numeric_vars:
+                default_var1_idx = numeric_vars.index(st.session_state.bivariate_var1)
+
+            current_var1 = st.selectbox(
+                "Variable 1 (X-axis):",
+                options=numeric_vars,
+                index=default_var1_idx,
+                key="bivariate_scatter_var1"
             )
 
         with col2:
-            hull_opacity = st.slider(
-                "Fill Opacity",
-                min_value=0.0,
-                max_value=0.5,
-                value=0.05,
-                step=0.01,
-                help="Transparency of hull fill (0 = transparent, 0.5 = opaque)",
-                key="bivariate_hull_opacity",
-                disabled=not hull_fill  # Disable if no fill
+            # Try to get from session state (set by ranking buttons)
+            default_var2_idx = min(1, len(numeric_vars)-1)
+            if hasattr(st.session_state, 'bivariate_var2') and st.session_state.bivariate_var2 in numeric_vars:
+                default_var2_idx = numeric_vars.index(st.session_state.bivariate_var2)
+
+            current_var2 = st.selectbox(
+                "Variable 2 (Y-axis):",
+                options=numeric_vars,
+                index=default_var2_idx,
+                key="bivariate_scatter_var2"
             )
 
-        with col3:
-            hull_line_style = st.selectbox(
-                "Line Style",
-                options=['solid', 'dash', 'dot', 'dashdot'],
-                index=1,  # Default to 'dash'
-                help="Line style for hull boundary",
-                key="bivariate_hull_line_style"
+        # Visualization Settings
+        st.markdown("---")
+        st.markdown("#### Visualization Settings")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            color_by = st.selectbox(
+                "Color By (Metadata):",
+                options=["None"] + metadata_cols,
+                index=0,
+                help="Select a categorical column to color-code points",
+                key="bivariate_color_by"
+            )
+            color_by_val = None if color_by == "None" else color_by
+
+            label_by = st.selectbox(
+                "Label By (Optional):",
+                options=["None", "Index"] + metadata_cols,
+                index=0,
+                help="Show row indices or column values as labels on points",
+                key="bivariate_label_by"
+            )
+            label_by_val = None if label_by == "None" else label_by
+
+        with col2:
+            point_size = st.slider(
+                "Point Size:",
+                min_value=10,
+                max_value=500,
+                value=100,
+                step=10,
+                key="bivariate_point_size"
             )
 
-        with col4:
-            hull_line_width = st.slider(
-                "Line Width",
-                min_value=1,
-                max_value=5,
-                value=2,
-                step=1,
-                help="Thickness of hull boundary line",
-                key="bivariate_hull_line_width"
+            opacity = st.slider(
+                "Opacity:",
+                min_value=0.1,
+                max_value=1.0,
+                value=0.7,
+                step=0.1,
+                key="bivariate_opacity"
             )
 
-    else:
-        # Default values when hull is disabled
-        hull_fill = True
-        hull_opacity = 0.05
-        hull_line_style = 'dash'
-        hull_line_width = 2
+        # Advanced Options
+        st.markdown("#### Advanced Options")
 
-    # === AUTO-GENERATE SCATTER PLOT ===
-    st.markdown("---")
+        col1, col2 = st.columns([2, 1])
 
-    # Get current selections from session state
-    current_var1 = st.session_state.bivariate_var1
-    current_var2 = st.session_state.bivariate_var2
-    color_by_val = None if color_by == "None" else color_by
-    label_by_val = None if label_by == "None" else label_by
-
-    # Check if both variables are selected and different
-    if current_var1 and current_var2 and current_var1 != current_var2:
-        try:
-            # Prepare custom_variables dict
-            custom_vars = None
-            if 'custom_variables' in st.session_state:
-                custom_vars = st.session_state.custom_variables
-
-            # AUTO-GENERATE SCATTER PLOT
-            fig = create_scatter_plot(
-                data=data,
-                x_var=current_var1,
-                y_var=current_var2,
-                color_by=color_by_val,
-                label_by=label_by_val,
-                custom_variables=custom_vars,
-                point_size=point_size,
-                opacity=opacity,
-                show_convex_hull=convex_hull_option,
-                hull_fill=hull_fill,
-                hull_opacity=hull_opacity,
-                hull_line_style=hull_line_style,
-                hull_line_width=hull_line_width
+        with col1:
+            convex_hull_option = st.checkbox(
+                "🔹 Show Convex Hull",
+                value=False,
+                key="bivariate_convex_hull"
             )
 
-            # CENTER THE PLOT HORIZONTALLY
-            col1, col2, col3 = st.columns([1, 2, 1])
+        # Convex hull settings
+        if convex_hull_option and color_by_val is not None:
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                hull_fill = st.checkbox("Fill Area", value=True, key="bivariate_hull_fill")
             with col2:
-                st.plotly_chart(fig, use_container_width=True)
-
-            # SHOW STATISTICS BELOW
-            st.markdown("---")
-
-            pair_data = data[[current_var1, current_var2]].dropna()
-            if len(pair_data) >= 2:
-                corr, pval = stats.pearsonr(pair_data[current_var1], pair_data[current_var2])
-
-                metric_col1, metric_col2, metric_col3 = st.columns(3)
-
-                with metric_col1:
-                    st.metric("Pearson r", f"{corr:.4f}")
-                with metric_col2:
-                    st.metric("P-value", f"{pval:.2e}")
-                with metric_col3:
-                    st.metric("Valid Points", len(pair_data))
-
-        except Exception as e:
-            st.error(f"❌ Error creating scatter plot: {str(e)}")
-
-    else:
-        # Show helpful messages when conditions not met
-        if current_var1 and current_var2 and current_var1 == current_var2:
-            st.info("ℹ️ Please select **two different variables** for scatter plot")
-        elif current_var1 or current_var2:
-            st.info("ℹ️ Please select **both variables** for scatter plot")
+                hull_opacity = st.slider("Hull Opacity", 0.0, 1.0, 0.2, key="bivariate_hull_opacity")
+            with col3:
+                hull_line_style = st.selectbox("Line Style", ["solid", "dash", "dot", "dashdot"], key="bivariate_hull_style")
+            with col4:
+                hull_line_width = st.slider("Line Width", 1, 5, 2, key="bivariate_hull_width")
         else:
-            st.info("💡 Select **Variable 1** and **Variable 2** to generate scatter plot")
+            hull_fill = True
+            hull_opacity = 0.2
+            hull_line_style = 'dash'
+            hull_line_width = 2
 
-    # === ADDITIONAL ANALYSIS TABS ===
-    st.markdown("---")
-    st.markdown("## 📊 Advanced Statistical Analysis")
+        # Create scatter plot
+        if current_var1 and current_var2 and current_var1 != current_var2:
+            try:
+                fig = create_scatter_plot(
+                    data=selected_data,
+                    x_var=current_var1,
+                    y_var=current_var2,
+                    color_by=color_by_val,
+                    label_by=label_by_val,
+                    custom_variables=st.session_state.get('custom_variables', None),
+                    point_size=point_size,
+                    opacity=opacity,
+                    show_convex_hull=convex_hull_option,
+                    hull_fill=hull_fill,
+                    hull_opacity=hull_opacity,
+                    hull_line_style=hull_line_style,
+                    hull_line_width=hull_line_width
+                )
 
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "Correlation Matrix",
-        "Covariance Matrix",
-        "Pairs Plot",
-        "Correlation Summary"
-    ])
+                # Center plot
+                col1, col2, col3 = st.columns([1, 2, 1])
+                with col2:
+                    st.plotly_chart(fig, use_container_width=True)
 
-    with tab1:
+                # Statistics
+                st.markdown("---")
+
+                pair_data = selected_data[[current_var1, current_var2]].dropna()
+                if len(pair_data) >= 2:
+                    corr, pval = stats.pearsonr(pair_data[current_var1], pair_data[current_var2])
+
+                    metric_col1, metric_col2, metric_col3 = st.columns(3)
+
+                    with metric_col1:
+                        st.metric("Pearson r", f"{corr:.4f}")
+                    with metric_col2:
+                        st.metric("P-value", f"{pval:.2e}")
+                    with metric_col3:
+                        st.metric("Valid Points", len(pair_data))
+
+            except Exception as e:
+                st.error(f"❌ Error creating scatter plot: {str(e)}")
+
+        else:
+            if current_var1 == current_var2:
+                st.info("ℹ️ Please select **two different variables**")
+            else:
+                st.info("💡 Select **both variables** to generate scatter plot")
+
+    # =========================================================================
+    # TAB 2: CORRELATION MATRIX
+    # =========================================================================
+    with tab2:
         st.markdown("### Correlation Matrix")
 
         corr_method = st.radio(
@@ -521,23 +437,9 @@ def show():
         except Exception as e:
             st.error(f"❌ Error: {str(e)}")
 
-    with tab2:
-        st.markdown("### Covariance Matrix")
-
-        try:
-            cov_matrix = compute_covariance_matrix(numeric_data)
-            st.dataframe(cov_matrix.round(4), use_container_width=True)
-
-            st.markdown("**Variances (Diagonal)**")
-            variances = pd.DataFrame({
-                'Variable': cov_matrix.index,
-                'Variance': np.diag(cov_matrix)
-            })
-            st.dataframe(variances, use_container_width=True)
-
-        except Exception as e:
-            st.error(f"❌ Error: {str(e)}")
-
+    # =========================================================================
+    # TAB 3: PAIRS PLOT
+    # =========================================================================
     with tab3:
         st.markdown("### Pairs Plot")
         st.markdown("*Pairwise scatter plots of top correlated variables*")
@@ -622,7 +524,31 @@ def show():
         else:
             st.info("💡 Select at least 2 variables for pairs plot")
 
+    # =========================================================================
+    # TAB 4: COVARIANCE & SUMMARY
+    # =========================================================================
     with tab4:
+        st.markdown("## 📋 Covariance Matrix & Correlation Summary")
+
+        # Covariance Matrix Section
+        st.markdown("### Covariance Matrix")
+
+        try:
+            cov_matrix = compute_covariance_matrix(numeric_data)
+            st.dataframe(cov_matrix.round(4), use_container_width=True)
+
+            st.markdown("**Variances (Diagonal)**")
+            variances = pd.DataFrame({
+                'Variable': cov_matrix.index,
+                'Variance': np.diag(cov_matrix)
+            })
+            st.dataframe(variances, use_container_width=True)
+
+        except Exception as e:
+            st.error(f"❌ Error computing covariance: {str(e)}")
+
+        # Correlation Summary Section
+        st.markdown("---")
         st.markdown("### Correlation Summary")
 
         significance_level = st.slider(

@@ -103,6 +103,9 @@ def show():
         st.session_state.selected_classifier = 'LDA'
     if 'trained_model' not in st.session_state:
         st.session_state.trained_model = None
+    # Ensure tab1_data exists (for backward compatibility and error prevention)
+    if 'tab1_data' not in st.session_state:
+        st.session_state['tab1_data'] = {}
 
     # Initialize local variables to avoid UnboundLocalError
     X_data = None
@@ -114,6 +117,9 @@ def show():
     y_test = None
     X_train_scaled = None
     X_test_scaled = None
+
+    # Initialize tab1_data from session state (accessible across all tabs)
+    tab1_data = st.session_state.get('tab1_data', {})
 
     # === CREATE TABS ===
     tab1, tab2, tab3, tab4 = st.tabs([
@@ -1085,7 +1091,11 @@ def show():
                             'n_components_pca': n_components_pca,
                             'use_pca_preprocessing': True,
                             'misclassified_indices': cv_results_raw.get('misclassified_indices', []),
-                            'mahalanobis_distances': cv_results_raw.get('mahalanobis_distances', {})
+                            'mahalanobis_distances': cv_results_raw.get('mahalanobis_distances', {}),
+                            # ✅ ADD PCA PREPROCESSOR IF AVAILABLE
+                            'pca_preprocessor': cv_results_raw.get('pca_preprocessor'),
+                            'pca_loadings': cv_results_raw.get('pca_loadings'),
+                            'pca_variance_explained': cv_results_raw.get('pca_variance_explained'),
                         }
                         cv_method = 'with_pca'
 
@@ -1200,13 +1210,30 @@ def show():
 
                     cv_time = time.time() - cv_start
 
-                    # Store in session state
+                    # ✅ SAVE CV RESULTS COMPLETELY
                     st.session_state['cv_results'] = standardized_results
                     st.session_state['cv_results_time'] = cv_time
                     st.session_state['cv_time'] = cv_time
                     st.session_state['cv_method'] = cv_method
                     st.session_state['cv_n_folds'] = n_folds_cv
                     st.session_state['cv_classifier'] = selected_classifier
+
+                    # ✅ ALSO SAVE FOR EXPORT (Training data)
+                    st.session_state['X_train_scaled_cv'] = X_train_scaled
+                    st.session_state['y_train_cv'] = y_values
+                    st.session_state['X_test_scaled_cv'] = X_test_scaled
+                    st.session_state['y_test_cv'] = y_test_values if 'y_test_values' in locals() else None
+
+                    # ✅ Save PCA if used
+                    if 'pca_preprocessor' in locals() and pca_preprocessor is not None:
+                        st.session_state['pca_preprocessor'] = pca_preprocessor
+                        st.session_state['use_pca_cv'] = True
+                        # ✅ SAVE PCA DATA FROM CV RESULTS
+                        st.session_state['pca_loadings'] = standardized_results.get('pca_loadings')
+                        st.session_state['pca_variance_explained'] = standardized_results.get('pca_variance_explained')
+                        st.session_state['n_components_pca'] = standardized_results.get('n_components_pca')
+                    else:
+                        st.session_state['use_pca_cv'] = False
 
                     # ✅ VERIFICATION
                     with st.expander("✅ CV Storage Verification", expanded=False):
@@ -1225,36 +1252,59 @@ def show():
 
                     try:
                         with st.spinner("Training final model on full training data..."):
+                            # ✅ DEBUG: Print training parameters
+                            print("\n" + "=" * 80)
+                            print("🔧 MODEL TRAINING STARTED")
+                            print(f"Classifier: {selected_classifier}")
+                            print(f"Use PCA: {use_pca_preprocessing}")
+                            print(f"N Components: {n_components_pca if use_pca_preprocessing else 'N/A'}")
+                            print(f"X_train_scaled shape: {X_train_scaled.shape}")
+                            print(f"y_values shape: {y_values.shape}")
+                            print(f"Classes: {classes}")
+                            print("=" * 80 + "\n")
+
                             if use_pca_preprocessing and selected_classifier in ['LDA', 'QDA', 'kNN']:
                                 # Train with PCA preprocessing
-                                pca_info = fit_pca_preprocessor(
-                                    X_train_scaled,
-                                    n_components=n_components_pca,
-                                    scaling_method=scaling_method
-                                )
-                                X_train_pca = project_onto_pca(X_train_scaled, pca_info)
+                                print(f"📊 Training {selected_classifier} with PCA ({n_components_pca} components)...")
 
                                 if selected_classifier == 'LDA':
+                                    print(f"🎯 Training LDA with PCA...")
                                     final_model = fit_lda_with_pca(
                                         X_train_scaled, y_values,
-                                        n_components=n_components_pca,
-                                        scaling_method=scaling_method
+                                        n_components_pca=n_components_pca
                                     )
+                                    # Extract PCA info from combined model
+                                    pca_info = final_model['pca_model']
+                                    X_train_pca = final_model['pca_model']['scores']
+
                                 elif selected_classifier == 'QDA':
+                                    print(f"🎯 Training QDA with PCA...")
                                     final_model = fit_qda_with_pca(
                                         X_train_scaled, y_values,
-                                        n_components=n_components_pca,
-                                        scaling_method=scaling_method
+                                        n_components_pca=n_components_pca
                                     )
+                                    # Extract PCA info from combined model
+                                    pca_info = final_model['pca_model']
+                                    X_train_pca = final_model['pca_model']['scores']
+
                                 elif selected_classifier == 'kNN':
+                                    print(f"🎯 Training kNN with PCA...")
                                     final_model = fit_knn_with_pca(
                                         X_train_scaled, y_values,
-                                        n_components=n_components_pca,
-                                        k=k_value,
-                                        metric=metric,
-                                        scaling_method=scaling_method
+                                        n_components_pca=n_components_pca,
+                                        metric=metric
                                     )
+                                    # Extract PCA info from combined model
+                                    pca_info = final_model['pca_model']
+                                    X_train_pca = final_model['pca_model']['scores']
+
+                                print(f"✅ Model trained successfully!")
+                                print(f"✅ PCA shape: {X_train_pca.shape}")
                             else:
+                                # ✅ INITIALIZE pca_info FOR NON-PCA CASE
+                                pca_info = None
+                                X_train_pca = None
+
                                 # Standard model training (no PCA)
                                 if selected_classifier == 'LDA':
                                     final_model = fit_lda(X_train_scaled, y_values)
@@ -1298,15 +1348,32 @@ def show():
                             'n_features': X_train_scaled.shape[1],
                             'classes': classes.tolist() if hasattr(classes, 'tolist') else list(classes),
                             'scaling_method': scaling_method,
-                            'X_train': X_train_scaled,  # ← ADD THIS for all classifiers
-                            'y_train': y_values,         # ← ADD THIS for all classifiers
+                            'X_train': X_train_scaled,  # ← For all classifiers
+                            'y_train': y_values,         # ← For all classifiers
                             'parameters': {
-                                'k': k_val,              # ← CHANGE from k_value
-                                'metric': met,           # ← CHANGE from metric
+                                'k': k_val,
+                                'metric': met,
                                 'n_components': n_components_pca if use_pca_preprocessing else None,
                                 'use_pca': use_pca_preprocessing
                             }
                         }
+
+                        # ✅ STEP 3: SAVE PCA PREPROCESSOR IF USED
+                        if use_pca_preprocessing and selected_classifier in ['LDA', 'QDA', 'kNN']:
+                            st.session_state.trained_model['pca_preprocessor'] = pca_info
+                            st.session_state.trained_model['X_train_pca'] = X_train_pca  # Transformed data
+                            st.session_state.trained_model['model_type'] = final_model.get('model_type', f'{selected_classifier.lower()}_with_pca')
+                            # Also save the inner classifier model for direct access
+                            if selected_classifier == 'LDA':
+                                st.session_state.trained_model['classifier_model'] = final_model['lda_model']
+                            elif selected_classifier == 'QDA':
+                                st.session_state.trained_model['classifier_model'] = final_model['qda_model']
+                            elif selected_classifier == 'kNN':
+                                st.session_state.trained_model['classifier_model'] = final_model['knn_model']
+                        else:
+                            st.session_state.trained_model['pca_preprocessor'] = None
+                            st.session_state.trained_model['model_type'] = 'standard'
+                            st.session_state.trained_model['classifier_model'] = final_model
 
                         # ✅ ALSO SAVE TO cv_results FOR TAB 2 ACCESS
                         standardized_results['trained_model'] = st.session_state.trained_model
@@ -1319,66 +1386,50 @@ def show():
                             standardized_results['k_value'] = k_val
                             standardized_results['metric'] = met
 
-                        st.success("✅ Final model trained and saved!")
+                        # ✅ FORCE REPLICATION: Ensure trained_model is accessible
+                        st.session_state['cv_results'] = standardized_results
 
-                        # ✅ MODEL SAVE VERIFICATION
-                        with st.expander("✅ Model Save Verification", expanded=False):
-                            st.write(f"**Model saved:** {st.session_state.trained_model is not None}")
-                            if st.session_state.trained_model:
-                                st.write(f"**Model type:** {st.session_state.trained_model.get('name')}")
-                                st.write(f"**Has X_train:** {'X_train' in st.session_state.trained_model}")
-                                st.write(f"**Has y_train:** {'y_train' in st.session_state.trained_model}")
-                                st.write(f"**Parameters:** {st.session_state.trained_model.get('parameters')}")
-                            st.write(f"\n**Also in cv_results:**")
-                            st.write(f"**trained_model in cv_results:** {'trained_model' in standardized_results}")
-                            if selected_classifier == 'kNN':
-                                st.write(f"**k_value:** {standardized_results.get('k_value')}")
-                                st.write(f"**metric:** {standardized_results.get('metric')}")
+                        # ✅ Verify model was saved
+                        if st.session_state.trained_model is None:
+                            st.error("❌ CRITICAL: Model not saved to session state!")
+                            st.stop()
+
+                        # ✅ MODEL SAVED - Silent success
+                        st.success(f"✅ Model ready for analysis in Tab 2")
 
                     except Exception as e:
-                        st.error(f"❌ CRITICAL ERROR: Could not train final model!")
+                        st.error(f"🔴 CRITICAL ERROR: Could not train final model!")
                         st.error(f"**Error Type:** {type(e).__name__}")
                         st.error(f"**Error Message:** {str(e)}")
 
                         # Show full traceback for debugging
                         import traceback
-                        with st.expander("📋 Full Error Traceback"):
-                            st.code(traceback.format_exc(), language='python')
+                        error_msg = traceback.format_exc()
+                        with st.expander("📋 Full Error Traceback", expanded=True):
+                            st.code(error_msg, language='python')
 
-                        st.info("Tab 2 analysis will use CV results only")
+                        # ✅ ALSO PRINT TO CONSOLE FOR VISIBILITY
+                        print("=" * 80)
+                        print("🔴 MODEL TRAINING ERROR DETAILS:")
+                        print(error_msg)
+                        print("=" * 80)
+                        print(f"Selected Classifier: {selected_classifier}")
+                        print(f"Use PCA: {use_pca_preprocessing}")
+                        print(f"N Components: {n_components_pca if use_pca_preprocessing else 'N/A'}")
+                        print(f"X_train shape: {X_train_scaled.shape if 'X_train_scaled' in locals() else 'N/A'}")
+                        print(f"y_values shape: {y_values.shape if 'y_values' in locals() else 'N/A'}")
+                        print("=" * 80)
+
+                        st.info("⚠️ Tab 2 analysis will use CV results only")
                         # Clear trained_model if training failed
                         st.session_state.trained_model = None
 
+                        # ✅ DON'T STOP - Let user see the error and continue
+                        st.warning("⚠️ Continuing without trained model. CV results are still available in Tab 2.")
+
                     st.success(f"✅ Cross-validation completed in {cv_time:.2f}s!")
 
-                    # ═══════════════════════════════════════════════════════════════
-                    # DEBUG: Verify model was saved
-                    # ═══════════════════════════════════════════════════════════════
-
-                    with st.expander("🔍 DEBUG: Model Save Status", expanded=False):
-                        st.write("**Session State Check:**")
-                        st.write(f"- trained_model exists: {'trained_model' in st.session_state}")
-                        st.write(f"- trained_model is None: {st.session_state.get('trained_model') is None}")
-
-                        if st.session_state.get('trained_model'):
-                            tm = st.session_state.get('trained_model')
-                            st.write(f"\n**Trained Model Contents:**")
-                            st.write(f"- Name: {tm.get('name')}")
-                            st.write(f"- Has X_train: {'X_train' in tm}")
-                            st.write(f"- Has y_train: {'y_train' in tm}")
-                            st.write(f"- Has model: {'model' in tm}")
-                            st.write(f"- Parameters: {tm.get('parameters')}")
-                        else:
-                            st.error("❌ trained_model is None in session_state!")
-                            st.write("\n**Checking cv_results:**")
-                            cv_res = st.session_state.get('cv_results', {})
-                            st.write(f"- cv_results exists: {'cv_results' in st.session_state}")
-                            st.write(f"- cv_results keys: {list(cv_res.keys())}")
-                            if selected_classifier == 'kNN':
-                                st.write(f"- Has X_train: {'X_train' in cv_res}")
-                                st.write(f"- Has k_value: {'k_value' in cv_res}")
-                                st.write(f"- Has metric: {'metric' in cv_res}")
-
+                    # Model saved - proceed to Tab 2 for analysis
                     st.rerun()
 
                 except Exception as e:
@@ -1418,72 +1469,62 @@ def show():
                     st.metric("Samples", len(cv_res.get('cv_predictions', [])))
 
             st.info("ℹ️ **Next Step:** Go to **Tab 2 (Classification Analysis)** to see detailed results, confusion matrix, and diagnostics.")
+
+
     # ========== TAB 2: CLASSIFICATION ANALYSIS ==========
     with tab2:
         st.markdown("## 🎲 Classification Analysis - Cross-Validation")
 
-        # Initialize tab1_data from session state
+        # Initialize tab1_data from session state with validation
         tab1_data = st.session_state.get('tab1_data', {})
+        if not tab1_data:
+            st.warning("⚠️ Tab 1 data not initialized properly")
+            st.info("💡 Please go to Tab 1 and complete the setup first (X, Y, Split)")
+            st.stop()
 
         # ═══════════════════════════════════════════════════════════════════════
-        # FORCE RELOAD SESSION STATE FOR kNN
+        # LOAD TRAINED MODEL AND CROSS-VALIDATION RESULTS
         # ═══════════════════════════════════════════════════════════════════════
 
-        # Ensure session state is properly loaded
         trained_model_info = st.session_state.get('trained_model')
         cv_results_info = st.session_state.get('cv_results')
+        cv_method = st.session_state.get('cv_method', None)
 
-        # ═══════════════════════════════════════════════════════════════════════
-        # FALLBACK: If trained_model is None, reconstruct from cv_results
-        # ═══════════════════════════════════════════════════════════════════════
+        # ✅ VALIDATION: Accept both standard model AND PCA-CV results
+        if trained_model_info is None and cv_results_info is None:
+            st.error("❌ **No trained model available**")
+            st.info("💡 **Please complete Tab 1 first:**")
+            st.info("   1. Select your dataset")
+            st.info("   2. Choose X (features) and Y (target)")
+            st.info("   3. Configure Train/Test split")
+            st.info("   4. Run Cross-Validation")
+            st.stop()
 
-        if trained_model_info is None and cv_results_info is not None:
-            st.warning("⚠️ Model not saved in session state - using cv_results as fallback")
+        # ✅ If we have CV results but no trained_model (PCA case), that's OK
+        if cv_results_info is None:
+            st.error("❌ **Cross-validation results not found**")
+            st.stop()
 
-            # Try to reconstruct model dict from cv_results
-            cv_classifier = st.session_state.get('cv_classifier', 'Unknown')
+        # ✅ LOAD TRAINED MODEL (final model from Tab 1)
+        has_trained_model = trained_model_info is not None and trained_model_info.get('model') is not None
 
-            if cv_classifier == 'kNN' and 'X_train' in cv_results_info:
-                X_train_cv = cv_results_info.get('X_train')
-                y_train_cv = cv_results_info.get('y_train')
-                metric_cv = cv_results_info.get('metric', 'euclidean')
-
-                # Calculate covariance if using Mahalanobis
-                cov_cv = None
-                if metric_cv == 'mahalanobis' and X_train_cv is not None:
-                    cov_cv = np.cov(X_train_cv, rowvar=False) + np.eye(X_train_cv.shape[1]) * 1e-10
-
-                # ✅ CORRECT: For kNN, the model IS the training data dict
-                trained_model_info = {
-                    'name': 'kNN',
-                    'n_features': X_train_cv.shape[1] if X_train_cv is not None else 0,
-                    'classes': np.unique(y_train_cv).tolist() if y_train_cv is not None else [],
-                    'scaling_method': st.session_state.get('scaling_method', 'autoscale'),
-                    'parameters': {
-                        'k': cv_results_info.get('k_value', 5),
-                        'metric': metric_cv,
-                    },
-                    'model': {  # ← THIS is the actual kNN "model"
-                        'X_train': X_train_cv,
-                        'y_train': y_train_cv,
-                        'metric': metric_cv,
-                        'cov': cov_cv,  # ← REQUIRED by predict_knn
-                    }
-                }
-                st.info("✓ Reconstructed kNN model from cv_results")
-            elif cv_classifier in ['LDA', 'QDA'] and 'trained_model' in cv_results_info:
-                # For LDA/QDA, cv_results might have the model
-                trained_model_info = cv_results_info.get('trained_model')
-
-        if trained_model_info is None:
-            st.warning("⚠️ No trained model available")
-            st.info("Make sure you ran Cross-Validation in Tab 1 first")
+        if has_trained_model:
+            st.success(f"✅ Final Model Loaded: {trained_model_info['name']}")
+            final_model = trained_model_info['model']
+            trained = trained_model_info
+            # Check if PCA was used in training
+            model_params = trained_model_info.get('parameters', {})
+            use_pca_in_model = model_params.get('use_pca', False)
+            n_components_pca_model = model_params.get('n_components')
+            pca_preprocessor_model = trained_model_info.get('pca_preprocessor')
         else:
-            model_name = trained_model_info.get('name', 'Unknown')
-            st.success(f"✓ Model loaded: {model_name}")
-
-        # ✅ CRITICAL: Update 'trained' variable for use throughout Tab 2
-        trained = trained_model_info
+            st.warning("⚠️ No trained model available - using CV results only for metrics")
+            final_model = None
+            trained = None
+            use_pca_in_model = cv_results_info.get('use_pca_preprocessing', False)
+            n_components_pca_model = cv_results_info.get('n_components_pca')
+            # ✅ LOAD PCA FROM CV_RESULTS, NOT FROM SESSION_STATE!
+            pca_preprocessor_model = cv_results_info.get('pca_preprocessor')
 
         # Check if data is available
         X_full = st.session_state.get('X_full')
@@ -1501,6 +1542,15 @@ def show():
         cv_method = st.session_state.get('cv_method', None)
         cv_results_from_tab1 = st.session_state.get('cv_results', None)
         use_pca_preprocessing = st.session_state.get('use_pca_preprocessing', False)
+
+        # ✅ FALLBACK: Load PCA data from cv_results if not in session_state
+        if cv_method == 'with_pca' and cv_results_from_tab1 is not None:
+            if 'pca_preprocessor' not in st.session_state and cv_results_from_tab1.get('pca_preprocessor'):
+                st.session_state['pca_preprocessor'] = cv_results_from_tab1.get('pca_preprocessor')
+                st.session_state['pca_loadings'] = cv_results_from_tab1.get('pca_loadings')
+                st.session_state['pca_variance_explained'] = cv_results_from_tab1.get('pca_variance_explained')
+                st.session_state['n_components_pca'] = cv_results_from_tab1.get('n_components_pca')
+                st.session_state['use_pca_cv'] = True
 
         if cv_method == 'with_pca' and cv_results_from_tab1 is not None:
             # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1587,24 +1637,191 @@ def show():
                 })
                 st.dataframe(metrics_df, use_container_width=True, hide_index=True)
 
+            # ✅ LOAD ALL PCA DATA FROM CV_RESULTS, NOT FROM SESSION_STATE!
+            pca_preprocessor = cv_results_from_tab1.get('pca_preprocessor')
+            pca_loadings = cv_results_from_tab1.get('pca_loadings')
+            pca_variance_explained = cv_results_from_tab1.get('pca_variance_explained')
+            X_train_scaled_cv = st.session_state.get('X_train_scaled_cv')
+            y_train_cv = st.session_state.get('y_train_cv')
+            n_components_pca = cv_results_from_tab1.get('n_components_pca', 'N/A')
+
             # PCA-specific information
-            st.markdown("#### PCA Preprocessing Details")
-            cv_details = cv_res.get('cv_details', [])
-            if cv_details:
-                pca_info_data = []
-                for i, fold_detail in enumerate(cv_details):
-                    pca_info = fold_detail.get('pca_info', {})
-                    pca_info_data.append({
-                        'Fold': i + 1,
-                        'Train Samples': fold_detail.get('train_size', 'N/A'),
-                        'Test Samples': fold_detail.get('test_size', 'N/A'),
-                        'Variance Explained (%)': f"{pca_info.get('variance_explained_total', 0) * 100:.1f}" if pca_info.get('variance_explained_total') else 'N/A',
-                        'Fold Accuracy (%)': f"{fold_detail.get('fold_accuracy', 0):.1f}" if fold_detail.get('fold_accuracy') is not None else 'N/A'
-                    })
-                pca_info_df = pd.DataFrame(pca_info_data)
-                st.dataframe(pca_info_df, use_container_width=True, hide_index=True)
-            else:
-                st.info(f"Using {n_components_pca} PCA components for dimensionality reduction before classification.")
+            st.markdown("#### PCA Preprocessing Summary")
+
+            # ✅ DISPLAY SUMMARY WITH ACTUAL DATA (not N/A)
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("PCA Components", n_components_pca)
+            with col2:
+                if pca_variance_explained is not None:
+                    st.metric("Total Variance %", f"{pca_variance_explained.sum()*100:.1f}%")
+                else:
+                    st.metric("Total Variance %", "Computing...")
+            with col3:
+                cv_n_folds = st.session_state.get('cv_n_folds', 5)
+                st.metric("CV Folds", cv_n_folds)
+
+            st.info("✅ PCA preprocessing applied correctly. See confusion matrix above for per-fold accuracy.")
+
+            # ✅ DISPLAY PCA PLOTS IF DATA IS AVAILABLE
+            if pca_preprocessor is not None and pca_loadings is not None:
+                st.markdown("#### PCA Visualization")
+
+                # Variance Explained Plot
+                if pca_variance_explained is not None:
+                    st.markdown("**Variance Explained by Components**")
+                    fig_var = go.Figure()
+                    fig_var.add_trace(go.Bar(
+                        x=[f"PC{i+1}" for i in range(len(pca_variance_explained))],
+                        y=pca_variance_explained * 100,
+                        name='Variance Explained (%)'
+                    ))
+                    fig_var.update_layout(
+                        title="PCA Variance Explained",
+                        xaxis_title="Principal Component",
+                        yaxis_title="Variance Explained (%)",
+                        height=400
+                    )
+                    st.plotly_chart(fig_var, use_container_width=True)
+
+                # Loadings Plot
+                st.markdown("**PCA Loadings (PC1 vs PC2)**")
+                if X_train_scaled_cv is not None:
+                    feature_names = tab1_data.get('X_columns', [f"Var {i+1}" for i in range(pca_loadings.shape[0])])
+                    fig_loadings = go.Figure()
+                    fig_loadings.add_trace(go.Scatter(
+                        x=pca_loadings[:, 0],
+                        y=pca_loadings[:, 1],
+                        mode='markers+text',
+                        text=feature_names,
+                        textposition='top center',
+                        marker=dict(size=10, color='blue')
+                    ))
+                    fig_loadings.update_layout(
+                        title="PCA Loadings Plot",
+                        xaxis_title=f"PC1 ({pca_variance_explained[0]*100:.1f}%)" if pca_variance_explained is not None else "PC1",
+                        yaxis_title=f"PC2 ({pca_variance_explained[1]*100:.1f}%)" if pca_variance_explained is not None and len(pca_variance_explained) > 1 else "PC2",
+                        height=500
+                    )
+                    st.plotly_chart(fig_loadings, use_container_width=True)
+
+            # ============================================================================
+            # 💾 EXPORT TRAINING DATA (after CV is complete)
+            # ============================================================================
+            st.divider()
+            st.markdown("### 💾 Export Training Data")
+            st.markdown("Download the preprocessed training/test data used in cross-validation")
+
+            export_col1, export_col2, export_col3 = st.columns(3)
+
+            with export_col1:
+                if st.button("📥 Export Training Set", key="export_train_tab2", use_container_width=True):
+                    X_train = st.session_state.get('X_train_scaled_cv')
+                    y_train = st.session_state.get('y_train_cv')
+
+                    # ✅ LOAD PCA FROM trained_model (where it's actually stored!)
+                    trained_model = st.session_state.get('trained_model')
+                    pca_preprocessor = trained_model.get('pca_preprocessor') if trained_model else None
+
+                    X_to_export = X_train
+                    X_columns = tab1_data.get('X_columns', [f"Feature_{i+1}" for i in range(X_train.shape[1])])
+                    feature_info = "original scaled features"
+
+                    # ✅ IF PCA IS AVAILABLE, USE IT!
+                    if pca_preprocessor is not None and X_train is not None:
+                        try:
+                            from classification_utils import project_onto_pca
+                            X_train_pca = project_onto_pca(X_train, pca_preprocessor)
+                            X_to_export = X_train_pca
+                            n_pc = X_train_pca.shape[1]
+                            X_columns = [f"PC{i+1}" for i in range(n_pc)]
+                            feature_info = f"PCA-transformed: {n_pc} components"
+                        except Exception as e:
+                            st.warning(f"⚠️ PCA transformation failed: {str(e)}")
+
+                    if X_to_export is not None and y_train is not None:
+                        df = pd.DataFrame(X_to_export, columns=X_columns)
+                        df.insert(0, 'Class', y_train)
+                        csv = df.to_csv(index=False)
+                        st.download_button(
+                            label="📂 Download X_train.csv",
+                            data=csv,
+                            file_name="classification_X_train.csv",
+                            mime="text/csv",
+                            key="dl_train"
+                        )
+                        st.success(f"✅ Training set: {df.shape[0]} samples × {X_to_export.shape[1]} features ({feature_info})")
+                    else:
+                        st.error("⚠️ Training data not available")
+
+            with export_col2:
+                if st.button("📥 Export Test Set", key="export_test_tab2", use_container_width=True):
+                    X_test = st.session_state.get('X_test_scaled_cv')
+                    y_test = st.session_state.get('y_test_cv')
+
+                    # ✅ LOAD PCA FROM trained_model
+                    trained_model = st.session_state.get('trained_model')
+                    pca_preprocessor = trained_model.get('pca_preprocessor') if trained_model else None
+
+                    X_to_export = X_test
+                    X_columns = tab1_data.get('X_columns', [f"Feature_{i+1}" for i in range(X_test.shape[1])])
+                    feature_info = "original scaled features"
+
+                    # ✅ IF PCA IS AVAILABLE, USE IT!
+                    if pca_preprocessor is not None and X_test is not None:
+                        try:
+                            from classification_utils import project_onto_pca
+                            X_test_pca = project_onto_pca(X_test, pca_preprocessor)
+                            X_to_export = X_test_pca
+                            n_pc = X_test_pca.shape[1]
+                            X_columns = [f"PC{i+1}" for i in range(n_pc)]
+                            feature_info = f"PCA-transformed: {n_pc} components"
+                        except Exception as e:
+                            st.warning(f"⚠️ PCA transformation failed: {str(e)}")
+
+                    if X_to_export is not None and y_test is not None:
+                        df = pd.DataFrame(X_to_export, columns=X_columns)
+                        df.insert(0, 'Class', y_test)
+                        csv = df.to_csv(index=False)
+                        st.download_button(
+                            label="📂 Download X_test.csv",
+                            data=csv,
+                            file_name="classification_X_test.csv",
+                            mime="text/csv",
+                            key="dl_test"
+                        )
+                        st.success(f"✅ Test set: {df.shape[0]} samples × {X_to_export.shape[1]} features ({feature_info})")
+                    else:
+                        st.info("ℹ️ Test data not available (no train/test split)")
+
+            with export_col3:
+                if st.button("📥 Export Labels", key="export_labels_tab2", use_container_width=True):
+                    y_train = st.session_state.get('y_train_cv')
+                    y_test = st.session_state.get('y_test_cv')
+                    classes = st.session_state.get('classes', [])
+
+                    if y_train is not None:
+                        # Create labels mapping DataFrame
+                        labels_dict = {
+                            'Class_Index': list(range(len(classes))),
+                            'Class_Name': classes
+                        }
+                        df = pd.DataFrame(labels_dict)
+
+                        # Convert to CSV
+                        csv = df.to_csv(index=False)
+                        st.download_button(
+                            label="📂 Download labels.csv",
+                            data=csv,
+                            file_name="classification_labels.csv",
+                            mime="text/csv",
+                            key="dl_labels"
+                        )
+                        st.success(f"✅ Labels: {len(classes)} classes")
+                    else:
+                        st.error("⚠️ Labels not available")
+
+            st.info("💡 **Tip:** Use these files for external validation, documentation, or retraining models in other software (Python, R, MATLAB).")
 
             # Skip the rest of Tab 2 (standard CV execution) when in PCA mode
             # Just show a button to go back to Tab 1
@@ -2909,10 +3126,20 @@ def show():
         elif trained['name'] in ['LDA', 'QDA']:
             st.info("📊 Mahalanobis distance distributions to each class centroid")
 
+            # ✅ Use classifier_model if available (for PCA models), otherwise use model
+            model_to_use = trained.get('classifier_model', trained['model'])
+
+            # ✅ If PCA was used, transform data to PCA space first
+            if trained.get('pca_preprocessor') is not None:
+                from classification_utils import project_onto_pca
+                X_for_prediction = project_onto_pca(X_for_cv_scaled, trained['pca_preprocessor'])
+            else:
+                X_for_prediction = X_for_cv_scaled
+
             if trained['name'] == 'LDA':
-                y_pred, distances_array = predict_lda(X_for_cv_scaled, trained['model'])
+                y_pred, distances_array = predict_lda(X_for_prediction, model_to_use)
             elif trained['name'] == 'QDA':
-                y_pred, distances_array = predict_qda(X_for_cv_scaled, trained['model'])
+                y_pred, distances_array = predict_qda(X_for_prediction, model_to_use)
 
             for i, cls in enumerate(classes):
                 distances_dict = {cls: distances_array[:, i]}
@@ -3015,10 +3242,20 @@ def show():
 
             elif trained['name'] in ['LDA', 'QDA']:
                 # Get distances array for LDA/QDA
+                # ✅ Use classifier_model if available (for PCA models), otherwise use model
+                model_to_use = trained.get('classifier_model', trained['model'])
+
+                # ✅ If PCA was used, transform data to PCA space first
+                if trained.get('pca_preprocessor') is not None:
+                    from classification_utils import project_onto_pca
+                    X_for_prediction = project_onto_pca(X_for_cv_scaled, trained['pca_preprocessor'])
+                else:
+                    X_for_prediction = X_for_cv_scaled
+
                 if trained['name'] == 'LDA':
-                    y_pred, distances_array = predict_lda(X_for_cv_scaled, trained['model'])
+                    y_pred, distances_array = predict_lda(X_for_prediction, model_to_use)
                 else:  # QDA
-                    y_pred, distances_array = predict_qda(X_for_cv_scaled, trained['model'])
+                    y_pred, distances_array = predict_qda(X_for_prediction, model_to_use)
 
                 # Find the index of the selected class
                 class_idx = list(classes).index(selected_class_tab2)
@@ -3135,14 +3372,24 @@ def show():
             try:
                 distances_to_classes = []
 
+                # ✅ Use classifier_model if available (for PCA models), otherwise use model
+                model_to_use = trained.get('classifier_model', trained['model'])
+
+                # ✅ If PCA was used, transform data to PCA space first
+                if trained.get('pca_preprocessor') is not None:
+                    from classification_utils import project_onto_pca
+                    X_for_prediction = project_onto_pca(X_for_cv_scaled, trained['pca_preprocessor'])
+                else:
+                    X_for_prediction = X_for_cv_scaled
+
                 if trained['name'] == 'LDA':
                     # Get distances for all samples
-                    _, distances_array = predict_lda(X_for_cv_scaled, trained['model'])
+                    _, distances_array = predict_lda(X_for_prediction, model_to_use)
                     distances_to_classes = distances_array[selected_sample_idx_tab2, :].tolist()
 
                 elif trained['name'] == 'QDA':
                     # Get distances for all samples
-                    _, distances_array = predict_qda(X_for_cv_scaled, trained['model'])
+                    _, distances_array = predict_qda(X_for_prediction, model_to_use)
                     distances_to_classes = distances_array[selected_sample_idx_tab2, :].tolist()
 
                 elif trained['name'] == 'kNN':
@@ -3512,7 +3759,17 @@ def show():
             if split_done:
                 # OPTION 1: Use split from Tab 1
                 st.success("✅ **Train/test split found from Tab 1!**")
-                st.info(f"🤖 **Model**: {trained['name']} | Features: {trained['n_features']}")
+
+                # ✅ SHOW CORRECT FEATURE COUNT
+                use_pca = trained.get('parameters', {}).get('use_pca', False)
+                n_components_pca = trained.get('parameters', {}).get('n_components')
+
+                if use_pca and n_components_pca:
+                    display_features = f"**{n_components_pca} PCA components**"
+                else:
+                    display_features = f"{trained['n_features']} features"
+
+                st.info(f"🤖 **Model**: {trained['name']} | Features: {display_features}")
 
                 use_tab1_split = st.checkbox(
                     "Use 30% holdout test set from Tab 1?",
@@ -3533,6 +3790,23 @@ def show():
                         st.error("❌ Holdout test set not found in session state")
                         st.info("💡 Return to Tab 1 and recreate the split")
                         return
+
+                    # ✅ IF MODEL USES PCA, APPLY IT TO TEST DATA
+                    use_pca = trained.get('parameters', {}).get('use_pca', False)
+
+                    if use_pca:
+                        pca_preprocessor = trained.get('pca_preprocessor')
+                        if pca_preprocessor is not None:
+                            try:
+                                from classification_utils import project_onto_pca
+                                X_test_scaled = project_onto_pca(X_test_scaled, pca_preprocessor)
+                                st.success("✅ PCA transformation applied to test data")
+                            except Exception as e:
+                                st.error(f"❌ PCA transformation failed: {str(e)}")
+                                return
+                        else:
+                            st.error("❌ PCA preprocessor not found in trained model")
+                            return
 
                     st.divider()
 
@@ -3827,10 +4101,15 @@ def show():
                 import time
                 test_pred_start = time.time()
 
+                # ✅ Get the correct model
+                model_to_use = trained.get('classifier_model', trained['model'])
+                # ✅ X_test_scaled è già nel formato corretto (PCA se usato, altrimenti originale)
+                X_test_for_prediction = X_test_scaled
+
                 if trained['name'] == 'LDA':
-                    y_pred_test, _ = predict_lda(X_test_scaled, trained['model'])
+                    y_pred_test, _ = predict_lda(X_test_for_prediction, model_to_use)
                 elif trained['name'] == 'QDA':
-                    y_pred_test, _ = predict_qda(X_test_scaled, trained['model'])
+                    y_pred_test, _ = predict_qda(X_test_for_prediction, model_to_use)
                 elif trained['name'] == 'kNN':
                     y_pred_test, _ = predict_knn(X_test_scaled, trained['model'], k=tab1_data.get('k_value', 3))
                 elif trained['name'] == 'SIMCA':
@@ -4469,11 +4748,16 @@ def show():
                             )
 
                             try:
+                                # ✅ Get the correct model
+                                model_to_use = trained.get('classifier_model', trained['model'])
+                                # ✅ X_test_scaled è già nel formato corretto (PCA se usato, altrimenti originale)
+                                X_test_for_prediction = X_test_scaled
+
                                 # Get Mahalanobis distances for test set
                                 if trained['name'] == 'LDA':
-                                    _, mahal_distances_test = predict_lda(X_test_scaled, trained['model'])
+                                    _, mahal_distances_test = predict_lda(X_test_for_prediction, model_to_use)
                                 else:  # QDA
-                                    _, mahal_distances_test = predict_qda(X_test_scaled, trained['model'])
+                                    _, mahal_distances_test = predict_qda(X_test_for_prediction, model_to_use)
 
                                 # ═══════════════════════════════════════════════════════════════════
                                 # CREATE SAMPLE NAMES DICT (before tabs, for all 3 plots)
@@ -4728,11 +5012,16 @@ def show():
                                 st.plotly_chart(fig_dist_test, use_container_width=True)
 
                             elif trained['name'] in ['LDA', 'QDA']:
+                                # ✅ Get the correct model
+                                model_to_use = trained.get('classifier_model', trained['model'])
+                                # ✅ X_test_scaled è già nel formato corretto (PCA se usato, altrimenti originale)
+                                X_test_for_prediction = X_test_scaled
+
                                 # Get distances array for LDA/QDA
                                 if trained['name'] == 'LDA':
-                                    _, distances_array = predict_lda(X_test_scaled, trained['model'])
+                                    _, distances_array = predict_lda(X_test_for_prediction, model_to_use)
                                 else:  # QDA
-                                    _, distances_array = predict_qda(X_test_scaled, trained['model'])
+                                    _, distances_array = predict_qda(X_test_for_prediction, model_to_use)
 
                                 # Find the index of the selected class
                                 class_idx = list(classes).index(selected_class_tab4)
@@ -4920,14 +5209,19 @@ def show():
                         try:
                             distances_to_classes_test = []
 
+                            # ✅ Get the correct model
+                            model_to_use = trained.get('classifier_model', trained['model'])
+                            # ✅ X_test_scaled è già nel formato corretto (PCA se usato, altrimenti originale)
+                            X_test_for_prediction = X_test_scaled
+
                             if trained['name'] == 'LDA':
                                 # Get distances for all test samples
-                                _, distances_array = predict_lda(X_test_scaled, trained['model'])
+                                _, distances_array = predict_lda(X_test_for_prediction, model_to_use)
                                 distances_to_classes_test = distances_array[selected_sample_idx_tab4, :].tolist()
 
                             elif trained['name'] == 'QDA':
                                 # Get distances for all test samples
-                                _, distances_array = predict_qda(X_test_scaled, trained['model'])
+                                _, distances_array = predict_qda(X_test_for_prediction, model_to_use)
                                 distances_to_classes_test = distances_array[selected_sample_idx_tab4, :].tolist()
 
                             elif trained['name'] == 'kNN':
