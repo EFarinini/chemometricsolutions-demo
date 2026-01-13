@@ -677,6 +677,9 @@ def cross_validate_lda_with_pca(
         eval_idx = fold_detail['eval_indices']
         all_mahal_distances[eval_idx] = fold_detail['mahal_distances_matrix']
 
+    # ✅ TRAIN FINAL PCA ON ALL DATA FOR EXPORT/DIAGNOSTICS
+    final_pca_preprocessor = calculations.fit_pca_preprocessor(X, n_components=n_components_pca)
+
     return {
         'predictions': y_pred_cv,
         'y_true': y,
@@ -687,7 +690,12 @@ def cross_validate_lda_with_pca(
         'n_misclassified': len(misclassified),
         'mahalanobis_distances': all_mahal_distances,
         'folds_info': folds_dict,
-        'scaling_method': scaling_method
+        'scaling_method': scaling_method,
+        # ✅ ADD THESE THREE LINES:
+        'pca_preprocessor': final_pca_preprocessor,
+        'pca_loadings': final_pca_preprocessor.get('loadings'),
+        'pca_variance_explained': final_pca_preprocessor.get('explained_variance_ratio'),
+        'use_pca_preprocessing': True
     }
 
 
@@ -807,6 +815,9 @@ def cross_validate_qda_with_pca(
         eval_idx = fold_detail['eval_indices']
         all_mahal_distances[eval_idx] = fold_detail['mahal_distances_matrix']
 
+    # ✅ TRAIN FINAL PCA ON ALL DATA FOR EXPORT/DIAGNOSTICS
+    final_pca_preprocessor = calculations.fit_pca_preprocessor(X, n_components=n_components_pca)
+
     return {
         'predictions': y_pred_cv,
         'y_true': y,
@@ -817,7 +828,12 @@ def cross_validate_qda_with_pca(
         'n_misclassified': len(misclassified),
         'mahalanobis_distances': all_mahal_distances,
         'folds_info': folds_dict,
-        'scaling_method': scaling_method
+        'scaling_method': scaling_method,
+        # ✅ ADD THESE THREE LINES:
+        'pca_preprocessor': final_pca_preprocessor,
+        'pca_loadings': final_pca_preprocessor.get('loadings'),
+        'pca_variance_explained': final_pca_preprocessor.get('explained_variance_ratio'),
+        'use_pca_preprocessing': True
     }
 
 
@@ -931,6 +947,9 @@ def cross_validate_knn_with_pca(
     # Find best k
     best_k = max(k_results.keys(), key=lambda k: k_results[k]['metrics']['accuracy'])
 
+    # ✅ TRAIN FINAL PCA ON ALL DATA FOR EXPORT/DIAGNOSTICS
+    final_pca_preprocessor = calculations.fit_pca_preprocessor(X, n_components=n_components_pca)
+
     return {
         'predictions': k_results[best_k]['predictions'],
         'y_true': y,
@@ -943,7 +962,12 @@ def cross_validate_knn_with_pca(
         'k_results': k_results,
         'metric': metric,
         'folds_info': folds_dict,
-        'scaling_method': scaling_method
+        'scaling_method': scaling_method,
+        # ✅ ADD THESE THREE LINES:
+        'pca_preprocessor': final_pca_preprocessor,
+        'pca_loadings': final_pca_preprocessor.get('loadings'),
+        'pca_variance_explained': final_pca_preprocessor.get('explained_variance_ratio'),
+        'use_pca_preprocessing': True
     }
 
 

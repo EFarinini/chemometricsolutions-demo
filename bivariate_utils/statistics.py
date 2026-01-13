@@ -7,8 +7,10 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 from typing import Tuple, Dict, Optional
+import streamlit as st
 
 
+@st.cache_data
 def compute_correlation_matrix(
     data: pd.DataFrame,
     method: str = 'pearson'
@@ -70,6 +72,7 @@ def compute_correlation_matrix(
     return corr_matrix, pval_matrix
 
 
+@st.cache_data
 def compute_covariance_matrix(data: pd.DataFrame) -> pd.DataFrame:
     """
     Compute covariance matrix
@@ -134,6 +137,7 @@ def compute_kendall_correlation(
     return compute_correlation_matrix(data, method='kendall')
 
 
+@st.cache_data
 def get_correlation_summary(
     corr_matrix: pd.DataFrame,
     pval_matrix: pd.DataFrame,

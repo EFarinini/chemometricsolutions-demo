@@ -206,8 +206,8 @@ def create_scatter_plot(
         else:
             color_by = None  # Disable if not found
 
-    # Add label_by
-    if label_by:
+    # Add label_by (skip if "Index" - it will be handled later)
+    if label_by and label_by != "Index":
         if label_by in data.columns:
             plot_data[label_by] = data.loc[plot_data.index, label_by]
         elif custom_variables and label_by in custom_variables:
@@ -242,33 +242,44 @@ def create_scatter_plot(
         )
         return fig
 
-    # === GET SAMPLE INDICES (like pca_plots.py) ===
-    sample_indices = plot_data.index.tolist()  # Get all indices as list
+    # === PREPARE TEXT LABELS FOR DISPLAY (PCA-style) ===
+    # Determine if labels should be shown and what text to use
+    show_text_labels = False
+    text_labels_param = None
 
-    # === DETERMINE HOVER LABELS ===
-    show_text_labels = False  # Default: hide text labels
-
-    if label_by == "None" or not label_by:
-        # Case 1: No labels to display on plot
+    if label_by is None or label_by == "None":
+        # No labels
         show_text_labels = False
-        hover_labels = [f"Sample {idx}" for idx in sample_indices]
+        text_labels_param = None
 
     elif label_by == "Index":
-        # Case 2: Show index on plot (no "Sample" prefix)
+        # Show row indices
         show_text_labels = True
-        hover_labels = [str(idx) for idx in sample_indices]  # OLO1, OLO2, etc.
+        text_labels_param = plot_data.index.astype(str)
 
-    elif label_by and label_by in plot_data.columns:
-        # Case 3: Show metavariable value on plot
+    elif label_by in plot_data.columns:
+        # Show column values
         show_text_labels = True
-        # Use column data with SAME indices as sample_indices
-        label_values = plot_data[label_by].fillna('N/A').astype(str).values
-        hover_labels = [str(val) for val in label_values]  # Category, Type, etc.
-
+        text_labels_param = plot_data[label_by].astype(str)
     else:
-        # Fallback: show indices
-        show_text_labels = True
-        hover_labels = [str(idx) for idx in sample_indices]
+        # Fallback: no labels
+        show_text_labels = False
+        text_labels_param = None
+
+    # Hover labels always show full information (for tooltip)
+    sample_indices = plot_data.index.tolist()
+    hover_labels = []
+    for i, idx in enumerate(sample_indices):
+        if text_labels_param is not None:
+            # Handle both Series and Index objects
+            if isinstance(text_labels_param, pd.Series):
+                label = text_labels_param.iloc[i]
+            else:
+                # It's an Index object, use direct indexing
+                label = text_labels_param[i]
+        else:
+            label = str(idx)
+        hover_labels.append(str(label) if label is not None else str(idx))
 
     # === BUILD HOVER TEXT ===
     hover_texts = []
@@ -298,26 +309,37 @@ def create_scatter_plot(
                 cat_x = [plot_data[x_var].iloc[i] for i in cat_indices]
                 cat_y = [plot_data[y_var].iloc[i] for i in cat_indices]
                 cat_hover_texts = [hover_texts[i] for i in cat_indices]
-                cat_text_labels = [hover_labels[i] for i in cat_indices] if show_text_labels else None
 
-                # Add trace for this category WITH CONDITIONAL TEXT LABELS
+                # Build text labels for this category (PCA-style)
+                if show_text_labels and text_labels_param is not None:
+                    # Extract labels for this category using same indices as data
+                    cat_text_labels = [text_labels_param.iloc[i] if isinstance(text_labels_param, pd.Series)
+                                       else text_labels_param[i]
+                                       for i in cat_indices]
+                    # Convert to simple int if numeric (like PCA)
+                    cat_text_labels = [str(int(float(t))) if str(t).replace('.', '').replace('-', '').isdigit() else str(t)
+                                       for t in cat_text_labels]
+                else:
+                    cat_text_labels = None
+
+                # Add trace for this category
                 fig.add_trace(go.Scatter(
                     x=cat_x,
                     y=cat_y,
-                    mode='markers+text' if show_text_labels else 'markers',  # Conditional mode
+                    mode='markers+text' if show_text_labels else 'markers',
                     marker=dict(
                         size=point_size / 10,
                         color=color_map.get(category, 'gray'),
                         opacity=opacity,
                         line=dict(color='white', width=0.5)
                     ),
-                    text=cat_text_labels,  # Use text_labels (conditional)
-                    textposition='top center' if show_text_labels else None,
+                    text=cat_text_labels,  # Will be None if show_text_labels=False
+                    textposition='top center',  # Above point (not overlapping)
                     textfont=dict(
-                        size=8,
-                        color='rgba(100, 100, 100, 0.8)',
+                        size=9,
+                        color='rgba(0, 0, 0, 0.6)',  # Semi-transparent black (like PCA)
                         family='Arial'
-                    ) if show_text_labels else None,
+                    ),
                     hovertext=cat_hover_texts,
                     hoverinfo='text',
                     name=str(category),
@@ -335,16 +357,29 @@ def create_scatter_plot(
                 opacity=opacity
             )
 
-            # Update with conditional text labels
+            # Prepare text labels for continuous coloring (PCA-style conversion)
+            if show_text_labels and text_labels_param is not None:
+                if isinstance(text_labels_param, pd.Series):
+                    text_vals = text_labels_param.values
+                else:
+                    text_vals = text_labels_param
+
+                # Convert to simple int if numeric (like PCA lines 292-293)
+                text_vals = [str(int(float(t))) if str(t).replace('.', '').replace('-', '').isdigit() else str(t)
+                             for t in text_vals]
+            else:
+                text_vals = None
+
+            # Update all traces
             fig.update_traces(
-                mode='markers+text' if show_text_labels else 'markers',  # Conditional mode
-                text=hover_labels if show_text_labels else None,  # Use hover_labels (conditional)
-                textposition='top center' if show_text_labels else None,
+                mode='markers+text' if show_text_labels else 'markers',
+                text=text_vals,  # Use converted text_vals
+                textposition='top center',  # Above point (not overlapping)
                 textfont=dict(
-                    size=8,
-                    color='rgba(100, 100, 100, 0.8)',
+                    size=9,
+                    color='rgba(0, 0, 0, 0.6)',  # Semi-transparent black
                     family='Arial'
-                ) if show_text_labels else None,
+                ),
                 hovertext=hover_texts,
                 hoverinfo='text',
                 marker=dict(size=point_size / 10)
@@ -353,22 +388,36 @@ def create_scatter_plot(
         # === NO COLORING ===
         color_scheme = get_unified_color_schemes()
         fig = go.Figure()
+
+        # Prepare text labels for no coloring (PCA-style conversion)
+        if show_text_labels and text_labels_param is not None:
+            if isinstance(text_labels_param, pd.Series):
+                text_vals = text_labels_param.values
+            else:
+                text_vals = text_labels_param
+
+            # Convert to simple int if numeric (like PCA)
+            text_vals = [str(int(float(t))) if str(t).replace('.', '').replace('-', '').isdigit() else str(t)
+                         for t in text_vals]
+        else:
+            text_vals = None
+
         fig.add_trace(go.Scatter(
             x=plot_data[x_var],
             y=plot_data[y_var],
-            mode='markers+text' if show_text_labels else 'markers',  # Conditional mode
+            mode='markers+text' if show_text_labels else 'markers',
             marker=dict(
                 size=point_size / 10,  # Scale down for plotly
                 color=color_scheme['point_color'],
                 opacity=opacity
             ),
-            text=hover_labels if show_text_labels else None,  # Use hover_labels (conditional)
-            textposition='top center' if show_text_labels else None,
+            text=text_vals,  # Use converted text_vals
+            textposition='top center',  # Above point (not overlapping)
             textfont=dict(
-                size=8,
-                color='rgba(100, 100, 100, 0.8)',
+                size=9,
+                color='rgba(0, 0, 0, 0.6)',  # Semi-transparent black
                 family='Arial'
-            ) if show_text_labels else None,
+            ),
             hovertext=hover_texts,  # Use hovertext
             hoverinfo='text',  # Use 'text'
             name='Samples'
