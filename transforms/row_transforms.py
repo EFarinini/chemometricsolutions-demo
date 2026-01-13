@@ -140,7 +140,7 @@ def row_sum100(data, col_range):
 
 def binning_transform(data, col_range, bin_width):
     """
-    Binning (averaging adjacent variables)
+    Binning (averaging adjacent variables with bin-center headers)
 
     Parameters:
     -----------
@@ -153,7 +153,7 @@ def binning_transform(data, col_range, bin_width):
 
     Returns:
     --------
-    pd.DataFrame : Binned data (reduced dimensions)
+    pd.DataFrame : Binned data (reduced dimensions) with bin centroid headers
 
     Raises:
     -------
@@ -167,11 +167,25 @@ def binning_transform(data, col_range, bin_width):
 
     n_bins = n_cols // bin_width
     binned_data = []
+    bin_headers = []
 
     for i in range(n_bins):
         start_idx = i * bin_width
         end_idx = start_idx + bin_width
+        
+        # Average the spectral data
         bin_mean = M.iloc[:, start_idx:end_idx].mean(axis=1)
         binned_data.append(bin_mean)
+        
+        # Calculate bin centroid from column headers (wavenumbers)
+        bin_cols = M.columns[start_idx:end_idx]
+        try:
+            bin_centroid = np.mean([float(col) for col in bin_cols])
+            bin_headers.append(bin_centroid)
+        except (ValueError, TypeError):
+            # Fallback for non-numeric headers
+            bin_headers.append(f"{bin_cols[0]}-{bin_cols[-1]}")
 
-    return pd.DataFrame(binned_data).T
+    result_df = pd.DataFrame(binned_data).T
+    result_df.columns = bin_headers
+    return result_df
