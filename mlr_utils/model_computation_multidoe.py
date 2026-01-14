@@ -20,6 +20,13 @@ from .model_computation import (
     statistical_summary
 )
 
+# Import shared detection functions from design_detection module
+from .design_detection import (
+    detect_replicates,
+    detect_central_points,
+    detect_pseudo_central_points
+)
+
 
 def fit_multidoe_model(X, y, terms=None, exclude_central=False, y_name="Y"):
     """

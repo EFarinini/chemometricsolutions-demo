@@ -90,6 +90,146 @@ def show_model_diagnostics_ui_multidoe(model_results, X, y, y_name="Response"):
         st.info("Residuals not available in model results")
 
     # ========================================================================
+    # SECTION 1B: RESIDUALS VS TIME SEQUENCE
+    # ========================================================================
+    st.markdown("### ⏱️ Residuals vs Experiment Number (Time Sequence)")
+
+    if 'residuals' in model_results:
+        residuals = model_results['residuals']
+
+        # Get sample names from y.index if available, otherwise use generic names
+        if hasattr(y, 'index'):
+            sample_names = y.index.tolist()
+        else:
+            sample_names = [f"Exp_{i+1}" for i in range(len(residuals))]
+
+        # Experiment numbers (0-indexed for plotting)
+        exp_numbers = np.arange(len(residuals))
+
+        # Calculate statistics for reference lines
+        residuals_std = np.std(residuals)
+
+        # Create Plotly figure
+        fig_time = go.Figure()
+
+        # Add scatter + line trace
+        fig_time.add_trace(go.Scatter(
+            x=exp_numbers,
+            y=residuals,
+            mode='markers+lines',
+            marker=dict(
+                size=8,
+                color=residuals,  # Color by residual value
+                colorscale='RdBu',  # Red (negative) to Blue (positive)
+                showscale=False,  # Hide colorbar
+                line=dict(color='darkblue', width=1)  # Dark blue marker border
+            ),
+            line=dict(
+                color='rgba(100, 100, 200, 0.3)',  # Semi-transparent blue-gray
+                width=1
+            ),
+            name='Residuals',
+            # Custom hover data: Exp #N: SampleName + Residual value
+            customdata=[[i+1, name] for i, name in enumerate(sample_names)],
+            hovertemplate='<b>Exp #%{customdata[0]}: %{customdata[1]}</b><br>Residual: %{y:.4f}<extra></extra>'
+        ))
+
+        # Add reference lines (without annotations - we'll add them separately)
+
+        # Zero line (perfect fit) - Red dashed
+        fig_time.add_hline(
+            y=0,
+            line_dash="dash",
+            line_color="red",
+            line_width=2
+        )
+
+        # +1 Std Dev line - Orange dotted
+        fig_time.add_hline(
+            y=residuals_std,
+            line_dash="dot",
+            line_color="orange",
+            line_width=1.5
+        )
+
+        # -1 Std Dev line - Orange dotted
+        fig_time.add_hline(
+            y=-residuals_std,
+            line_dash="dot",
+            line_color="orange",
+            line_width=1.5
+        )
+
+        # Reference lines are self-explanatory - no legend needed
+
+        # Update layout
+        fig_time.update_layout(
+            title=f"Residuals vs Experiment Number (Time Sequence) - {y_name}",
+            xaxis_title="Experiment Number",
+            yaxis_title="Residual Value",
+            hovermode='closest',
+            height=500,
+            template='plotly_white',
+            showlegend=False,
+            # Adjust tick density for small datasets
+            xaxis=dict(
+                dtick=1 if len(residuals) < 20 else None  # Show every tick for small datasets
+            )
+        )
+
+        # Display plot
+        st.plotly_chart(fig_time, use_container_width=True)
+
+        # Display statistics in columns
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.metric("Mean Residual", f"{np.mean(residuals):.6f}")
+        with col2:
+            st.metric("Std Dev", f"{np.std(residuals):.6f}")
+        with col3:
+            st.metric("Max |Residual|", f"{np.max(np.abs(residuals)):.6f}")
+        with col4:
+            st.metric("N Experiments", len(residuals))
+
+        # Interpretation guide
+        with st.expander("📖 Interpretation Guide"):
+            col_good, col_warning = st.columns(2)
+
+            with col_good:
+                st.markdown("**✅ GOOD Signs:**")
+                st.markdown("""
+                - Random scatter around zero
+                - No systematic pattern or trend
+                - Values roughly equidistributed above/below zero
+                - Most points within ±1 std dev band
+                - No clustering or grouping
+                """)
+
+            with col_warning:
+                st.markdown("**⚠️ WARNING Signs:**")
+                st.markdown("""
+                - **Trend:** Increasing or decreasing pattern
+                - **Cycles:** Periodic/sinusoidal patterns
+                - **Outliers:** Isolated extreme values
+                - **Variance change:** Spread increases/decreases over time
+                - **Clustering:** Groups of similar residuals
+                """)
+
+            st.info("""
+            **Why this matters:**
+            - Patterns suggest missing time-dependent variables
+            - Trends may indicate instrument drift or process changes
+            - Cycles suggest periodic disturbances
+            - Clustering may indicate batch effects or grouping factors
+            """)
+
+    else:
+        st.info("Residuals not available for time sequence plot")
+
+    st.markdown("---")
+
+    # ========================================================================
     # SECTION 2: Q-Q PLOT
     # ========================================================================
     st.markdown("### Q-Q Plot (Normality Check)")

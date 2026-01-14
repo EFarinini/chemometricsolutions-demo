@@ -14,6 +14,13 @@ import numpy as np
 import plotly.graph_objects as go
 from scipy import stats
 
+# Import shared detection functions from design_detection module
+from .design_detection import (
+    detect_replicates,
+    detect_central_points,
+    detect_pseudo_central_points
+)
+
 
 # ============================================================================
 # CORE COMPUTATION FUNCTIONS
@@ -171,6 +178,10 @@ def analyze_design_structure(X):
         'interpretation': interpretation,
         'warnings': warnings_list
     }
+
+
+# Note: detect_central_points and detect_pseudo_central_points are now imported from mlr_doe
+# (removed local definitions to use shared functions)
 
 
 def create_model_matrix(X, terms_dict=None, include_intercept=True,
@@ -572,7 +583,7 @@ def create_term_selection_matrix(x_vars):
     return matrix
 
 
-def display_term_selection_ui(x_vars, key_prefix="", design_analysis=None):
+def display_term_selection_ui(x_vars, key_prefix="", design_analysis=None, allow_interactions=True, allow_quadratic=True):
     """
     Display interactive term selection UI with intelligent disabling per design rules.
 
@@ -580,6 +591,8 @@ def display_term_selection_ui(x_vars, key_prefix="", design_analysis=None):
         x_vars: list of X variable names
         key_prefix: prefix for streamlit keys
         design_analysis: dict from analyze_design_structure() with design type info
+        allow_interactions: whether interactions are enabled (from checkbox)
+        allow_quadratic: whether quadratic terms are enabled (from checkbox)
 
     Returns:
         tuple: (term_matrix DataFrame, selected_terms dict)
@@ -601,7 +614,7 @@ def display_term_selection_ui(x_vars, key_prefix="", design_analysis=None):
     # ════════════════════════════════════════════════════════════════════
 
     # RULE 1 & 2: For 2-level, disable all quadratic
-    disable_all_quadratic = (design_analysis['design_type'] == "2-level")
+    disable_all_quadratic = (design_analysis['design_type'] == "2-level") or not allow_quadratic
 
 
     # RULE 3: For qualitative variables, disable their interactions and quadratic
@@ -613,35 +626,42 @@ def display_term_selection_ui(x_vars, key_prefix="", design_analysis=None):
 
     # ════════════════════════════════════════════════════════════════════
 
-    st.markdown("**Quadratic Terms:**")
-    quad_cols = st.columns(min(n_vars, 4))
+    if allow_quadratic:
+        st.markdown("**Quadratic Terms:**")
+        quad_cols = st.columns(min(n_vars, 4))
 
-    for i, var in enumerate(x_vars):
-        with quad_cols[i % len(quad_cols)]:
-            # Determine if this quadratic should be disabled
-            should_disable = (
-                disable_all_quadratic or  # Rule 1: 2-level disables all
-                var in qual_vars          # Rule 3: qualitative disables its own
-            )
+        for i, var in enumerate(x_vars):
+            with quad_cols[i % len(quad_cols)]:
+                # Determine if this quadratic should be disabled
+                should_disable = (
+                    disable_all_quadratic or  # Rule 1: 2-level disables all
+                    var in qual_vars          # Rule 3: qualitative disables its own
+                )
 
 
-            # Determine default value
-            should_check = not should_disable
+                # Determine default value
+                should_check = not should_disable
 
-            selected = st.checkbox(
-                f"{var}²",
-                value=should_check,  # ← Pre-set based on rules
-                disabled=should_disable,  # ← Disable based on rules
-                key=f"{key_prefix}_quad_{i}"
-            )
+                selected = st.checkbox(
+                    f"{var}²",
+                    value=should_check,  # ← Pre-set based on rules
+                    disabled=should_disable,  # ← Disable based on rules
+                    key=f"{key_prefix}_quad_{i}"
+                )
 
-            term_matrix.iloc[i, i] = 1 if selected else 0
+                term_matrix.iloc[i, i] = 1 if selected else 0
 
-    # Add warning if quadratic disabled
-    if disable_all_quadratic:
-        st.caption("⚠️ Quadratic terms disabled (2-level design cannot fit)")
-    if qual_vars:
-        st.caption(f"⚠️ Qualitative variables {qual_vars}: no quadratic")
+        # Add warning if quadratic disabled
+        if disable_all_quadratic and not allow_quadratic:
+            st.caption("⚠️ Quadratic terms disabled by user")
+        elif disable_all_quadratic:
+            st.caption("⚠️ Quadratic terms disabled (2-level design cannot fit)")
+        if qual_vars:
+            st.caption(f"⚠️ Qualitative variables {qual_vars}: no quadratic")
+    else:
+        # Quadratic not allowed - set all diagonal to 0
+        for i in range(n_vars):
+            term_matrix.iloc[i, i] = 0
 
 
     # ════════════════════════════════════════════════════════════════════
@@ -649,7 +669,7 @@ def display_term_selection_ui(x_vars, key_prefix="", design_analysis=None):
 
     # ════════════════════════════════════════════════════════════════════
 
-    if n_vars > 1:
+    if n_vars > 1 and allow_interactions:
         st.markdown("**Interaction Terms:**")
         interactions = []
 
@@ -683,6 +703,12 @@ def display_term_selection_ui(x_vars, key_prefix="", design_analysis=None):
 
         if qual_vars:
             st.caption(f"⚠️ Qualitative variables {qual_vars}: no interactions")
+    elif n_vars > 1 and not allow_interactions:
+        # Interactions not allowed - set all off-diagonal to 0
+        for i in range(n_vars):
+            for j in range(n_vars):
+                if i != j:
+                    term_matrix.iloc[i, j] = 0
 
 
     # ════════════════════════════════════════════════════════════════════
@@ -862,8 +888,8 @@ def show_model_computation_ui(data, dataset_name):
     # Import helper functions from parent module (avoid circular imports)
 
     # Note: create_model_matrix and fit_mlr_model are already in this module
-    # We only need detect_replicates and detect_central_points from mlr_doe
-    from mlr_doe import detect_replicates, detect_central_points
+    # Note: detect_replicates, detect_central_points, and detect_pseudo_central_points
+    # are now imported at the module level (top of file)
 
     st.markdown("## 🔧 MLR Model Computation")
 
@@ -1104,11 +1130,11 @@ def show_model_computation_ui(data, dataset_name):
 
 
     # ════════════════════════════════════════════════════════════════════
-    # TOP CONTROLS (2 checkboxes CAT-style)
+    # TOP CONTROLS (3 checkboxes: intercept, interactions, quadratic)
 
     # ════════════════════════════════════════════════════════════════════
 
-    col_top1, col_top2 = st.columns(2)
+    col_top1, col_top2, col_top3 = st.columns(3)
 
     with col_top1:
         include_intercept = st.checkbox(
@@ -1119,14 +1145,25 @@ def show_model_computation_ui(data, dataset_name):
         )
 
     with col_top2:
-        # Disable for qualitative-only designs
-        should_disable_higher_order = (design_structure_info['design_type'] == "qualitative_only")
+        # Disable interactions for qualitative-only designs
+        should_disable_interactions = (design_structure_info['design_type'] == "qualitative_only")
 
-        include_higher_order = st.checkbox(
-            "Include higher-order terms",
-            value=(design_structure_info['recommended_terms']['interactions'] or design_structure_info['recommended_terms']['quadratic']),
-            disabled=should_disable_higher_order,
-            help="Interactions and/or quadratic" if not should_disable_higher_order else "Not available for qualitative-only"
+        include_interactions = st.checkbox(
+            "Include interactions",
+            value=design_structure_info['recommended_terms']['interactions'],
+            disabled=should_disable_interactions,
+            help="Two-way interaction terms (X1*X2)" if not should_disable_interactions else "Not available for qualitative-only"
+        )
+
+    with col_top3:
+        # Disable quadratic for 2-level or qualitative-only designs
+        should_disable_quadratic = (design_structure_info['design_type'] in ["2-level", "qualitative_only"])
+
+        include_quadratic = st.checkbox(
+            "Include quadratic terms",
+            value=design_structure_info['recommended_terms']['quadratic'] if not should_disable_quadratic else False,
+            disabled=should_disable_quadratic,
+            help="Quadratic terms (X1²)" if not should_disable_quadratic else "Only for >2-level designs"
         )
 
 
@@ -1134,11 +1171,11 @@ def show_model_computation_ui(data, dataset_name):
 
 
     # ════════════════════════════════════════════════════════════════════
-    # TERM SELECTION MATRIX (if higher-order enabled)
+    # TERM SELECTION MATRIX (if interactions or quadratic enabled)
 
     # ════════════════════════════════════════════════════════════════════
 
-    if include_higher_order and design_structure_info['design_type'] != "qualitative_only":
+    if (include_interactions or include_quadratic) and design_structure_info['design_type'] != "qualitative_only":
 
         st.markdown("### 📊 Select Model Terms")
 
@@ -1147,10 +1184,13 @@ def show_model_computation_ui(data, dataset_name):
 
         # Get the term selection matrix UI
         # Pass design_structure_info so function can apply rules intelligently
+        # Also pass which terms are enabled
         term_matrix, selected_terms = display_term_selection_ui(
             x_vars,
             key_prefix="model_config",
-            design_analysis=design_structure_info  # ← Pass this!
+            design_analysis=design_structure_info,  # ← Pass this!
+            allow_interactions=include_interactions,
+            allow_quadratic=include_quadratic
         )
 
 
@@ -1197,9 +1237,9 @@ def show_model_computation_ui(data, dataset_name):
 
 
     else:
-        # Higher-order disabled (qualitative-only or user unchecked)
+        # No higher-order terms selected (qualitative-only or user unchecked both)
 
-        st.info("📊 **Select Model Terms** - Higher-order terms disabled")
+        st.info("📊 **Select Model Terms** - Using linear terms only")
 
 
         # Build simple selected_terms with linear only
@@ -1229,6 +1269,37 @@ def show_model_computation_ui(data, dataset_name):
             value=False,
             help="Central points are typically used only for validation in factorial designs"
         )
+
+        # Detect pseudo-central points (pattern-based detection)
+        pseudo_central_indices = detect_pseudo_central_points(X_for_analysis, design_structure_info)
+
+        # Show checkbox if:
+        # 1. Found pseudo-central points AND
+        # 2. User did NOT select quadratic (pseudo-centrals don't matter for quadratic models)
+        show_pseudo_central_option = (
+            len(pseudo_central_indices) > 0 and
+            not include_quadratic
+        )
+
+        if show_pseudo_central_option:
+            # Debug output to help understand what's being detected
+            with st.expander("🔍 Debug: Pseudo-Central Detection"):
+                st.write(f"**Pseudo-central points detected at indices:** {pseudo_central_indices}")
+                st.write(f"**Include quadratic?** {include_quadratic}")
+
+                if pseudo_central_indices:
+                    st.write("**Detected pseudo-central points:**")
+                    for idx in pseudo_central_indices:
+                        row_data = X_for_analysis.iloc[idx].to_dict()
+                        st.write(f"  Row {X_for_analysis.index[idx]}: {row_data}")
+
+            exclude_pseudo_central = st.checkbox(
+                f"Exclude pseudo-central points ({len(pseudo_central_indices)} found)",
+                value=False,
+                help="Points with some (but not all) coordinates at 0. Repeated points used for validation and variance estimation."
+            )
+        else:
+            exclude_pseudo_central = False
 
     with col_set2:
         # Variance method selector
@@ -1368,6 +1439,38 @@ def show_model_computation_ui(data, dataset_name):
                         }
                 else:
                     st.info("ℹ️ Central points included in the analysis")
+
+
+            # Detect and optionally exclude pseudo-central points
+            # (only relevant for mixed quantitative/qualitative designs without quadratic)
+            if exclude_pseudo_central and len(pseudo_central_indices) > 0:
+                # Get indices in current X_data (after potential central point removal)
+                # Need to map from original indices to current X_data indices
+                remaining_pseudo_central = [i for i in range(len(X_data))
+                                           if X_data.index.tolist()[i] in
+                                           [data.index.tolist()[pi] for pi in pseudo_central_indices]]
+
+                if remaining_pseudo_central:
+                    pseudo_central_samples_original = X_data.index[remaining_pseudo_central].tolist()
+
+                    st.info(f"🎯 Detected {len(remaining_pseudo_central)} pseudo-central point(s)")
+
+                    # Remove pseudo-central points from modeling data
+                    X_data = X_data.drop(X_data.index[remaining_pseudo_central])
+                    if y_data is not None:
+                        y_data = y_data.drop(y_data.index[remaining_pseudo_central])
+
+                    st.warning(f"⚠️ Excluded {len(remaining_pseudo_central)} pseudo-central point(s) from analysis")
+
+                    st.info(f"ℹ️ Using {len(X_data)} samples (after exclusions)")
+
+                    # Store excluded pseudo-central points for later validation (only if Y exists)
+                    if y_var:
+                        st.session_state.mlr_pseudo_central_points = {
+                            'X': data.loc[pseudo_central_samples_original, x_vars],
+                            'y': data.loc[pseudo_central_samples_original, y_var],
+                            'indices': pseudo_central_samples_original
+                        }
 
 
             # Use term_matrix if user selected specific terms
@@ -1538,6 +1641,11 @@ def _display_model_results(model_results, y_var, x_vars, data, selected_samples,
         _display_central_points_validation(central_points)
 
 
+    # ===== CONDITIONAL: Pseudo-Central Points Validation (only if excluded) =====
+    if 'mlr_pseudo_central_points' in st.session_state:
+        _display_pseudo_central_points_validation()
+
+
     # ===== CONDITIONAL: Model Data Replicates Check =====
     replicate_info = detect_replicates(X_data, y_data)
     if replicate_info:
@@ -1584,7 +1692,7 @@ def _display_replicate_analysis(replicate_info_full, model_results, central_poin
 
     st.info("""
     **Pure experimental error** estimated from replicate measurements
-    (including ALL points - central points always included for experimental error calculation).
+    (including ALL points - central and pseudo-central points always included for experimental error calculation).
     This represents the baseline measurement variability.
     """)
 
@@ -1837,6 +1945,57 @@ def _display_central_points_validation(central_points):
         **Central Point Validation**: Use these points for model validation in the Predictions tab.
         They help assess curvature and lack of fit at the experimental center.
         """)
+
+
+def _display_pseudo_central_points_validation():
+    """Display pseudo-central points validation section"""
+    st.markdown("---")
+
+    st.markdown("### 🎯 Pseudo-Central Points Validation")
+
+    if 'mlr_pseudo_central_points' not in st.session_state:
+        return
+
+    pseudo_central_X = st.session_state.mlr_pseudo_central_points['X']
+    pseudo_central_y = st.session_state.mlr_pseudo_central_points['y']
+
+    st.info(f"""
+    **{len(pseudo_central_y)} pseudo-central point(s)** excluded from model fitting - reserved for validation.
+    These are repeated points with some (but not all) coordinates at 0.
+    They assess model adequacy and provide experimental variance estimates.
+    """)
+
+    # Calculate pseudo-central point statistics
+    pseudo_central_mean = pseudo_central_y.mean()
+    pseudo_central_std = pseudo_central_y.std(ddof=1) if len(pseudo_central_y) > 1 else 0
+
+    pseudo_stats_col1, pseudo_stats_col2, pseudo_stats_col3 = st.columns(3)
+
+    with pseudo_stats_col1:
+        st.metric("Pseudo-Central Points Count", len(pseudo_central_y))
+    with pseudo_stats_col2:
+        st.metric("Mean Response", f"{pseudo_central_mean:.4f}")
+    with pseudo_stats_col3:
+        if len(pseudo_central_y) > 1:
+            st.metric("Std Dev", f"{pseudo_central_std:.4f}")
+        else:
+            st.metric("Std Dev", "N/A (single point)")
+
+    with st.expander("📋 Pseudo-Central Points Details"):
+        pseudo_central_display = pd.DataFrame({
+            'Sample': [str(idx) for idx in st.session_state.mlr_pseudo_central_points['indices']],
+            'Observed Y': pseudo_central_y.values
+        })
+
+        for col in pseudo_central_X.columns:
+            pseudo_central_display[col] = pseudo_central_X[col].values
+
+        st.dataframe(pseudo_central_display, use_container_width=True)
+
+    st.info("""
+    **Pseudo-Central Point Validation**: Use these points for model validation in the Predictions tab.
+    They help assess model adequacy in mixed quantitative/qualitative experimental designs.
+    """)
 
 
 def _display_model_data_replicates(replicate_info, replicate_info_full):

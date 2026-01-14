@@ -12,6 +12,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+from scipy import stats
 
 # Import core computation functions
 try:
@@ -237,7 +238,9 @@ def show_model_diagnostics_ui(model_results=None, X=None, y=None):
         if 'r_squared' in model_results and 'rmse' in model_results:
             diagnostic_options.extend([
                 "📈 Experimental vs Fitted",
-                "📉 Residuals vs Fitted"
+                "📉 Residuals vs Fitted",
+                "⏱️ Residuals vs Time Sequence",
+                "📊 Q-Q Plot (Normality Check)"
             ])
 
         # CONDITIONAL: Only if CV available
@@ -259,6 +262,12 @@ def show_model_diagnostics_ui(model_results=None, X=None, y=None):
 
     elif diagnostic_type == "📉 Residuals vs Fitted":
         _plot_residuals_vs_fitted(model_results)
+
+    elif diagnostic_type == "⏱️ Residuals vs Time Sequence":
+        _plot_residuals_vs_time(model_results)
+
+    elif diagnostic_type == "📊 Q-Q Plot (Normality Check)":
+        _plot_qq_normality(model_results)
 
     elif diagnostic_type == "🔄 Experimental vs CV Predicted":
         _plot_experimental_vs_cv(model_results)
@@ -403,6 +412,270 @@ def _plot_residuals_vs_fitted(model_results):
         st.metric("Std Residual", f"{residuals.std():.4f}")
     with col3:
         st.metric("Max |Residual|", f"{np.abs(residuals).max():.4f}")
+
+
+def _plot_residuals_vs_time(model_results):
+    """
+    Plot residuals vs experiment number (time sequence)
+
+    This plot helps identify:
+    - Temporal trends (systematic drift over time)
+    - Periodic patterns (cyclic behavior)
+    - Outlier experiments
+    - Non-constant variance over time
+
+    REQUIRES:
+    - residuals
+    - y (optional, for sample names from index)
+    """
+    st.markdown("### ⏱️ Residuals vs Experiment Number (Time Sequence)")
+
+    # Defensive checks
+    if 'residuals' not in model_results or model_results['residuals'] is None:
+        st.error("❌ Missing required data: 'residuals' not in model results")
+        return
+
+    # 1. Extract residuals and sample names
+    residuals = model_results['residuals']
+
+    # Get sample names from y.index if available, otherwise use generic names
+    if 'y' in model_results and hasattr(model_results['y'], 'index'):
+        sample_names = model_results['y'].index.tolist()
+    else:
+        sample_names = [f"Exp_{i+1}" for i in range(len(residuals))]
+
+    # Experiment numbers (0-indexed for plotting)
+    exp_numbers = np.arange(len(residuals))
+
+    # Calculate statistics for reference lines
+    residuals_std = np.std(residuals)
+
+    # 2. Create Plotly figure
+    fig = go.Figure()
+
+    # 3. Add scatter + line trace
+    fig.add_trace(go.Scatter(
+        x=exp_numbers,
+        y=residuals,
+        mode='markers+lines',
+        marker=dict(
+            size=8,
+            color=residuals,  # Color by residual value
+            colorscale='RdBu',  # Red (negative) to Blue (positive)
+            showscale=False,  # Hide colorbar
+            line=dict(color='darkblue', width=1)  # Dark blue marker border
+        ),
+        line=dict(
+            color='rgba(100, 100, 200, 0.3)',  # Semi-transparent blue-gray
+            width=1
+        ),
+        name='Residuals',
+        # Custom hover data: Exp #N: SampleName + Residual value
+        customdata=[[i+1, name] for i, name in enumerate(sample_names)],
+        hovertemplate='<b>Exp #%{customdata[0]}: %{customdata[1]}</b><br>Residual: %{y:.4f}<extra></extra>'
+    ))
+
+    # 4. Add reference lines (without annotations - we'll add them separately)
+
+    # Zero line (perfect fit) - Red dashed
+    fig.add_hline(
+        y=0,
+        line_dash="dash",
+        line_color="red",
+        line_width=2
+    )
+
+    # +1 Std Dev line - Orange dotted
+    fig.add_hline(
+        y=residuals_std,
+        line_dash="dot",
+        line_color="orange",
+        line_width=1.5
+    )
+
+    # -1 Std Dev line - Orange dotted
+    fig.add_hline(
+        y=-residuals_std,
+        line_dash="dot",
+        line_color="orange",
+        line_width=1.5
+    )
+
+    # Reference lines are self-explanatory - no legend needed
+
+    # 5. Update layout
+    y_var_name = st.session_state.get('mlr_y_var', 'Response')
+
+    fig.update_layout(
+        title=f"Residuals vs Experiment Number (Time Sequence) - {y_var_name}",
+        xaxis_title="Experiment Number",
+        yaxis_title="Residual Value",
+        hovermode='closest',
+        height=500,
+        template='plotly_white',
+        showlegend=False,
+        # Adjust tick density for small datasets
+        xaxis=dict(
+            dtick=1 if len(residuals) < 20 else None  # Show every tick for small datasets
+        )
+    )
+
+    # Display plot
+    st.plotly_chart(fig, use_container_width=True)
+
+    # 6. Display statistics in columns
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("Mean Residual", f"{np.mean(residuals):.6f}")
+    with col2:
+        st.metric("Std Dev", f"{np.std(residuals):.6f}")
+    with col3:
+        st.metric("Max |Residual|", f"{np.max(np.abs(residuals)):.6f}")
+    with col4:
+        st.metric("N Experiments", len(residuals))
+
+    # 7. Interpretation guide
+    st.markdown("---")
+    st.markdown("#### 📖 Interpretation Guide")
+
+    col_good, col_warning = st.columns(2)
+
+    with col_good:
+        st.markdown("**✅ GOOD Signs:**")
+        st.markdown("""
+        - Random scatter around zero
+        - No systematic pattern or trend
+        - Values roughly equidistributed above/below zero
+        - Most points within ±1 std dev band
+        - No clustering or grouping
+        """)
+
+    with col_warning:
+        st.markdown("**⚠️ WARNING Signs:**")
+        st.markdown("""
+        - **Trend:** Increasing or decreasing pattern
+        - **Cycles:** Periodic/sinusoidal patterns
+        - **Outliers:** Isolated extreme values
+        - **Variance change:** Spread increases/decreases over time
+        - **Clustering:** Groups of similar residuals
+        """)
+
+    st.info("""
+    **Why this matters:**
+    - Patterns suggest missing time-dependent variables
+    - Trends may indicate instrument drift or process changes
+    - Cycles suggest periodic disturbances
+    - Clustering may indicate batch effects or grouping factors
+    """)
+
+
+def _plot_qq_normality(model_results):
+    """
+    Plot Q-Q (Quantile-Quantile) plot for normality check of residuals
+
+    This plot helps assess whether residuals follow a normal distribution:
+    - Points along diagonal → residuals are normally distributed ✅
+    - Points deviate from diagonal → non-normal residuals ⚠️
+
+    REQUIRES:
+    - residuals
+    """
+    st.markdown("### 📊 Q-Q Plot (Normality Check)")
+
+    # Defensive checks
+    if 'residuals' not in model_results or model_results['residuals'] is None:
+        st.error("❌ Missing required data: 'residuals' not in model results")
+        return
+
+    residuals = model_results['residuals']
+
+    # Standardize residuals (mean=0, std=1)
+    residuals_std = (residuals - np.mean(residuals)) / np.std(residuals)
+
+    # Calculate theoretical quantiles from standard normal distribution
+    # Use linspace from 0.01 to 0.99 to avoid extreme quantiles
+    theoretical_quantiles = stats.norm.ppf(np.linspace(0.01, 0.99, len(residuals)))
+
+    # Calculate sample quantiles (sorted standardized residuals)
+    sample_quantiles = np.sort(residuals_std)
+
+    # Create figure
+    fig = go.Figure()
+
+    # Add scatter plot of actual data
+    fig.add_trace(go.Scatter(
+        x=theoretical_quantiles,
+        y=sample_quantiles,
+        mode='markers',
+        marker=dict(size=8, color='blue', opacity=0.6),
+        name='Residuals',
+        hovertemplate='Theoretical: %{x:.3f}<br>Sample: %{y:.3f}<extra></extra>'
+    ))
+
+    # Add perfect normal distribution line (diagonal y=x)
+    min_val = min(theoretical_quantiles.min(), sample_quantiles.min())
+    max_val = max(theoretical_quantiles.max(), sample_quantiles.max())
+
+    fig.add_trace(go.Scatter(
+        x=[min_val, max_val],
+        y=[min_val, max_val],
+        mode='lines',
+        name='Perfect Normal',
+        line=dict(color='red', dash='dash', width=2),
+        hovertemplate='Perfect Normal<extra></extra>'
+    ))
+
+    # Update layout
+    y_var_name = st.session_state.get('mlr_y_var', 'Response')
+
+    fig.update_layout(
+        title=f"Q-Q Plot (Normality Check) - {y_var_name}",
+        xaxis_title="Theoretical Quantiles (Normal Distribution)",
+        yaxis_title="Sample Quantiles (Standardized Residuals)",
+        height=400,
+        hovermode='closest',
+        showlegend=True,
+        template='plotly_white'
+    )
+
+    # Display plot
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Interpretation guide
+    st.markdown("#### 📖 Interpretation")
+
+    col_good, col_warning = st.columns(2)
+
+    with col_good:
+        st.markdown("**✅ GOOD (Normal Residuals):**")
+        st.markdown("""
+        - Points closely follow the red diagonal line
+        - Only minor deviations at the extremes
+        - Symmetric distribution around the line
+        - Indicates residuals are normally distributed
+        """)
+
+    with col_warning:
+        st.markdown("**⚠️ WARNING (Non-Normal):**")
+        st.markdown("""
+        - **S-curve:** Heavy tails (outliers more frequent than normal)
+        - **Inverted S:** Light tails (fewer outliers than normal)
+        - **Systematic deviation:** Skewed distribution
+        - **Large gaps:** Discrete or grouped data
+        """)
+
+    st.info("""
+    **Why normality matters:**
+    - Many statistical tests assume normal residuals
+    - Non-normality may indicate:
+      - Missing important predictors
+      - Need for data transformation (log, sqrt, etc.)
+      - Presence of outliers or influential points
+      - Model misspecification
+
+    **Note:** With small sample sizes (n<30), some deviation is normal and acceptable.
+    """)
 
 
 def _plot_experimental_vs_cv(model_results):

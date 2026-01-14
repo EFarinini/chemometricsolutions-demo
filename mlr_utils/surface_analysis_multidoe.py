@@ -389,47 +389,89 @@ def show_unified_control_panel_multidoe(models_dict, x_vars, y_vars):
         )
 
         if variance_method_exp == "Model residuals (from fitting)":
-            # Use same values as model
+            # Use per-model values for each response
+            # Each response has its own model RMSE/DOF
+            s_exp_dict = {}
+            dof_exp_dict = {}
+
+            for y_var in y_vars:
+                model = models_dict.get(y_var)
+                if model and 'error' not in model:
+                    s_exp_dict[y_var] = model.get('rmse', s_model)
+                    dof_exp_dict[y_var] = model.get('dof', dof_model)
+                else:
+                    # Fallback to reference model
+                    s_exp_dict[y_var] = s_model
+                    dof_exp_dict[y_var] = dof_model
+
+            # Use same values as reference model for backward compatibility
             s_exp = s_model
             dof_exp = dof_model
 
             col_exp_m1, col_exp_m2 = st.columns(2)
             with col_exp_m1:
                 st.metric("Experimental Std Dev (s_exp)", f"{s_exp:.6f}")
-                st.caption("From model fitting residuals")
+                st.caption("From model fitting residuals (reference model)")
             with col_exp_m2:
                 st.metric("Experimental DOF", dof_exp)
-                st.caption("Same as model fit")
+                st.caption("Same as model fit (per-response values used)")
 
         else:
-            st.markdown("**Enter Independent Experimental Variance**")
+            st.markdown("**Enter Independent Experimental Variance per Response**")
             st.caption("""
-            This should come from replicate measurements of the same point,
-            reflecting your measurement instrument precision/variability
+            Specify measurement variability for each response variable separately.
+            Each Y variable may have different instrument precision/variability.
             """)
 
-            col_exp_i1, col_exp_i2 = st.columns(2)
+            # Initialize dictionary to store per-response variance
+            s_exp_dict = {}  # Format: {y_var: s_exp_value}
+            dof_exp_dict = {}  # Format: {y_var: dof_value}
 
-            with col_exp_i1:
-                s_exp = st.number_input(
-                    "Experimental std deviation (s_exp):",
-                    value=0.02,
-                    min_value=0.0001,
-                    format="%.6f",
-                    step=0.001,
-                    key="multidoe_surface_s_exp_independent",
-                    help="Measurement variability (from replicate experiments)"
-                )
+            # Create header for the per-response table
+            col_hdr1, col_hdr2, col_hdr3 = st.columns([2, 2, 2])
+            with col_hdr1:
+                st.markdown("**Response Variable**")
+            with col_hdr2:
+                st.markdown("**Std Dev (s_exp)**")
+            with col_hdr3:
+                st.markdown("**DOF**")
 
-            with col_exp_i2:
-                dof_exp = st.number_input(
-                    "Experimental DOF:",
-                    value=5,
-                    min_value=1,
-                    step=1,
-                    key="multidoe_surface_dof_exp_independent",
-                    help="Degrees of freedom from experimental replicates"
-                )
+            st.markdown("---")
+
+            # For each response variable, create input fields
+            for i, y_var in enumerate(y_vars):
+                col_y_name, col_s_exp, col_dof = st.columns([2, 2, 2])
+
+                with col_y_name:
+                    st.write(f"**{y_var}**")
+
+                with col_s_exp:
+                    s_exp_dict[y_var] = st.number_input(
+                        "Experimental std deviation:",
+                        value=0.02,
+                        min_value=0.0001,
+                        format="%.6f",
+                        step=0.001,
+                        key=f"multidoe_surface_s_exp_independent_{y_var}",
+                        help=f"Measurement variability for {y_var} (from replicate experiments)",
+                        label_visibility="collapsed"
+                    )
+
+                with col_dof:
+                    dof_exp_dict[y_var] = st.number_input(
+                        "Experimental DOF:",
+                        value=5,
+                        min_value=1,
+                        step=1,
+                        key=f"multidoe_surface_dof_exp_independent_{y_var}",
+                        help=f"Degrees of freedom from experimental replicates for {y_var}",
+                        label_visibility="collapsed"
+                    )
+
+            # For compatibility with rest of function, use first response as default
+            # (but s_exp_dict and dof_exp_dict now contain per-response values)
+            s_exp = s_exp_dict[y_vars[0]] if y_vars else 0.02
+            dof_exp = dof_exp_dict[y_vars[0]] if y_vars else 5
 
     st.markdown("---")
 
@@ -472,6 +514,12 @@ def show_unified_control_panel_multidoe(models_dict, x_vars, y_vars):
     # ========================================================================
     # RETURN CONFIGURATION DICTIONARY
     # ========================================================================
+    # Ensure s_exp_dict and dof_exp_dict exist (for Prediction mode)
+    if ci_type == "Prediction (Model Uncertainty Only)":
+        # Create empty dicts for consistency
+        s_exp_dict = {}
+        dof_exp_dict = {}
+
     return {
         # Variables and ranges
         'var1': var1,
@@ -491,6 +539,10 @@ def show_unified_control_panel_multidoe(models_dict, x_vars, y_vars):
         's_exp': s_exp,
         'dof_exp': dof_exp,
         'n_replicates': n_replicates,
+
+        # NEW: Per-response experimental variance
+        's_exp_dict': s_exp_dict,
+        'dof_exp_dict': dof_exp_dict,
 
         # Range parameters
         'n_steps': n_steps,
@@ -561,7 +613,12 @@ def calculate_surfaces_multidoe(models_dict, config, response_criteria, x_vars, 
                 )
             else:  # Experimental (Model + Measurement Uncertainty)
                 # Model component: use THIS model's RMSE/DOF
-                # Experimental component: use shared s_exp/dof_exp (measurement uncertainty)
+                # Experimental component: use per-response s_exp/dof_exp (measurement uncertainty)
+
+                # Get per-response experimental variance
+                s_exp_resp = config['s_exp_dict'].get(y_var, config.get('s_exp', model_rmse))
+                dof_exp_resp = config['dof_exp_dict'].get(y_var, config.get('dof_exp', model_dof))
+
                 _, _, _, _, ci_grid, _ = calculate_ci_experimental_surface(
                     model_results=model,
                     x_vars=x_vars,
@@ -570,8 +627,8 @@ def calculate_surfaces_multidoe(models_dict, config, response_criteria, x_vars, 
                     fixed_values=config['fixed_values'],
                     s_model=model_rmse,      # Use THIS model's RMSE
                     dof_model=model_dof,     # Use THIS model's DOF
-                    s_exp=config['s_exp'],   # Shared experimental variance
-                    dof_exp=config['dof_exp'],
+                    s_exp=s_exp_resp,        # PER-RESPONSE experimental variance
+                    dof_exp=dof_exp_resp,    # PER-RESPONSE experimental DOF
                     n_replicates=config['n_replicates'],
                     n_steps=config['n_steps'],
                     value_range=value_range
@@ -608,6 +665,209 @@ def calculate_surfaces_multidoe(models_dict, config, response_criteria, x_vars, 
             continue
 
     return surfaces_dict
+
+
+# ============================================================================
+# SECTION 3B: COMBINED FEASIBILITY (MULTI-RESPONSE OVERLAY)
+# ============================================================================
+
+def calculate_combined_feasibility_multiobjective(surfaces_dict, response_criteria,
+                                                   x_vars, y_vars, use_ci=True):
+    """
+    Calculate combined feasibility across ALL response variables.
+
+    Returns a binary (0/1) feasibility grid where:
+    - 1.0 = ALL response constraints satisfied (GREEN)
+    - 0.0 = At least ONE constraint violated (RED)
+
+    Args:
+        surfaces_dict: {y_var: {'response_grid': array, 'optimized_surface': array, ...}}
+        response_criteria: {y_var: {'optimization': str, 'acceptability_min/max': float, ...}}
+        x_vars: list of X variable names
+        y_vars: list of Y variable names
+        use_ci: if True, use 'optimized_surface' (conservative with CI),
+                if False, use 'response_grid' (mean predictions)
+
+    Returns:
+        combined_feasibility: 2D array of values 0.0 to 1.0
+    """
+    # Get grid shape from first response (all share same grid)
+    first_surface = surfaces_dict[y_vars[0]]
+    grid_shape = first_surface['response_grid'].shape
+
+    # Start with all-feasible
+    combined_feasibility = np.ones(grid_shape)
+
+    # For each response variable, apply its constraint
+    for y_var in y_vars:
+        if y_var not in surfaces_dict:
+            continue
+
+        surface = surfaces_dict[y_var]
+        criteria = response_criteria[y_var]
+        optimization = criteria.get('optimization')
+
+        # Choose grid: conservative (with CI) or mean
+        if use_ci and 'optimized_surface' in surface and surface['optimized_surface'] is not None:
+            response_grid = surface['optimized_surface']
+        else:
+            response_grid = surface['response_grid']
+
+        # Initialize this response as feasible everywhere
+        response_feasible = np.ones(grid_shape, dtype=float)
+
+        # Apply constraint based on optimization type
+        if optimization == "Threshold_Above":
+            threshold = criteria.get('acceptability_min')
+            if threshold is not None:
+                # Feasible where response >= threshold
+                response_feasible = (response_grid >= threshold).astype(float)
+
+        elif optimization == "Threshold_Below":
+            threshold = criteria.get('acceptability_max')
+            if threshold is not None:
+                # Feasible where response <= threshold
+                response_feasible = (response_grid <= threshold).astype(float)
+
+        elif optimization == "Target":
+            target_min = criteria.get('target_min')
+            target_max = criteria.get('target_max')
+            if target_min is not None and target_max is not None:
+                # Feasible where min <= response <= max
+                response_feasible = ((response_grid >= target_min) &
+                                    (response_grid <= target_max)).astype(float)
+
+        elif optimization in ["Maximize", "Minimize", "None"]:
+            # No hard constraint
+            response_feasible = np.ones(grid_shape, dtype=float)
+
+        else:
+            response_feasible = np.ones(grid_shape, dtype=float)
+
+        # Multiply: combined is feasible only if this response is feasible too
+        combined_feasibility = combined_feasibility * response_feasible
+
+    return combined_feasibility
+
+
+def plot_combined_feasibility_overlay(surfaces_dict, combined_feasibility,
+                                     x_var_name, y_var_name, fixed_values=None):
+    """
+    Create combined feasibility map with GREEN (feasible) / RED (infeasible) overlay.
+
+    Similar to your screenshot but combining ALL response constraints.
+
+    Args:
+        surfaces_dict: surfaces data (for grid coordinates)
+        combined_feasibility: 2D array of feasibility (0.0 to 1.0)
+        x_var_name, y_var_name: names of variables for axes
+        fixed_values: dict of fixed values for other variables
+
+    Returns:
+        plotly Figure
+    """
+    # Get grid from first surface
+    first_surface = list(surfaces_dict.values())[0]
+    x_grid = first_surface['x_grid']
+    y_grid = first_surface['y_grid']
+
+    fig = go.Figure()
+
+    # Add main heatmap: RED (0 = infeasible) to GREEN (1 = feasible)
+    # Binary colorscale with sharp boundary
+    fig.add_trace(go.Heatmap(
+        x=x_grid[0, :],
+        y=y_grid[:, 0],
+        z=combined_feasibility,
+        colorscale=[
+            [0.0, 'rgb(220, 50, 50)'],       # Dark Red for infeasible
+            [0.5, 'rgb(220, 50, 50)'],       # Sharp boundary at 0.5
+            [0.5, 'rgb(50, 170, 50)'],       # Dark Green for feasible
+            [1.0, 'rgb(50, 170, 50)']        # Dark Green for feasible
+        ],
+        showscale=False,  # Remove colorbar
+        hovertemplate=(
+            f'{x_var_name}: %{{x:.4f}}<br>'
+            f'{y_var_name}: %{{y:.4f}}<br>'
+            'Status: %{text}<extra></extra>'
+        ),
+        text=[['✅ Feasible' if z > 0.5 else '❌ Infeasible'
+               for z in row] for row in combined_feasibility],
+        name='Feasibility',
+        showlegend=False
+    ))
+
+    # Add BLACK contour lines at boundary (0.5 threshold)
+    fig.add_trace(go.Contour(
+        x=x_grid[0, :],
+        y=y_grid[:, 0],
+        z=combined_feasibility,
+        showscale=False,
+        contours=dict(
+            start=0.4,
+            end=0.6,
+            size=0.1,
+            showlabels=False,
+            coloring='lines'
+        ),
+        line=dict(
+            width=3,
+            color='black'
+        ),
+        hoverinfo='skip',
+        name='Boundary',
+        showlegend=False
+    ))
+
+    # Add simple legend items (fake traces for legend only)
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None],
+        mode='markers',
+        marker=dict(size=15, color='rgb(220, 50, 50)', symbol='square'),
+        name='❌ Infeasible',
+        showlegend=True,
+        hoverinfo='skip'
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None],
+        mode='markers',
+        marker=dict(size=15, color='rgb(50, 170, 50)', symbol='square'),
+        name='✅ Feasible',
+        showlegend=True,
+        hoverinfo='skip'
+    ))
+
+    # Title with fixed values
+    subtitle = ""
+    if fixed_values:
+        fixed_text = [f"{var}={val:.3f}" for var, val in fixed_values.items()]
+        subtitle = f"<br><sub>Fixed: {', '.join(fixed_text)}</sub>"
+
+    fig.update_layout(
+        title=f"Combined Multi-Response Feasibility Map{subtitle}",
+        xaxis_title=x_var_name,
+        yaxis_title=y_var_name,
+        height=600,
+        width=750,
+        margin=dict(l=70, r=80, t=100, b=70),
+        yaxis=dict(scaleanchor="x", scaleratio=1),
+        template='plotly_white',
+        font=dict(size=12),
+        legend=dict(
+            orientation="v",
+            yanchor="middle",
+            y=0.5,
+            xanchor="left",
+            x=1.02,
+            bgcolor="rgba(255, 255, 255, 0.9)",
+            bordercolor="black",
+            borderwidth=1
+        ),
+        showlegend=True
+    )
+
+    return fig
 
 
 # ============================================================================
@@ -1655,6 +1915,8 @@ def show_surface_analysis_ui_multidoe(models_dict, x_vars, y_vars):
                     'dof_model': config['dof_model'],
                     's_exp': config.get('s_exp'),
                     'dof_exp': config.get('dof_exp'),
+                    's_exp_dict': config.get('s_exp_dict', {}),  # NEW: Per-response experimental variance
+                    'dof_exp_dict': config.get('dof_exp_dict', {}),  # NEW: Per-response experimental DOF
                     'n_replicates': config.get('n_replicates', 1)
                 }
 
@@ -1824,3 +2086,193 @@ def show_surface_analysis_ui_multidoe(models_dict, x_vars, y_vars):
             y_vars,
             stored_config
         )
+
+        # ====================================================================
+        # SECTION 6: COMBINED MULTI-RESPONSE FEASIBILITY MAP
+        # ====================================================================
+        # Check if there are actual response constraints (2+ responses)
+        has_constraints = any(
+            stored_criteria[y_var]['optimization'] in
+            ["Threshold_Above", "Threshold_Below", "Target"]
+            for y_var in y_vars
+        )
+
+        constrained_count = sum(
+            1 for y_var in y_vars
+            if stored_criteria[y_var]['optimization'] in
+            ["Threshold_Above", "Threshold_Below", "Target"]
+        )
+
+        # Only show if 2+ responses have constraints
+        if has_constraints and constrained_count >= 2:
+            st.markdown("---")
+            st.markdown("## 🎯 Combined Multi-Response Feasibility Map")
+            st.markdown("**All constraints overlaid into a single GREEN/RED map**")
+
+            st.info(f"""
+            🟢 **GREEN Zone:** All {constrained_count} response constraints are satisfied simultaneously
+            🔴 **RED Zone:** At least one response constraint is violated
+            ⬛ **Black Line:** Boundary between feasible and infeasible regions
+
+            **Find the sweet spot where you can optimize ALL responses at once!**
+            """)
+
+            try:
+                # Calculate combined feasibility
+                combined_feas = calculate_combined_feasibility_multiobjective(
+                    surfaces_dict=surfaces_dict,
+                    response_criteria=stored_criteria,
+                    x_vars=x_vars,
+                    y_vars=y_vars,
+                    use_ci=True  # Use conservative surfaces with CI
+                )
+
+                # Calculate statistics
+                total_points = combined_feas.size
+                feasible_points = np.sum(combined_feas > 0.5)
+                feasible_pct = (feasible_points / total_points) * 100
+
+                # Display summary metrics
+                col_m1, col_m2, col_m3 = st.columns(3)
+                with col_m1:
+                    st.metric("🟢 Feasible Region", f"{feasible_pct:.1f}%",
+                             delta=f"{feasible_points} points")
+                with col_m2:
+                    st.metric("🔴 Infeasible Region", f"{100-feasible_pct:.1f}%",
+                             delta=f"{total_points - feasible_points} points")
+                with col_m3:
+                    if feasible_points > 0:
+                        st.metric("✅ Status", "Feasible Region Exists",
+                                 delta="Solution possible")
+                    else:
+                        st.error("❌ No Feasible Region Found")
+
+                st.markdown("")  # Spacing
+
+                # Generate button
+                if st.button("🗺️ Generate Combined Feasibility Map",
+                            type="primary",
+                            key="combined_map_generate"):
+
+                    # Create and display the plot (using same variables as individual surfaces)
+                    fig_combined = plot_combined_feasibility_overlay(
+                        surfaces_dict=surfaces_dict,
+                        combined_feasibility=combined_feas,
+                        x_var_name=stored_config['var1'],
+                        y_var_name=stored_config['var2'],
+                        fixed_values=stored_config['fixed_values']
+                    )
+
+                    st.plotly_chart(fig_combined, use_container_width=True)
+
+                    # Analysis section
+                    st.markdown("### 📊 Feasibility Analysis")
+
+                    # Find best feasible point
+                    if feasible_points > 0:
+                        # Find point with highest overall feasibility
+                        best_idx = np.argmax(combined_feas)
+                        best_i, best_j = np.unravel_index(best_idx, combined_feas.shape)
+
+                        # Get coordinates from first surface (all have same grid)
+                        first_surf = list(surfaces_dict.values())[0]
+                        best_x1 = first_surf['x_grid'][best_i, best_j]
+                        best_x2 = first_surf['y_grid'][best_i, best_j]
+
+                        st.success(f"""
+                        ✅ **Best Operating Point Found:**
+                        - **{stored_config['var1']}** = `{best_x1:.4f}`
+                        - **{stored_config['var2']}** = `{best_x2:.4f}`
+                        """)
+
+                        # Show predictions for all responses at best point
+                        st.markdown("**Predicted Responses at Best Point:**")
+
+                        pred_cols = st.columns(len(y_vars))
+                        for idx, y_var in enumerate(y_vars):
+                            with pred_cols[idx % len(pred_cols)]:
+                                criteria = stored_criteria[y_var]
+                                opt_type = criteria.get('optimization')
+
+                                # Get predicted value
+                                if y_var in surfaces_dict:
+                                    pred_value = surfaces_dict[y_var]['response_grid'][best_i, best_j]
+
+                                    # Determine status
+                                    status = "✅"
+                                    status_text = ""
+                                    if opt_type == "Threshold_Above":
+                                        threshold = criteria.get('acceptability_min')
+                                        if threshold:
+                                            if pred_value < threshold:
+                                                status = "❌"
+                                            status_text = f"{status} ≥ {threshold:.2f}"
+
+                                    elif opt_type == "Threshold_Below":
+                                        threshold = criteria.get('acceptability_max')
+                                        if threshold:
+                                            if pred_value > threshold:
+                                                status = "❌"
+                                            status_text = f"{status} ≤ {threshold:.2f}"
+
+                                    elif opt_type == "Target":
+                                        target_min = criteria.get('target_min')
+                                        target_max = criteria.get('target_max')
+                                        if target_min and target_max:
+                                            if pred_value < target_min or pred_value > target_max:
+                                                status = "❌"
+                                            status_text = f"{status} ∈ [{target_min:.2f}, {target_max:.2f}]"
+
+                                    st.metric(
+                                        y_var,
+                                        f"{pred_value:.4f}",
+                                        delta=status_text if status_text else None
+                                    )
+
+                    else:
+                        st.error("❌ **No Feasible Region Exists**")
+                        st.warning("""
+                        **Possible solutions:**
+                        1. Relax at least one constraint
+                        2. Check if thresholds are realistic given your model predictions
+                        3. Review the individual response surfaces above
+                        """)
+
+                    # Summary table showing constraints
+                    st.markdown("**Active Constraints:**")
+                    constraint_data = []
+                    for y_var in y_vars:
+                        criteria = stored_criteria[y_var]
+                        opt_type = criteria.get('optimization')
+
+                        if opt_type == "Threshold_Above":
+                            constraint_data.append({
+                                'Response': y_var,
+                                'Constraint': f'≥ {criteria.get("acceptability_min", "N/A")}'
+                            })
+                        elif opt_type == "Threshold_Below":
+                            constraint_data.append({
+                                'Response': y_var,
+                                'Constraint': f'≤ {criteria.get("acceptability_max", "N/A")}'
+                            })
+                        elif opt_type == "Target":
+                            min_val = criteria.get('target_min', 'N/A')
+                            max_val = criteria.get('target_max', 'N/A')
+                            constraint_data.append({
+                                'Response': y_var,
+                                'Constraint': f'∈ [{min_val}, {max_val}]'
+                            })
+                        else:
+                            constraint_data.append({
+                                'Response': y_var,
+                                'Constraint': 'No constraint'
+                            })
+
+                    constraint_df = pd.DataFrame(constraint_data)
+                    st.dataframe(constraint_df, use_container_width=True, hide_index=True)
+
+            except Exception as e:
+                st.error(f"❌ Error generating combined feasibility map: {str(e)}")
+                import traceback
+                with st.expander("🐛 Error details"):
+                    st.code(traceback.format_exc())
