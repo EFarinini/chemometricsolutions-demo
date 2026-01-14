@@ -18,6 +18,14 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import sys
+import os
+
+# Add parent directory to path (only if needed for mlr_doe import)
+# This is needed because multi_doe_page.py is in the root directory
+# but might be called from different contexts
+if os.path.dirname(os.path.abspath(__file__)) not in sys.path:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # Import Multi-DOE utility functions
 from mlr_utils.model_computation_multidoe import (
@@ -61,7 +69,11 @@ from mlr_utils.model_computation_multidoe import (
     categorize_coefficients_by_type,
     get_separator_positions
 )
-from mlr_doe import detect_central_points
+# Import detection functions from design_detection module
+from mlr_utils.design_detection import (
+    detect_central_points,
+    detect_pseudo_central_points
+)
 
 
 def sort_coefficients_by_type(coef_names):
@@ -666,8 +678,8 @@ def show():
         else:
             st.caption(f"ℹ️ Design: {design_analysis['design_type']}")
 
-        # Top controls (2 checkboxes CAT-style)
-        col_top1, col_top2 = st.columns(2)
+        # Top controls (3 checkboxes - matching model_computation.py)
+        col_top1, col_top2, col_top3 = st.columns(3)
 
         with col_top1:
             include_intercept = st.checkbox(
@@ -679,32 +691,46 @@ def show():
             )
 
         with col_top2:
-            # Disable for qualitative-only designs
-            should_disable_higher_order = (design_analysis['design_type'] == "qualitative_only")
+            # Disable interactions for qualitative-only designs
+            should_disable_interactions = (design_analysis['design_type'] == "qualitative_only")
 
-            include_higher_order = st.checkbox(
-                "Include higher-order terms",
-                value=(design_analysis['recommended_terms']['interactions'] or design_analysis['recommended_terms']['quadratic']),
-                disabled=should_disable_higher_order,
-                help="Interactions and/or quadratic" if not should_disable_higher_order else "Not available for qualitative-only",
-                key="multidoe_include_higher_order"
+            include_interactions = st.checkbox(
+                "Include interactions",
+                value=design_analysis['recommended_terms']['interactions'],
+                disabled=should_disable_interactions,
+                help="Two-way interaction terms (X1*X2)" if not should_disable_interactions else "Not available for qualitative-only",
+                key="multidoe_include_interactions"
+            )
+
+        with col_top3:
+            # Disable quadratic for 2-level or qualitative-only designs
+            should_disable_quadratic = (design_analysis['design_type'] in ["2-level", "qualitative_only"])
+
+            include_quadratic = st.checkbox(
+                "Include quadratic terms",
+                value=design_analysis['recommended_terms']['quadratic'] if not should_disable_quadratic else False,
+                disabled=should_disable_quadratic,
+                help="Quadratic terms (X1²)" if not should_disable_quadratic else "Only for >2-level designs",
+                key="multidoe_include_quadratic"
             )
 
         st.markdown("---")
 
         # ====================================================================
-        # SECTION 5: TERM SELECTION MATRIX (identical to model_computation.py)
+        # SECTION 5: TERM SELECTION MATRIX (updated for 3-checkbox model)
         # ====================================================================
-        if include_higher_order and design_analysis['design_type'] != "qualitative_only":
+        if (include_interactions or include_quadratic) and design_analysis['design_type'] != "qualitative_only":
 
             st.markdown("### 📊 Select Model Terms")
             st.info("Use the matrix below to select interactions and quadratic terms")
 
-            # Get the term selection matrix UI
+            # Get the term selection matrix UI (pass individual flags)
             term_matrix, selected_terms = display_term_selection_ui(
                 x_vars,
                 key_prefix="multidoe_config",
-                design_analysis=design_analysis
+                design_analysis=design_analysis,
+                allow_interactions=include_interactions,
+                allow_quadratic=include_quadratic
             )
 
             # Display Summary
@@ -778,6 +804,40 @@ def show():
                 key="multidoe_run_cv"
             )
 
+        # Detect pseudo-central points (pattern-based detection)
+        pseudo_central_indices = detect_pseudo_central_points(X_for_analysis, design_analysis)
+
+        # Show checkbox if:
+        # 1. Found pseudo-central points AND
+        # 2. User did NOT select quadratic (pseudo-centrals don't matter for quadratic models)
+        show_pseudo_central_option = (
+            len(pseudo_central_indices) > 0 and
+            not include_quadratic
+        )
+
+        if show_pseudo_central_option:
+            st.markdown("---")
+
+            # Debug output to help understand what's being detected
+            with st.expander("🔍 Debug: Pseudo-Central Detection"):
+                st.write(f"**Pseudo-central points detected at indices:** {pseudo_central_indices}")
+                st.write(f"**Include quadratic?** {include_quadratic}")
+
+                if pseudo_central_indices:
+                    st.write("**Detected pseudo-central points:**")
+                    for idx in pseudo_central_indices:
+                        row_data = X_for_analysis.iloc[idx].to_dict()
+                        st.write(f"  Row {X_for_analysis.index[idx]}: {row_data}")
+
+            exclude_pseudo_central = st.checkbox(
+                f"Exclude pseudo-central points ({len(pseudo_central_indices)} found)",
+                value=False,
+                help="Points with some (but not all) coordinates at 0. Repeated points used for validation and variance estimation.",
+                key="multidoe_exclude_pseudo_central"
+            )
+        else:
+            exclude_pseudo_central = False
+
         # ====================================================================
         # SECTION 7: MODEL FORMULAS (NEW - show all Y formulas)
         # ====================================================================
@@ -840,6 +900,34 @@ def show():
 
                     else:
                         X_data_for_fitting = X_data_original
+
+                    # Detect and optionally exclude pseudo-central points
+                    # (only relevant for designs without quadratic, matching checkbox logic)
+                    if exclude_pseudo_central and len(pseudo_central_indices) > 0:
+                        # Get indices in current X_data_for_fitting (after potential central point removal)
+                        # Need to map from original indices to current X_data_for_fitting indices
+                        remaining_pseudo_central = [i for i in range(len(X_data_for_fitting))
+                                                   if X_data_for_fitting.index.tolist()[i] in
+                                                   [data.index.tolist()[pi] for pi in pseudo_central_indices]]
+
+                        if remaining_pseudo_central:
+                            pseudo_central_samples_original = X_data_for_fitting.index[remaining_pseudo_central].tolist()
+
+                            st.info(f"🎯 Detected {len(remaining_pseudo_central)} pseudo-central point(s)")
+
+                            # Remove pseudo-central points from modeling data
+                            X_data_for_fitting = X_data_for_fitting.drop(X_data_for_fitting.index[remaining_pseudo_central])
+
+                            st.warning(f"⚠️ Excluded {len(remaining_pseudo_central)} pseudo-central point(s) from analysis")
+
+                            st.info(f"ℹ️ Using {len(X_data_for_fitting)} samples (after all exclusions)")
+
+                            # Store excluded pseudo-central points for later validation
+                            # (will be used for all Y variables in Multi-DOE)
+                            st.session_state.multi_doe_pseudo_central_points = {
+                                'X': data.loc[pseudo_central_samples_original, x_vars],
+                                'indices': pseudo_central_samples_original
+                            }
 
                     # Create Y dictionary (remove NaNs per Y variable)
                     y_dict = {}
