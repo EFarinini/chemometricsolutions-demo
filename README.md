@@ -65,7 +65,7 @@ Includes **12+ advanced modules**: Multi-response DoE, Classification, PLS Calib
 
 ## 📄 License
 
-MIT License - © 2025 Dr. Emanuele Farinini, PhD
+MIT License - © 2026 Dr. Emanuele Farinini, PhD
 
 ---
 
