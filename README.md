@@ -1,109 +1,72 @@
-# ChemometricSolutions
-Professional chemometric analysis on the web. Modular Streamlit app with PCA, MLR/DoE, classification, calibration, and more.
+# ChemometricSolutions - DEMO VERSION
 
-**Live Demo:** https://chemometricsolutions-demo.streamlit.app/
+[![Streamlit](https://img.shields.io/badge/streamlit-1.28+-FF4B4B.svg)](https://streamlit.io)
+[![Python](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
+
+> **7 core chemometric modules for multivariate data analysis**  
+> Workshop Como 2026 Edition
+
+**🚀 Live Demo:** https://chemometricsolutions-demo.streamlit.app/  
+**🔒 Access:** Password-protected (credentials provided at workshop)
 
 ---
 
-## 🏗️ Architecture
+## 📊 Included Modules
 
-```
-root/
-├── streamlit_app.py              # Main entry
-├── homepage.py                   # Navigation & dashboard
-├── data_handling.py              # Data I/O
-├── pca.py                        # PCA analysis
-├── mlr_doe.py                    # MLR & DoE
-├── multi_doe_page.py             # Multi-response DoE
-├── transformations.py            # Data preprocessing
-├── pca_monitoring_page.py        # Quality control
-├── classification_page.py        # Classification
-├── calibration_page.py           # PLS calibration
-├── univariate_page.py            # Univariate stats
-├── bivariate_page.py             # Bivariate analysis
-├── generate_doe.py               # DoE generator
-├── mixture_design.py             # Mixture designs
-├── ga_variable_selection_page.py # GA variable selection
-│
-├── 🔧 Common Utilities (Root)
-│   ├── color_utils.py            # Color palettes & themes
-│   ├── workspace_utils.py        # Shared dataset workspace
-│   ├── auth_utils.py             # Authentication
-│   └── session_state_keys.py     # Session state keys
-│
-└── 📁 modules/                   # Calculation engines
-    ├── data_handling/
-    ├── pca/
-    ├── mlr_doe/
-    ├── transformations/
-    ├── quality_control/
-    ├── classification/
-    ├── calibration/
-    ├── univariate/
-    └── visualization/
+1. **Data Handling** - Import/export CSV, Excel, TXT formats
+2. **PCA Analysis** - Principal Component Analysis with diagnostics
+3. **Quality Control** - PCA Monitoring (T², Q statistics)
+4. **MLR & DoE** - Multiple Linear Regression & Design of Experiments
+5. **Univariate Analysis** - Statistical tests, distributions, outliers
+6. **Bivariate Analysis** - Correlation analysis
+7. **Preprocessing** - Data transformations and scaling
+
+---
+
+## 🚀 Quick Start
+
+```bash
+# Clone repository
+git clone https://github.com/EFarinini/chemometricsolutions-demo.git
+cd chemometricsolutions-demo
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Run application
+streamlit run streamlit_app.py
 ```
 
----
-
-## 💡 Key Principles
-
-✅ **Separation of Concerns:** Calculations in `modules/`, UI in root `.py` files  
-✅ **Shared Workspace:** Single dataset loaded, accessible everywhere via `workspace_utils`  
-✅ **Modular:** Each module folder works standalone  
-✅ **Reusable:** Calculation functions can be imported and used anywhere  
+**Login:** Credentials provided at workshop
 
 ---
 
-## 🔗 Workspace System
+## 📂 Structure
 
-Load data **once** in Data Handling → Access **everywhere** via `workspace_utils`:
-
-```python
-from workspace_utils import get_current_dataset, activate_dataset_in_workspace
-
-# Get current active dataset
-data = get_current_dataset()
-
-# Switch datasets
-datasets = get_workspace_datasets()
-activate_dataset_in_workspace("my_dataset", datasets["my_dataset"])
+```
+chemometricsolutions-demo/
+├── 7 module files (data_handling.py, pca.py, etc.)
+├── Common utilities (color_utils.py, workspace_utils.py)
+├── Calculation engines (pca_utils/, mlr_utils/, etc.)
+└── Sample datasets (20+ real chemometric datasets)
 ```
 
-**Flow:** Data Handling → workspace → Every module accesses via `get_current_dataset()`
-
 ---
 
-## 📚 Stack
+## 💼 Full Version
 
-- **Framework:** Streamlit 1.28+
-- **Compute:** NumPy, SciPy, scikit-learn
-- **Data:** Pandas
-- **Plots:** Plotly, Matplotlib
-- **Deployment:** Streamlit Cloud
+Includes **12+ advanced modules**: Multi-response DoE, Classification, PLS Calibration, GA Variable Selection, Mixture Design, and more.
 
----
-
-## 🤝 Contributing
-
-1. Fork repo
-2. Create feature branch
-3. **Separate calculation logic from UI**
-4. Update README
-5. Submit PR
+📧 **Contact:** chemometricsolutions@gmail.com  
+🌐 **Website:** https://chemometricsolutions.com
 
 ---
 
 ## 📄 License
 
-MIT License - See LICENSE file
+MIT License - © 2025 Dr. Emanuele Farinini, PhD
 
 ---
 
-## 👨‍🔬 Author
-
-**Dr. Emanuele Farinini, PhD**  
-Chemometrics & Analytical Chemistry Expert
-
-- Website: https://chemometricsolutions.com
-- GitHub: https://github.com/FarininiChemometricSolutions
-- Email: chemometricsolutions@gmail.com
+**Demo Version - Workshop Como 2026**
