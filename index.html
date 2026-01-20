@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <!-- SEO Meta Tags -->
+    <meta name="description" content="ChemometricSolutions Demo - 7 core chemometric modules for PCA, MLR/DoE, quality control, and multivariate analysis. Workshop Como 2026 edition.">
+    <meta name="keywords" content="chemometrics demo, PCA analysis, MLR DoE, quality control, multivariate statistics, workshop">
+    <meta name="author" content="ChemometricSolutions">
+    
+    <title>ChemometricSolutions - DEMO VERSION</title>
+    
+    <!-- CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        :root {
+            --primary: #1E90FF;
+            --secondary: #4da3ff;
+            --bg-dark: #0a0a0f;
+            --bg-dark-light: #1a1a24;
+            --text: #ffffff;
+            --text-light: rgba(255, 255, 255, 0.8);
+            --border: rgba(255, 255, 255, 0.1);
+            --radius-lg: 16px;
+            --transition: all 0.3s ease;
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-dark);
+            color: var(--text);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+        
+        /* Hero Section */
+        .hero-fullscreen {
+            position: relative;
+            height: 100vh;
+            min-height: 700px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+        
+        .hero-backgrounds {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+        
+        .hero-bg-slide {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-size: cover;
+            background-position: center;
+            opacity: 0;
+            transition: opacity 1.5s ease-in-out;
+            animation: kenBurns 20s ease-out infinite;
+        }
+        
+        .hero-bg-slide.active {
+            opacity: 1;
+        }
+        
+        @keyframes kenBurns {
+            0% { transform: scale(1) translateX(0); }
+            50% { transform: scale(1.1) translateX(-2%); }
+            100% { transform: scale(1) translateX(0); }
+        }
+        
+        .hero-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(180deg, 
+                rgba(10, 10, 15, 0.7) 0%, 
+                rgba(10, 10, 15, 0.85) 50%, 
+                rgba(10, 10, 15, 0.95) 100%);
+            z-index: 2;
+        }
+        
+        .hero-content-centered {
+            position: relative;
+            z-index: 3;
+            text-align: center;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+        
+        .hero-subtitle {
+            font-size: 1.3rem;
+            font-weight: 500;
+            color: var(--secondary);
+            margin-bottom: 25px;
+            letter-spacing: 1px;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+            animation: fadeInUp 0.8s ease-out;
+        }
+        
+        .hero-title {
+            font-size: 4rem;
+            font-weight: 700;
+            margin-bottom: 30px;
+            color: var(--text);
+            line-height: 1.1;
+            text-shadow: 0 4px 20px rgba(0, 0, 0, 0.7);
+            animation: fadeInUp 0.8s ease-out 0.2s both;
+        }
+        
+        .hero-title .highlight {
+            color: var(--secondary);
+            text-shadow: 0 0 30px rgba(77, 163, 255, 0.5);
+        }
+        
+        .hero-description {
+            font-size: 1.25rem;
+            color: rgba(255, 255, 255, 0.9);
+            margin-bottom: 40px;
+            line-height: 1.6;
+            animation: fadeInUp 0.8s ease-out 0.4s both;
+        }
+        
+        .hero-btns {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            flex-wrap: wrap;
+            animation: fadeInUp 0.8s ease-out 0.6s both;
+        }
+        
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+        
+        /* Buttons */
+        .btn {
+            display: inline-block;
+            padding: 16px 40px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            text-decoration: none;
+            border-radius: 10px;
+            transition: var(--transition);
+            border: 2px solid transparent;
+        }
+        
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: var(--secondary);
+            transform: translateY(-3px);
+            box-shadow: 0 10px 30px rgba(30, 144, 255, 0.4);
+        }
+        
+        .btn-outline {
+            border: 2px solid var(--primary);
+            color: var(--primary);
+            background: rgba(30, 144, 255, 0.1);
+        }
+        
+        .btn-outline:hover {
+            background: var(--primary);
+            color: white;
+            transform: translateY(-3px);
+        }
+        
+        /* Hero Dots */
+        .hero-dots {
+            position: absolute;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 15px;
+            z-index: 4;
+        }
+        
+        .hero-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.4);
+            cursor: pointer;
+            transition: var(--transition);
+        }
+        
+        .hero-dot.active {
+            background: var(--primary);
+            transform: scale(1.3);
+        }
+        
+        .hero-dot:hover {
+            background: var(--secondary);
+        }
+        
+        /* Container */
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+        
+        /* Section */
+        .section {
+            padding: 80px 0;
+        }
+        
+        .section-title {
+            font-size: 2.5rem;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 20px;
+            color: var(--text);
+        }
+        
+        .section-subtitle {
+            font-size: 1.2rem;
+            text-align: center;
+            color: var(--text-light);
+            margin-bottom: 60px;
+            max-width: 700px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        
+        /* Demo Cards */
+        .demos-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 30px;
+            margin-top: 40px;
+        }
+        
+        .demo-card {
+            background: var(--bg-dark-light);
+            padding: 40px 30px;
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border);
+            transition: var(--transition);
+            text-align: center;
+        }
+        
+        .demo-card:hover {
+            border-color: var(--primary);
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(30, 144, 255, 0.2);
+        }
+        
+        .demo-icon {
+            font-size: 3rem;
+            color: var(--primary);
+            margin-bottom: 20px;
+        }
+        
+        .demo-card h3 {
+            font-size: 1.5rem;
+            margin-bottom: 15px;
+            color: var(--text);
+        }
+        
+        /* Stats Section */
+        .stats-section {
+            background: linear-gradient(135deg, rgba(30, 144, 255, 0.1) 0%, rgba(77, 163, 255, 0.1) 100%);
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 40px;
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 3.5rem;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 10px;
+        }
+        
+        .stat-label {
+            font-size: 1.1rem;
+            color: var(--text-light);
+        }
+        
+        /* Footer */
+        .footer {
+            background: var(--bg-dark-light);
+            padding: 60px 0 30px;
+            border-top: 1px solid var(--border);
+        }
+        
+        /* Badge */
+        .badge {
+            display: inline-block;
+            background: rgba(255, 193, 7, 0.2);
+            color: #ffc107;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin-bottom: 20px;
+            border: 1px solid rgba(255, 193, 7, 0.3);
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .hero-title {
+                font-size: 2.5rem;
+            }
+            
+            .hero-description {
+                font-size: 1.1rem;
+            }
+            
+            .section-title {
+                font-size: 2rem;
+            }
+            
+            .demos-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Hero Section with Carousel -->
+    <section class="hero-fullscreen">
+        <div class="hero-backgrounds">
+            <div class="hero-bg-slide active" style="background-image: url('https://images.unsplash.com/photo-1532187863486-abf9dbad1b69?w=1920');">
+            </div>
+            <div class="hero-bg-slide" style="background-image: url('https://images.unsplash.com/photo-1582719471384-894fbb16e074?w=1920');">
+            </div>
+            <div class="hero-bg-slide" style="background-image: url('https://images.unsplash.com/photo-1530026405186-ed1f139313f8?w=1920');">
+            </div>
+        </div>
+        
+        <div class="hero-overlay"></div>
+        
+        <div class="hero-content-centered">
+            <div class="badge">🎓 Workshop Como 2026 Edition</div>
+            <p class="hero-subtitle">Interactive Chemometric Analysis Platform</p>
+            <h1 class="hero-title">
+                ChemometricSolutions<br>
+                <span class="highlight">DEMO VERSION</span>
+            </h1>
+            <p class="hero-description">
+                7 fully functional modules for multivariate data analysis, design of experiments, and statistical process control. 
+                Access credentials provided to workshop participants.
+            </p>
+            
+            <div class="hero-btns">
+                <a href="https://chemometricsolutions-demo.streamlit.app/" target="_blank" class="btn btn-primary">
+                    <i class="fas fa-rocket"></i> Launch Demo App
+                </a>
+                <a href="https://github.com/EFarinini/chemometricsolutions-demo" target="_blank" class="btn btn-outline">
+                    <i class="fab fa-github"></i> View on GitHub
+                </a>
+            </div>
+        </div>
+        
+        <div class="hero-dots">
+            <span class="hero-dot active" data-slide="0"></span>
+            <span class="hero-dot" data-slide="1"></span>
+            <span class="hero-dot" data-slide="2"></span>
+        </div>
+    </section>
+    
+    <!-- Modules Section -->
+    <section class="section">
+        <div class="container">
+            <h2 class="section-title">7 Core Modules</h2>
+            <p class="section-subtitle">Fully functional chemometric analysis tools for multivariate data</p>
+            
+            <div class="demos-grid">
+                <!-- Data Handling Module -->
+                <div class="demo-card">
+                    <div class="demo-icon">
+                        <i class="fas fa-database"></i>
+                    </div>
+                    <h3>📊 Data Handling</h3>
+                    <p>Import, manage, and export datasets. Supports CSV, Excel, and TXT formats.</p>
+                </div>
+                
+                <!-- PCA Module -->
+                <div class="demo-card">
+                    <div class="demo-icon">
+                        <i class="fas fa-chart-line"></i>
+                    </div>
+                    <h3>📈 PCA Analysis</h3>
+                    <p>Principal Component Analysis with advanced diagnostics and visualizations.</p>
+                </div>
+
+                <!-- Quality Control Module -->
+                <div class="demo-card">
+                    <div class="demo-icon">
+                        <i class="fas fa-heartbeat"></i>
+                    </div>
+                    <h3>📊 Quality Control</h3>
+                    <p>PCA Monitoring with T² and Q statistics for Statistical Process Control.</p>
+                </div>
+                
+                <!-- MLR & DoE Module -->
+                <div class="demo-card">
+                    <div class="demo-icon">
+                        <i class="fas fa-flask"></i>
+                    </div>
+                    <h3>🧪 MLR & DoE</h3>
+                    <p>Multiple Linear Regression & Design of Experiments (Single Response).</p>
+                </div>
+
+                <!-- Univariate Analysis Module -->
+                <div class="demo-card">
+                    <div class="demo-icon">
+                        <i class="fas fa-chart-bar"></i>
+                    </div>
+                    <h3>📉 Univariate Analysis</h3>
+                    <p>Statistical analysis for single variables: distributions, tests, outliers.</p>
+                </div>
+
+                <!-- Bivariate Analysis Module -->
+                <div class="demo-card">
+                    <div class="demo-icon">
+                        <i class="fas fa-chart-scatter"></i>
+                    </div>
+                    <h3>🔗 Bivariate Analysis</h3>
+                    <p>Correlation analysis and relationships between two variables.</p>
+                </div>
+
+                <!-- Preprocessing Module -->
+                <div class="demo-card">
+                    <div class="demo-icon">
+                        <i class="fas fa-sliders-h"></i>
+                    </div>
+                    <h3>⚙️ Preprocessing</h3>
+                    <p>Data transformations, scaling, and preprocessing techniques.</p>
+                </div>
+
+            </div>
+        </div>
+    </section>
+    
+    <!-- Stats Section -->
+    <section class="section stats-section">
+        <div class="container">
+            <div class="stats-grid">
+                <div>
+                    <div class="stat-value">7</div>
+                    <div class="stat-label">Core Modules</div>
+                </div>
+                <div>
+                    <div class="stat-value">20+</div>
+                    <div class="stat-label">Sample Datasets</div>
+                </div>
+                <div>
+                    <div class="stat-value">100%</div>
+                    <div class="stat-label">Functional</div>
+                </div>
+                <div>
+                    <div class="stat-value">🔐</div>
+                    <div class="stat-label">Password Protected</div>
+                </div>
+            </div>
+        </div>
+    </section>
+    
+    <!-- Technical Overview Section -->
+    <section class="section" style="background: linear-gradient(135deg, rgba(30, 144, 255, 0.05) 0%, rgba(77, 163, 255, 0.05) 100%);">
+        <div class="container" style="max-width: 900px;">
+            <h2 class="section-title">Demo Version Structure</h2>
+            
+            <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(30, 144, 255, 0.2); border-radius: 12px; padding: 30px; margin-bottom: 40px;">
+                <h3 style="color: var(--secondary); margin-bottom: 20px; font-size: 1.3rem;">📂 What's Included</h3>
+                <pre style="background: rgba(0, 0, 0, 0.4); padding: 15px; border-radius: 8px; overflow-x: auto; font-size: 0.85rem; color: #90EE90;">chemometricsolutions-demo/
+├── streamlit_app.py           # Main entry point (auth enabled)
+├── homepage.py                 # Navigation dashboard
+├── auth_utils.py              # Password: como2026
+│
+├── <strong style="color: var(--secondary);">7 MODULE FILES</strong>
+│   ├── data_handling.py       # Data import/export
+│   ├── pca.py                 # PCA Analysis
+│   ├── pca_monitoring_page.py # Quality Control
+│   ├── mlr_doe.py             # MLR & DoE (Single Response)
+│   ├── univariate_page.py     # Univariate Statistics
+│   ├── bivariate_page.py      # Bivariate Analysis
+│   └── transformations.py     # Preprocessing
+│
+├── <strong style="color: var(--secondary);">COMMON UTILITIES</strong>
+│   ├── color_utils.py         # Color palettes
+│   ├── workspace_utils.py     # Dataset management
+│   └── session_state_keys.py  # Session state
+│
+├── <strong style="color: var(--secondary);">CALCULATION ENGINES</strong>
+│   ├── pca_utils/             # PCA algorithms
+│   ├── mlr_utils/             # MLR/DoE algorithms
+│   ├── univariate_utils/      # Statistical tests
+│   ├── bivariate_utils/       # Correlation analysis
+│   └── transforms/            # Data preprocessing
+│
+└── <strong style="color: var(--secondary);">SAMPLE DATA</strong>
+    └── sample_data/           # 20+ real datasets
+        ├── Spectroscopy (NIR, UV-Vis, IR)
+        ├── Food analysis (wine, milk)
+        ├── Industrial QC
+        └── 16 DoE designs</pre>
+
+                <div style="margin-top: 30px; padding: 20px; background: rgba(30, 144, 255, 0.1); border-left: 4px solid var(--primary); border-radius: 8px;">
+                    <h4 style="color: var(--secondary); margin-bottom: 10px;">🔒 Authentication</h4>
+                    <p style="font-size: 0.95rem; line-height: 1.6;">
+                        <strong>Access:</strong> Password-protected. Credentials will be provided to workshop participants.
+                    </p>
+                </div>
+
+                <div style="margin-top: 20px; padding: 20px; background: rgba(255, 193, 7, 0.1); border-left: 4px solid #ffc107; border-radius: 8px;">
+                    <h4 style="color: #ffc107; margin-bottom: 10px;">💼 Full Version Available</h4>
+                    <p style="font-size: 0.95rem; line-height: 1.6;">
+                        Includes <strong>12+ advanced modules</strong>: Multi-response DoE, GA Variable Selection, 
+                        Classification, PLS Calibration, Mixture Design, and more.<br>
+                        📧 <a href="/cdn-cgi/l/email-protection#4b28232e2624262e3f3922283824273e3f222425380b2c262a222765282426" style="color: var(--primary);">Contact us</a> for enterprise solutions.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="section">
+        <div class="container" style="text-align: center;">
+            <h2 class="section-title">Ready to Get Started?</h2>
+            <p class="section-subtitle">Try the demo now - Access credentials provided at workshop</p>
+            
+            <div style="display: flex; gap: 20px; justify-content: center; flex-wrap: wrap; margin-top: 40px;">
+                <a href="https://chemometricsolutions-demo.streamlit.app/" target="_blank" class="btn btn-primary" style="font-size: 1.2rem; padding: 20px 50px;">
+                    <i class="fas fa-play-circle"></i> Launch Demo App
+                </a>
+                <a href="https://github.com/EFarinini/chemometricsolutions-demo" target="_blank" class="btn btn-outline" style="font-size: 1.2rem; padding: 20px 50px;">
+                    <i class="fab fa-github"></i> View Code
+                </a>
+            </div>
+        </div>
+    </section>
+    
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 30px; margin-bottom: 40px; text-align: left;">
+                <div>
+                    <h4 style="color: var(--secondary); margin-bottom: 15px;">About</h4>
+                    <p style="font-size: 0.9rem; line-height: 1.6;">
+                        <strong>ChemometricSolutions DEMO</strong> - 7 core modules for chemometric analysis. 
+                        Workshop Como 2026 edition with secure access.
+                    </p>
+                </div>
+                <div>
+                    <h4 style="color: var(--secondary); margin-bottom: 15px;">Demo Modules (7)</h4>
+                    <ul style="list-style: none; font-size: 0.9rem;">
+                        <li>📊 Data Handling</li>
+                        <li>📈 PCA Analysis</li>
+                        <li>📊 Quality Control</li>
+                        <li>🧪 MLR & DoE</li>
+                        <li>📉 Univariate Analysis</li>
+                        <li>🔗 Bivariate Analysis</li>
+                        <li>⚙️ Preprocessing</li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 style="color: var(--secondary); margin-bottom: 15px;">Resources</h4>
+                    <ul style="list-style: none; font-size: 0.9rem;">
+                        <li><a href="https://github.com/EFarinini/chemometricsolutions-demo" style="color: var(--text-light); text-decoration: none;">GitHub Repository</a></li>
+                        <li><a href="https://chemometricsolutions.com" style="color: var(--text-light); text-decoration: none;">Main Website</a></li>
+                        <li><a href="/cdn-cgi/l/email-protection#9dfef5f8f0f2f0f8e9eff4feeef2f1e8e9f4f2f3eeddfaf0fcf4f1b3fef2f0" style="color: var(--text-light); text-decoration: none;">Contact Us</a></li>
+                    </ul>
+                </div>
+            </div>
+            
+            <hr style="border: 0; border-top: 1px solid rgba(255, 255, 255, 0.1); margin: 40px 0;">
+            
+            <p style="text-align: center; font-size: 0.85rem; color: rgba(255, 255, 255, 0.6);">
+                © 2025 <strong>ChemometricSolutions</strong> by Dr. Emanuele Farinini, PhD<br>
+                MIT License | <a href="https://github.com/EFarinini/chemometricsolutions-demo" style="color: var(--primary); text-decoration: none;">GitHub</a> |
+                <a href="https://chemometricsolutions.com" style="color: var(--primary); text-decoration: none;">Website</a><br>
+                <em>Demo Version - Workshop Como 2026</em>
+            </p>
+        </div>
+    </footer>
+    
+    <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
+        // Hero background carousel
+        const bgSlides = document.querySelectorAll('.hero-bg-slide');
+        const heroDots = document.querySelectorAll('.hero-dot');
+        let currentSlide = 0;
+        
+        function showSlide(index) {
+            bgSlides.forEach(slide => slide.classList.remove('active'));
+            heroDots.forEach(dot => dot.classList.remove('active'));
+            bgSlides[index].classList.add('active');
+            heroDots[index].classList.add('active');
+            currentSlide = index;
+        }
+        
+        function nextSlide() {
+            const next = (currentSlide + 1) % bgSlides.length;
+            showSlide(next);
+   

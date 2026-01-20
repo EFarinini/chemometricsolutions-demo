@@ -771,9 +771,33 @@ def show():
                 # Create the subplot figure
                 st.markdown(f"### 📈 Profiles for **{batch_col} = {selected_batch}**")
 
+                # === SAFETY CHECK: Too many variables ===
+                n_vars = len(batch_numeric.columns)
+                MAX_VARS_PER_PLOT = 50  # Maximum variables to plot at once
+
+                if n_vars > MAX_VARS_PER_PLOT:
+                    st.warning(f"⚠️ Dataset has {n_vars} variables. Showing first {MAX_VARS_PER_PLOT} only to prevent performance issues.")
+                    st.info("💡 Tip: Filter your data to specific variables of interest for better visualization.")
+
+                    # Allow user to select which variables to plot
+                    with st.expander("🔧 Advanced: Select variables to plot"):
+                        selected_vars = st.multiselect(
+                            f"Select up to {MAX_VARS_PER_PLOT} variables:",
+                            batch_numeric.columns.tolist(),
+                            default=batch_numeric.columns.tolist()[:MAX_VARS_PER_PLOT],
+                            max_selections=MAX_VARS_PER_PLOT,
+                            key="batch_var_selector"
+                        )
+                        if len(selected_vars) == 0:
+                            st.error("❌ Please select at least one variable")
+                            st.stop()
+                        vars_to_plot = selected_vars
+                else:
+                    vars_to_plot = batch_numeric.columns.tolist()
+
                 fig = plot_single_batch_profiles(
                     batch_data,
-                    batch_numeric.columns.tolist(),
+                    vars_to_plot,
                     selected_batch,
                     n_cols=2
                 )
@@ -897,35 +921,125 @@ def show():
         st.markdown("### 🎯 Step 2: Select Row Range (Samples)")
 
         n_samples = len(selected_data)
-        st.info(f"Dataset: {n_samples} total samples")
+        st.info(f"📊 Dataset: {n_samples} total samples")
 
-        # Row range selection
-        st.markdown("#### 🎯 Define row range (1-based):")
-        row_range_1, row_range_2 = st.columns(2)
+        # Toggle between Range Mode and Specific Rows Mode
+        selection_mode = st.radio(
+            "Selection method:",
+            ["Range (from-to)", "Specific rows (comma-separated)"],
+            horizontal=True,
+            key="row_selection_mode"
+        )
 
-        with row_range_1:
-            first_row = st.number_input(
-                "First row:",
-                min_value=1,
-                max_value=n_samples,
-                value=1,
-                key="tab3_first_row",
-                help="Start row index (1-based)"
+        selected_row_indices = []
+        first_row = 1  # Initialize with default values (will be updated in Range Mode)
+        last_row = n_samples
+
+        if selection_mode == "Range (from-to)":
+            # ===== RANGE MODE: Original range selection =====
+            st.markdown("#### 🎯 Define row range (1-based):")
+            row_range_1, row_range_2 = st.columns(2)
+
+            with row_range_1:
+                first_row = st.number_input(
+                    "First row:",
+                    min_value=1,
+                    max_value=n_samples,
+                    value=1,
+                    key="tab3_first_row",
+                    help="Start row index (1-based)"
+                )
+
+            with row_range_2:
+                last_row = st.number_input(
+                    "Last row:",
+                    min_value=first_row,
+                    max_value=n_samples,
+                    value=n_samples,
+                    key="tab3_last_row",
+                    help="End row index (1-based, inclusive)"
+                )
+
+            # Convert range to 0-based indices
+            selected_row_indices = list(range(first_row - 1, last_row))
+
+        else:
+            # ===== SPECIFIC ROWS MODE: Comma-separated input =====
+            st.markdown("#### 🎯 Enter specific row numbers (1-based):")
+
+            row_input = st.text_input(
+                "Row numbers (comma-separated):",
+                value="1,2,3",
+                key="tab3_specific_rows",
+                help="Example: 4,8,12,15 or 1,5-10,15 (ranges supported)"
             )
 
-        with row_range_2:
-            last_row = st.number_input(
-                "Last row:",
-                min_value=first_row,
-                max_value=n_samples,
-                value=n_samples,
-                key="tab3_last_row",
-                help="End row index (1-based, inclusive)"
-            )
+            # Parse input
+            if row_input.strip():
+                try:
+                    indices = []
+                    for part in row_input.split(','):
+                        part = part.strip()
+                        if '-' in part:
+                            # Range: "5-10" → [4,5,6,7,8,9] (0-based)
+                            start_str, end_str = part.split('-')
+                            start = int(start_str)
+                            end = int(end_str)
+                            if start < 1 or end > n_samples or start > end:
+                                st.error(f"❌ Invalid range: {part} (must be 1-{n_samples} and start ≤ end)")
+                                selected_row_indices = []
+                                break
+                            indices.extend(range(start - 1, end))
+                        else:
+                            # Single index: "4" → [3] (0-based)
+                            idx = int(part)
+                            if idx < 1 or idx > n_samples:
+                                st.error(f"❌ Invalid row number: {idx} (must be 1-{n_samples})")
+                                selected_row_indices = []
+                                break
+                            indices.append(idx - 1)
 
-        # Extract subset
-        X_matrix = selected_data.iloc[first_row-1:last_row, first_col-1:last_col]
-        st.info(f"**Selected rows:** {first_row} to {last_row} ({len(X_matrix)} samples)  \n**Selected columns:** {len(X_matrix.columns)} variables  \n**Shape:** {X_matrix.shape}")
+                    if indices:
+                        selected_row_indices = sorted(list(set(indices)))  # Remove duplicates and sort
+                        st.success(f"✅ Selected {len(selected_row_indices)} rows: {sorted([i+1 for i in selected_row_indices])}")
+
+                except ValueError:
+                    st.error("❌ Invalid format. Use comma-separated numbers (e.g., '4,8,12,15') or ranges (e.g., '1,5-10,15')")
+                    selected_row_indices = []
+            else:
+                st.warning("⚠️ Please enter at least one row number")
+                selected_row_indices = []
+
+        # Extract subset using selected_row_indices
+        if len(selected_row_indices) > 0:
+            X_matrix = selected_data.iloc[selected_row_indices, first_col-1:last_col]
+
+            # === PROMPT #2: Separate numeric data from metadata ===
+            # Separate numeric (for plotting) from metadata (for hover)
+            X_numeric = X_matrix.select_dtypes(include=[np.number])
+            metadata_cols = [col for col in X_matrix.columns if col not in X_numeric.columns]
+
+            if len(metadata_cols) > 0:
+                metadata_subset = X_matrix[metadata_cols].copy()
+                st.info(f"**Selected rows:** {len(selected_row_indices)} samples  \n**Numeric columns:** {len(X_numeric.columns)} variables  \n**Metadata columns:** {len(metadata_cols)} ({', '.join(metadata_cols)})")
+
+                # Show preview of metadata
+                with st.expander("📋 Preview: Selected rows with metadata", expanded=False):
+                    # Create preview with row numbers (1-based) and metadata
+                    preview_df = pd.DataFrame({
+                        'Row #': [i+1 for i in selected_row_indices]
+                    })
+                    for col in metadata_cols:
+                        preview_df[col] = metadata_subset[col].values
+                    st.dataframe(preview_df, use_container_width=True, hide_index=True)
+            else:
+                metadata_subset = None
+                st.info(f"**Selected rows:** {len(selected_row_indices)} samples  \n**Selected columns:** {len(X_matrix.columns)} variables  \n**Shape:** {X_matrix.shape}")
+        else:
+            X_matrix = pd.DataFrame()  # Empty dataframe if no valid selection
+            X_numeric = pd.DataFrame()
+            metadata_subset = None
+            st.error("❌ No valid rows selected")
 
         st.divider()
 
@@ -946,7 +1060,7 @@ def show():
             st.write("All profiles will be colored uniformly (steel blue)")
 
         elif coloring_mode == "By Row Index":
-            st.write("Profiles colored by sample index (blue → red gradient)")
+            st.write("Profiles colored by sample index (discrete colors: black, red, green, blue, etc.)")
 
         elif coloring_mode == "By Metavariable":
             st.markdown("#### Select metavariable for coloring:")
@@ -962,8 +1076,11 @@ def show():
                     help="Select a column outside X range to color the profiles"
                 )
 
-                # Get color values for selected rows
-                color_values = selected_data.loc[selected_data.index[first_row-1:last_row], color_variable].values
+                # Get color values for selected rows using selected_row_indices
+                if len(selected_row_indices) > 0:
+                    color_values = selected_data.iloc[selected_row_indices][color_variable].values
+                else:
+                    color_values = None
 
                 # Detect if numeric or categorical
                 try:
@@ -982,6 +1099,34 @@ def show():
 
         # ===== PLOT SECTION =====
         st.markdown("### 📈 Row Profiles Plot - Parallel Coordinates")
+
+        # === NEW: Custom Axis Labels (Collapsible) ===
+        with st.expander("🎨 Customize Plot Labels", expanded=False):
+            col1, col2 = st.columns(2)
+
+            with col1:
+                custom_x_label = st.text_input(
+                    "X-axis label:",
+                    value="Variables",
+                    help="Name for the X-axis (horizontal)",
+                    key="custom_x_label_tab3"
+                )
+                custom_y_label = st.text_input(
+                    "Y-axis label:",
+                    value="Values",
+                    help="Name for the Y-axis (vertical)",
+                    key="custom_y_label_tab3"
+                )
+
+            with col2:
+                custom_title = st.text_input(
+                    "Plot title:",
+                    value=f"Row Profiles ({len(selected_row_indices)} samples)",
+                    help="Main title of the plot",
+                    key="custom_title_tab3"
+                )
+                st.markdown("**Preview:**")
+                st.caption(f"📊 {custom_title}")
 
         # Marker size slider - COMPACT
         col_m1, col_m2 = st.columns([1, 3])
@@ -1019,10 +1164,10 @@ def show():
                 }
 
                 # Create plot data with color variable if needed
-                if coloring_mode == "By Metavariable" and color_variable:
+                if coloring_mode == "By Metavariable" and color_variable and len(selected_row_indices) > 0:
                     # Add color variable to X_matrix for plotting
                     plot_data = X_matrix.copy()
-                    plot_data[color_variable] = selected_data.iloc[first_row-1:last_row][color_variable].values
+                    plot_data[color_variable] = selected_data.iloc[selected_row_indices][color_variable].values
                 else:
                     plot_data = X_matrix
 
@@ -1030,8 +1175,12 @@ def show():
                     plot_data,
                     color_mode=mode_map[coloring_mode],
                     color_variable=color_variable,
-                    row_indices=list(range(len(plot_data))),
-                    marker_size=marker_size
+                    row_indices=selected_row_indices,  # Pass original indices for correct sample numbering
+                    marker_size=marker_size,
+                    custom_x_label=custom_x_label,
+                    custom_y_label=custom_y_label,
+                    custom_title=custom_title,
+                    metadata_df=metadata_subset  # Pass metadata for hover tooltips
                 )
 
                 st.plotly_chart(fig, use_container_width=True)
@@ -1079,6 +1228,15 @@ def show():
 
             # Export
             st.markdown("#### 💾 Export")
+
+            # Calculate row range label based on selection mode
+            if selection_mode == "Specific rows (comma-separated)" and selected_row_indices:
+                min_row = min(selected_row_indices) + 1
+                max_row = max(selected_row_indices) + 1
+                rows_label = f"{min_row}-{max_row}"
+            else:
+                rows_label = f"{first_row}-{last_row}"
+
             exp_col1, exp_col2 = st.columns(2)
 
             with exp_col1:
@@ -1086,7 +1244,7 @@ def show():
                 st.download_button(
                     "📥 Statistics (CSV)",
                     data=csv_stats,
-                    file_name=f"row_profiles_stats_r{first_row}_{last_row}_c{first_col}_{last_col}.csv",
+                    file_name=f"row_profiles_stats_r{rows_label}_c{first_col}_{last_col}.csv",
                     mime="text/csv",
                     key="tab3_stats_csv"
                 )
@@ -1096,7 +1254,7 @@ def show():
                 st.download_button(
                     "📥 Subset Data (CSV)",
                     data=csv_data,
-                    file_name=f"row_profiles_data_r{first_row}_{last_row}_c{first_col}_{last_col}.csv",
+                    file_name=f"row_profiles_data_r{rows_label}_c{first_col}_{last_col}.csv",
                     mime="text/csv",
                     key="tab3_subset_csv"
                 )

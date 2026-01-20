@@ -57,8 +57,7 @@ except ImportError:
 try:
     from pca_monitoring_page import (
         calculate_all_contributions,
-        create_contribution_plot_all_vars,
-        create_correlation_scatter
+        create_contribution_plot_all_vars
     )
     CONTRIB_FUNCS_AVAILABLE = True
 except ImportError:
@@ -76,6 +75,175 @@ except ImportError:
     MISSING_DATA_AVAILABLE = False
 
 
+# ============================================================================
+# HELPER FUNCTIONS FOR FLEXIBLE CORRELATION ANALYSIS
+# ============================================================================
+
+def get_top_contributors(contrib_vector, variables, n_top=10):
+    """
+    Get top contributors ranked by absolute contribution magnitude.
+
+    Parameters
+    ----------
+    contrib_vector : array-like
+        Contribution vector (T² or Q contributions)
+    variables : list
+        Variable names
+    n_top : int
+        Number of top contributors to return
+
+    Returns
+    -------
+    list of tuples
+        [(var_name, contribution_value), ...] sorted by |contribution| descending
+    """
+    contrib_abs = np.abs(contrib_vector)
+    top_indices = np.argsort(contrib_abs)[::-1][:n_top]
+    return [(variables[i], contrib_abs[i]) for i in top_indices]
+
+
+def get_top_correlated(X, var_idx, variables, n_top=10):
+    """
+    Get variables most correlated to a given variable.
+
+    Parameters
+    ----------
+    X : array-like, shape (n_samples, n_variables)
+        Data matrix
+    var_idx : int
+        Index of the variable to correlate with
+    variables : list
+        Variable names
+    n_top : int
+        Number of top correlated variables to return
+
+    Returns
+    -------
+    list of tuples
+        [(var_name, correlation), ...] sorted by |correlation| descending
+    """
+    correlations = {}
+    for i, var in enumerate(variables):
+        if i != var_idx:
+            corr = np.corrcoef(X[:, var_idx], X[:, i])[0, 1]
+            # Handle NaN correlations (e.g., constant columns)
+            if not np.isnan(corr):
+                correlations[var] = corr
+
+    # Sort by absolute correlation value (descending)
+    sorted_corr = sorted(correlations.items(),
+                        key=lambda x: abs(x[1]),
+                        reverse=True)[:n_top]
+    return sorted_corr
+
+
+def create_correlation_scatter(X_train, X_sample, var1_idx, var2_idx,
+                               var1_name, var2_name, correlation_val, sample_idx):
+    """
+    Create flexible correlation scatter plot showing training (grey), sample (red star).
+
+    Parameters
+    ----------
+    X_train : array-like, shape (n_samples, n_variables)
+        Training data
+    X_sample : array-like, shape (n_variables,)
+        Single sample (outlier point marked as red star)
+    var1_idx : int
+        Column index for X-axis variable
+    var2_idx : int
+        Column index for Y-axis variable
+    var1_name : str
+        Name of X-axis variable
+    var2_name : str
+        Name of Y-axis variable
+    correlation_val : float
+        Pearson correlation coefficient (for title)
+    sample_idx : int
+        Sample index (for legend)
+
+    Returns
+    -------
+    plotly.graph_objects.Figure
+    """
+    # Calculate axis ranges including BOTH training data AND sample point
+    sample_x = X_sample[var1_idx]
+    sample_y = X_sample[var2_idx]
+
+    # Include sample in axis calculation (so star never disappears)
+    x_min = min(X_train[:, var1_idx].min(), sample_x)
+    x_max = max(X_train[:, var1_idx].max(), sample_x)
+    y_min = min(X_train[:, var2_idx].min(), sample_y)
+    y_max = max(X_train[:, var2_idx].max(), sample_y)
+
+    x_padding = (x_max - x_min) * 0.05
+    y_padding = (y_max - y_min) * 0.05
+
+    x_range = [x_min - x_padding, x_max + x_padding]
+    y_range = [y_min - y_padding, y_max + y_padding]
+
+    # Create figure
+    fig = go.Figure()
+
+    # Training set (grey, sampled for performance if dataset is large)
+    n_plot = min(1000, X_train.shape[0])
+    sample_indices = np.random.choice(X_train.shape[0], n_plot, replace=False)
+
+    fig.add_trace(go.Scatter(
+        x=X_train[sample_indices, var1_idx],
+        y=X_train[sample_indices, var2_idx],
+        mode='markers',
+        name='Training',
+        marker=dict(color='darkgrey', size=5, opacity=0.7),
+        hovertemplate=f'{var1_name}: %{{x:.2f}}<br>{var2_name}: %{{y:.2f}}<extra></extra>'
+    ))
+
+    # Selected sample (red star)
+    fig.add_trace(go.Scatter(
+        x=[X_sample[var1_idx]],
+        y=[X_sample[var2_idx]],
+        mode='markers',
+        name=f'Sample {sample_idx+1}',
+        marker=dict(color='red', size=15, symbol='star'),
+        hovertemplate=f'{var1_name}: %{{x:.2f}}<br>{var2_name}: %{{y:.2f}}<br>Sample {sample_idx+1}<extra></extra>'
+    ))
+
+    # Get unified color scheme
+    color_scheme = get_unified_color_schemes() if COLORS_AVAILABLE else {
+        'background': 'white',
+        'paper': 'white',
+        'text': 'black',
+        'grid': 'lightgray'
+    }
+
+    # Update layout with auto-scaled axes (including sample point)
+    fig.update_layout(
+        title=f'{var1_name} vs {var2_name}<br><sub>Correlation (training): r = {correlation_val:.3f}</sub>',
+        xaxis_title=var1_name,
+        yaxis_title=var2_name,
+        plot_bgcolor=color_scheme['background'],
+        paper_bgcolor=color_scheme['paper'],
+        font=dict(color=color_scheme['text']),
+        hovermode='closest',
+        width=600,
+        height=550,
+        showlegend=True,
+        xaxis=dict(
+            showgrid=True,
+            gridcolor=color_scheme['grid'],
+            range=x_range,
+            autorange=False
+        ),
+        yaxis=dict(
+            showgrid=True,
+            gridcolor=color_scheme['grid'],
+            range=y_range,
+            autorange=False
+        )
+    )
+
+    return fig
+
+
 def show():
     """
     Main PCA Analysis page.
@@ -83,7 +251,7 @@ def show():
     Displays a multi-tab interface for complete PCA workflow:
     1. Model Computation
     2. Variance Plots
-    3. Loadings Plots
+    3. Loading Plots
     4. Score Plots
     5. Interpretation
     6. Advanced Diagnostics
@@ -451,6 +619,28 @@ def _show_model_computation_tab(data: pd.DataFrame):
                     )
 
                     st.plotly_chart(fig, use_container_width=True)
+
+                    # === EXPLAINED VARIANCE TABLE ===
+                    st.markdown("---")
+                    st.markdown("#### 📋 Explained Variance by Component (Descending)")
+
+                    # Create variance table
+                    explained_var_pct = pca_dict['explained_variance_ratio'] * 100
+                    cumulative_var_pct = pca_dict['cumulative_variance'] * 100
+
+                    # Build DataFrame
+                    variance_table = pd.DataFrame({
+                        'Component': [f'PC{i+1}' for i in range(len(explained_var_pct))],
+                        'Explained Variance (%)': [f'{var:.2f}%' for var in explained_var_pct],
+                        'Cumulative Variance (%)': [f'{cum:.2f}%' for cum in cumulative_var_pct]
+                    })
+
+                    # Display as formatted table
+                    st.dataframe(
+                        variance_table,
+                        use_container_width=True,
+                        hide_index=True
+                    )
 
                     # Find elbow point (80% cumulative variance)
                     cumulative_pct = pca_dict['cumulative_variance'] * 100
@@ -975,6 +1165,28 @@ def _show_variance_plots_tab():
 
         st.plotly_chart(fig, use_container_width=True, key="scree_plot")
 
+        # === EXPLAINED VARIANCE TABLE ===
+        st.markdown("---")
+        st.markdown("#### 📋 Variance Explained by Component (Descending)")
+
+        # Get variance data
+        explained_var_pct = pca_results['explained_variance_ratio'] * 100
+        cumulative_var_pct = pca_results['cumulative_variance'] * 100
+
+        # Build DataFrame
+        variance_table = pd.DataFrame({
+            'Component': component_labels,
+            'Explained Variance (%)': [f'{var:.2f}%' for var in explained_var_pct],
+            'Cumulative Variance (%)': [f'{cum:.2f}%' for cum in cumulative_var_pct]
+        })
+
+        # Display table
+        st.dataframe(
+            variance_table,
+            use_container_width=True,
+            hide_index=True
+        )
+
     elif plot_type == "📊 Cumulative Variance":
         title_suffix = " (Varimax)" if is_varimax else ""
         st.markdown(f"### 📊 Cumulative Variance Plot{title_suffix}")
@@ -1012,6 +1224,14 @@ def _show_variance_plots_tab():
         # Step 2: Calculate variance explained per variable
         st.markdown(f"#### Step 2: Explained Variance by Variable")
 
+        # Add sorting checkbox
+        sort_by_importance = st.checkbox(
+            "Sort variables by importance (highest to lowest)",
+            value=False,
+            key="sort_variables_by_importance",
+            help="When checked, variables are sorted by variance explained (descending). When unchecked, original variable order is preserved."
+        )
+
         # Import from pca_utils.pca_statistics
         from pca_utils.pca_statistics import calculate_variable_variance_explained
 
@@ -1036,6 +1256,10 @@ def _show_variance_plots_tab():
             n_components=n_significant
         )
 
+        # Sort by importance if requested
+        if sort_by_importance:
+            var_expl_df = var_expl_df.sort_values('Variance_Explained_Ratio', ascending=False).reset_index(drop=True)
+
         # Create bar plot
         fig = go.Figure()
 
@@ -1054,8 +1278,11 @@ def _show_variance_plots_tab():
             textposition='outside'
         ))
 
+        # Update title to show sort mode
+        sort_mode_suffix = " - Sorted by Importance" if sort_by_importance else " - Original Order"
+
         fig.update_layout(
-            title=f"Variance of Each Variable Explained by {n_significant} Significant {comp_label.lower()}s",
+            title=f"Variance of Each Variable Explained by {n_significant} Significant {comp_label.lower()}s{sort_mode_suffix}",
             xaxis_title="Variables",
             yaxis_title="Variance Explained (0-1.0)",
             height=600,
@@ -1103,7 +1330,7 @@ def _show_variance_plots_tab():
             ⚠️ **Variables with low representation** (< {low_var_threshold*100:.0f}%):
             {', '.join(map(str, low_explained['Variable'].tolist()))}
 
-            → Consider adding more components or these variables follow different patterns
+            
             """)
 
 
@@ -1113,7 +1340,7 @@ def _show_variance_plots_tab():
 
 def _show_loadings_plots_tab():
     """Display loadings plots with multiple visualization options."""
-    st.markdown("## 📈 Loadings Plots")
+    st.markdown("## 📈 Loading Plots")
     #st.markdown("*Equivalent to R PCA_plots_loadings.r*")
 
     if 'pca_results' not in st.session_state:
@@ -1166,6 +1393,89 @@ def _show_loadings_plots_tab():
                 help="Select the order of derivative applied to original data"
             )
 
+        # === NEW: VARIABLE BLOCK COLORING OPTION ===
+        st.markdown("###### Optional: Color by Contiguous Variable Blocks")
+
+        use_block_colors = st.checkbox(
+            "Color loading points by variable blocks",
+            value=False,
+            key="use_block_colors_loadings",
+            help="Assign variables to blocks and color them differently in the loading plot"
+        )
+
+        variable_blocks = None
+        if use_block_colors:
+            st.info("💡 Define variable blocks by index ranges (1-based, inclusive). Example: Block 1: variables 1-4, Block 2: variables 5-8")
+
+            # Initialize session state for block values
+            if 'num_blocks_state_loadings' not in st.session_state:
+                st.session_state.num_blocks_state_loadings = 3
+
+            # Number of blocks (with change detection)
+            num_blocks = st.number_input(
+                "Number of blocks:",
+                min_value=1,
+                max_value=10,
+                value=st.session_state.num_blocks_state_loadings,
+                key="num_blocks_input_loadings"
+            )
+
+            # Reset values if num_blocks changed
+            if num_blocks != st.session_state.num_blocks_state_loadings:
+                st.session_state.num_blocks_state_loadings = num_blocks
+                # Clear old values from session state
+                for i in range(11):  # Clear up to 11 blocks (max possible + 1)
+                    if f'block_start_loadings_{i}' in st.session_state:
+                        del st.session_state[f'block_start_loadings_{i}']
+                    if f'block_end_loadings_{i}' in st.session_state:
+                        del st.session_state[f'block_end_loadings_{i}']
+                    if f'block_name_loadings_{i}' in st.session_state:
+                        del st.session_state[f'block_name_loadings_{i}']
+                st.rerun()
+
+            variable_blocks = {}
+            cols = st.columns(min(num_blocks, 3))  # Max 3 columns per row
+
+            # Calculate total variables
+            n_vars = len(loadings)
+
+            for i in range(num_blocks):
+                with cols[i % 3]:
+                    st.write(f"**Block {i+1}**")
+
+                    # Block name
+                    block_name = st.text_input(
+                        f"Block {i+1} name:",
+                        value=f"Block {i+1}",
+                        key=f"block_name_loadings_{i}"
+                    )
+
+                    # Initialize defaults based on block number
+                    default_start = 1 + i * (n_vars // num_blocks)
+                    default_end = min((i + 1) * (n_vars // num_blocks), n_vars)
+
+                    col_start, col_end = st.columns(2)
+                    with col_start:
+                        # Start index
+                        start = st.number_input(
+                            f"Start:",
+                            min_value=1,
+                            max_value=n_vars,
+                            value=default_start,
+                            key=f"block_start_loadings_{i}"
+                        )
+                    with col_end:
+                        # End index - SAFE calculation
+                        end = st.number_input(
+                            f"End:",
+                            min_value=start,  # Ensures min_value is always ≤ value
+                            max_value=n_vars,
+                            value=max(start, default_end),  # Ensure value ≥ min_value
+                            key=f"block_end_loadings_{i}"
+                        )
+
+                    variable_blocks[block_name] = (start, end)
+
         if pc_x != pc_y:
             if use_antiderivative:
                 # Plot antiderivative scatter
@@ -1186,7 +1496,8 @@ def _show_loadings_plots_tab():
                     pc_y,
                     pca_results['explained_variance_ratio'],
                     is_varimax=is_varimax,
-                    color_by_magnitude=is_varimax
+                    color_by_magnitude=is_varimax,
+                    variable_blocks=variable_blocks if use_block_colors else None
                 )
 
             st.plotly_chart(fig, use_container_width=True, key="loadings_scatter")
@@ -1489,8 +1800,7 @@ def _show_score_plots_tab():
             )
 
         # === Marker Size Control ===
-        st.markdown("---")
-        st.markdown("### ⚫ Marker Size")
+        st.markdown("##### ⚫ Marker Size")
         marker_size = st.slider(
             "Point size:",
             min_value=1,
@@ -1620,17 +1930,148 @@ def _show_score_plots_tab():
             trajectory_color_by_index = True
             trajectory_color_variable = None
 
-        # Prepare color data and text labels
-        color_data = None
-        if color_by != "None":
-            if color_by == "Index":
-                color_data = pd.Series(range(len(scores)), index=scores.index, name="Row Index")
-            elif data is not None:
-                try:
-                    color_data = data.loc[scores.index, color_by]
-                except:
-                    st.warning(f"⚠️ Could not align color variable '{color_by}' with scores")
-                    color_data = None
+        # === BLOCK COLORING BY SAMPLE ASSIGNMENT (CORRECT) ===
+        st.markdown("##### Optional: Color by Sample Block")
+        st.caption("Assign samples to blocks and color them accordingly")
+
+        use_score_block_colors = st.checkbox(
+            "Color score points by sample block",
+            value=False,
+            help="Assign samples to blocks and color each sample by its block.",
+            key="use_score_block_colors"
+        )
+
+        score_sample_blocks = None
+        if use_score_block_colors:
+            st.info("📌 Assign samples to blocks by sample index range. Each sample will be colored by its assigned block.")
+
+            # Get number of samples
+            n_samples = len(scores)
+            st.caption(f"📊 Dataset has {n_samples} samples")
+
+            # Initialize session state
+            if 'score_num_blocks_state' not in st.session_state:
+                st.session_state.score_num_blocks_state = 2
+
+            num_score_blocks = st.number_input(
+                "Number of sample blocks:",
+                min_value=1,
+                max_value=5,
+                value=st.session_state.score_num_blocks_state,
+                key="score_num_blocks_input"
+            )
+
+            # Reset on change
+            if num_score_blocks != st.session_state.score_num_blocks_state:
+                st.session_state.score_num_blocks_state = num_score_blocks
+                for i in range(6):
+                    if f'score_block_start_{i}' in st.session_state:
+                        del st.session_state[f'score_block_start_{i}']
+                    if f'score_block_end_{i}' in st.session_state:
+                        del st.session_state[f'score_block_end_{i}']
+                    if f'score_block_name_{i}' in st.session_state:
+                        del st.session_state[f'score_block_name_{i}']
+                st.rerun()
+
+            score_sample_blocks = {}
+            cols = st.columns(num_score_blocks)
+
+            for i in range(num_score_blocks):
+                with cols[i]:
+                    st.write(f"**Block {i+1}**")
+
+                    # Block name
+                    block_name = st.text_input(
+                        f"Name:",
+                        value=f"Block {i+1}",
+                        key=f"score_block_name_{i}"
+                    )
+
+                    # Calculate default ranges based on SAMPLES, not variables
+                    default_start = 1 + i * (n_samples // num_score_blocks)
+                    default_end = min((i + 1) * (n_samples // num_score_blocks), n_samples)
+
+                    # Safety checks
+                    if default_start > n_samples:
+                        default_start = n_samples
+                    if default_end > n_samples:
+                        default_end = n_samples
+                    if default_end < default_start:
+                        default_end = default_start
+
+                    # Start sample index
+                    start = st.number_input(
+                        f"Start sample:",
+                        min_value=1,
+                        max_value=n_samples,
+                        value=default_start,
+                        key=f"score_block_start_{i}"
+                    )
+
+                    # End sample index
+                    end = st.number_input(
+                        f"End sample:",
+                        min_value=start,
+                        max_value=n_samples,
+                        value=max(start, default_end),
+                        key=f"score_block_end_{i}"
+                    )
+
+                    score_sample_blocks[block_name] = (start, end)
+
+        # === ASSIGN SAMPLES TO BLOCKS (SIMPLE INDEX-BASED) ===
+        if use_score_block_colors and score_sample_blocks is not None:
+            # Create assignment for each sample (1-based indexing)
+            sample_block_assignment = {}
+
+            for sample_idx in range(1, len(scores) + 1):
+                # Find which block this sample belongs to
+                assigned_block = None
+                for block_name, (start, end) in score_sample_blocks.items():
+                    if start <= sample_idx <= end:
+                        assigned_block = block_name
+                        break
+
+                if assigned_block is None:
+                    assigned_block = "Unassigned"
+
+                sample_block_assignment[sample_idx] = assigned_block
+
+            # Create color map
+            block_names = list(score_sample_blocks.keys())
+            if COLORS_AVAILABLE:
+                score_block_color_map = create_categorical_color_map(block_names)
+
+            # Create Series aligned with scores index
+            color_data = pd.Series(
+                [sample_block_assignment.get(i, "Unassigned") for i in range(1, len(scores) + 1)],
+                index=scores.index,
+                name="Sample Block"
+            )
+            color_by = "Sample Block"
+
+            # === SHOW RESULTS TABLE ===
+            st.markdown("---")
+            st.subheader("📊 Sample Block Assignment")
+            st.caption("Each sample is assigned to a block by its index")
+
+            results_df = pd.DataFrame({
+                'Sample': range(1, len(scores) + 1),
+                'Block': color_data.values
+            })
+            st.dataframe(results_df, hide_index=True, use_container_width=True)
+        else:
+            # Prepare color data and text labels (ORIGINAL LOGIC)
+            color_data = None
+            if color_by != "None":
+                if color_by == "Index":
+                    color_data = pd.Series(range(len(scores)), index=scores.index, name="Row Index")
+                elif data is not None:
+                    try:
+                        color_data = data.loc[scores.index, color_by]
+                    except:
+                        st.warning(f"⚠️ Could not align color variable '{color_by}' with scores")
+                        color_data = None
 
         # Prepare text labels - show sample name + color variable value
         text_param = None
@@ -1670,7 +2111,28 @@ def _show_score_plots_tab():
         # Create plot using px.scatter with color logic from pca_OLD.py
         color_discrete_map = None  # Initialize
 
-        if color_by == "None":
+        # === SPECIAL HANDLING FOR SAMPLE BLOCK COLORING ===
+        if use_score_block_colors and color_by == "Sample Block":
+            # Use the pre-calculated block color map
+            color_discrete_map = score_block_color_map
+
+            fig = px.scatter(
+                x=scores[pc_x],
+                y=scores[pc_y],
+                color=color_data,
+                color_discrete_map=color_discrete_map,
+                text=text_param,
+                title=f"Scores: {pc_x} vs {pc_y} (colored by Sample Block){title_suffix}<br>Total Explained Variance: {var_total:.1f}%",
+                labels={
+                    'x': f'{pc_x} ({var_x:.1f}%)',
+                    'y': f'{pc_y} ({var_y:.1f}%)',
+                    'color': 'Sample Block'
+                }
+            )
+            # CRITICAL: Enable legend for block coloring
+            fig.update_traces(showlegend=True)
+
+        elif color_by == "None":
             fig = px.scatter(
                 x=scores[pc_x], y=scores[pc_y], text=text_param,
                 title=f"Scores: {pc_x} vs {pc_y}{title_suffix}<br>Total Explained Variance: {var_total:.1f}%",
@@ -1837,7 +2299,7 @@ def _show_score_plots_tab():
 
             # TEMPLATE and INTERACTION
             template='plotly_white',
-            dragmode='lasso',
+            dragmode='zoom',
 
             # EQUAL ASPECT RATIO
             xaxis=dict(
@@ -1869,6 +2331,23 @@ def _show_score_plots_tab():
             # HOVER: compact mode
             hovermode='closest'
         )
+
+        # === SPECIAL LEGEND CONFIGURATION FOR BLOCK COLORING ===
+        if use_score_block_colors and color_by == "Sample Block":
+            fig.update_layout(
+                showlegend=True,
+                legend=dict(
+                    x=0.99,
+                    y=0.99,
+                    xanchor='right',
+                    yanchor='top',
+                    bgcolor='rgba(255, 255, 255, 0.9)',
+                    borderwidth=1,
+                    bordercolor='rgba(0, 0, 0, 0.2)',
+                    font=dict(size=11)
+                ),
+                margin=dict(l=60, r=120, t=70, b=60)
+            )
 
         # Display plot with selection enabled
         selection = st.plotly_chart(fig, use_container_width=True, key="scores_2d", on_select="rerun", selection_mode=["points", "lasso"])
@@ -2159,23 +2638,9 @@ def _show_score_plots_tab():
             else:
                 base_labels_3d = [str(idx) for idx in scores.index]
 
-            # Add color variable value if coloring is active
-            if color_by_3d != "None" and color_data_3d is not None:
-                try:
-                    # Format labels with color variable value
-                    if hasattr(color_data_3d, 'dtype') and pd.api.types.is_numeric_dtype(color_data_3d):
-                        # Numeric color variable - show with 2 decimals
-                        text_param_3d = [f"{base_labels_3d[i]}<br>{color_by_3d}: {color_data_3d.iloc[i]:.2f}"
-                                        for i in range(len(base_labels_3d))]
-                    else:
-                        # Show only the label values
-                        text_param_3d = base_labels_3d
-                except:
-                    # Fallback to base labels only
-                    text_param_3d = base_labels_3d
-            else:
-                # No coloring - show base labels only
-                text_param_3d = base_labels_3d
+            # === FIX: Show ONLY the selected labels, never the color variable ===
+            # The color variable affects point COLOR, not the LABEL text
+            text_param_3d = base_labels_3d
 
         # Debug output for label verification
         if text_param_3d and len(text_param_3d) > 0:
@@ -2579,7 +3044,7 @@ def _show_interpretation_tab():
         st.session_state.variable_annotations = {}
 
     # ========== PC SELECTION ==========
-    st.markdown("### ⚙️ Principal Component Selection")
+    st.markdown("#### ⚙️ Principal Component Selection")
 
     col1, col2 = st.columns(2)
     with col1:
@@ -2589,7 +3054,7 @@ def _show_interpretation_tab():
         pc_y = st.selectbox("Y-axis PC:", loadings.columns, index=pc_y_idx, key='interp_pc_y')
 
     # ========== VISUALIZATION OPTIONS (mirrored from Score Plots tab) ==========
-    st.markdown("### 🎨 Visualization Options")
+    st.markdown("#### 🎨 Visualization Options")
 
     # === COLOR AND LABEL OPTIONS ===
     col3, col4 = st.columns(2)
@@ -2629,7 +3094,6 @@ def _show_interpretation_tab():
         hull_opacity = 0.2
 
     # === TRAJECTORY LINES STRATEGY ===
-    st.markdown("---")
     st.markdown("**🎯 Sample Trajectory Lines**")
     st.caption("Connect samples in order to visualize temporal or sequential progression")
 
@@ -2663,8 +3127,7 @@ def _show_interpretation_tab():
         )
 
     # === MARKER SIZE CONTROL ===
-    st.markdown("---")
-    st.markdown("### ⚫ Marker Size")
+    st.markdown("**⚫ Marker Size**")
     marker_size = st.slider(
         "Point size:",
         min_value=1,
@@ -2821,8 +3284,7 @@ def _show_interpretation_tab():
         text_param = pd.Series(base_labels, index=scores.index)
 
     # ========== MAIN PLOT AREA ==========
-    st.markdown("---")
-    st.markdown("### 📊 Loadings-Scores Analysis")
+    st.markdown("#### 📊 Loadings-Scores Analysis")
 
     try:
         from pca_utils.pca_plots import plot_loadings_scores_side_by_side
@@ -3861,54 +4323,90 @@ def _show_advanced_diagnostics_tab():
                             analyze_statistic = "Q"
                             contrib_norm_to_use = q_contrib_norm
 
-                        st.markdown(f"### 📈 Correlation Analysis - Top {analyze_statistic} Contributor")
-                        st.markdown(f"*Select from top {analyze_statistic} contributors to see correlation with most correlated variable*")
+                        # === FLEXIBLE CORRELATION ANALYSIS ===
+                        st.markdown("### 📈 Correlation Analysis - Flexible Variable Selection")
+                        st.markdown("*Explore correlations by selecting variables from suggestions*")
 
-                        # Get top contributors (variables with highest contribution)
-                        contrib_abs = np.abs(contrib_norm_to_use)
-                        top_indices = np.argsort(contrib_abs)[::-1][:5]
-                        top_contributors = [selected_vars[i] for i in top_indices]
+                        # Get top contributors for X-axis selection
+                        X_data_array = X_data_df.values
+                        top_contrib = get_top_contributors(contrib_norm_to_use, selected_vars, n_top=10)
+                        top_contrib_names = [name for name, _ in top_contrib]
+                        top_contrib_values = {name: val for name, val in top_contrib}
 
-                        # Dropdown to select from top contributors
-                        corr_col1, corr_col2 = st.columns([2, 1])
+                        # Step 1: Select X variable (from top contributors)
+                        col1, col2, col3 = st.columns([2.5, 2.5, 2])
 
-                        with corr_col1:
-                            selected_contrib_var = st.selectbox(
-                                f"Select from top {analyze_statistic} contributors:",
-                                options=top_contributors,
-                                key="diag_top_contrib_var"
+                        with col1:
+                            default_x = top_contrib_names[0] if top_contrib_names else selected_vars[0]
+
+                            selected_x_var = st.selectbox(
+                                "🎯 Select Variable X (from top contributors):",
+                                options=top_contrib_names,
+                                index=0,
+                                key="pca_diag_corr_x_var",
+                                help="Variables ranked by T²/Q contribution to this outlier"
                             )
 
-                        # Calculate correlations for selected variable (from training data)
-                        var1_idx = selected_vars.index(selected_contrib_var)
-                        X_data_array = X_data_df.values
-                        correlations = {}
-                        for i, var in enumerate(selected_vars):
-                            if var != selected_contrib_var:
-                                corr = np.corrcoef(X_data_array[:, var1_idx], X_data_array[:, i])[0, 1]
-                                correlations[var] = (corr, i)
+                            # Show contribution value
+                            if selected_x_var in top_contrib_values:
+                                contrib_val_x = top_contrib_values[selected_x_var]
+                                st.caption(f"📊 Contribution: **{contrib_val_x:.4f}**")
 
-                        # Find most correlated variable
-                        most_corr_var = max(correlations, key=lambda k: abs(correlations[k][0]))
-                        corr_coef, var2_idx = correlations[most_corr_var]
+                        # Step 2: Select Y variable (from top correlated to X)
+                        with col2:
+                            x_idx = selected_vars.index(selected_x_var)
+                            top_corr = get_top_correlated(X_data_array, x_idx, selected_vars, n_top=10)
+                            top_corr_names = [name for name, _ in top_corr]
+                            top_corr_values = {name: corr for name, corr in top_corr}
 
-                        with corr_col2:
-                            st.metric("Correlation (training)", f"{corr_coef:.4f}")
+                            if top_corr_names:
+                                selected_y_var = st.selectbox(
+                                    "🔗 Select Variable Y (top correlated):",
+                                    options=top_corr_names,
+                                    index=0,
+                                    key="pca_diag_corr_y_var",
+                                    help="Variables ranked by correlation to selected X variable"
+                                )
 
-                        # Create scatter plot (training=grey, sample=red star)
-                        fig_corr_scatter = create_correlation_scatter(
-                            X_train=X_data_array,
-                            X_test=X_data_array,  # Same as training in pca.py diagnostics
-                            X_sample=X_data_array[sample_idx, :],
-                            var1_idx=var1_idx,
-                            var2_idx=var2_idx,
-                            var1_name=selected_contrib_var,
-                            var2_name=most_corr_var,
-                            correlation_val=corr_coef,
-                            sample_idx=sample_idx
-                        )
+                                # Show correlation value
+                                if selected_y_var in top_corr_values:
+                                    corr_val_xy = top_corr_values[selected_y_var]
+                                    st.caption(f"📈 Correlation: **{corr_val_xy:.4f}**")
+                            else:
+                                st.error("❌ No correlated variables found")
+                                selected_y_var = None
 
-                        st.plotly_chart(fig_corr_scatter, use_container_width=True)
+                        # Step 3: Show correlation coefficient
+                        with col3:
+                            if selected_x_var and selected_y_var:
+                                x_idx = selected_vars.index(selected_x_var)
+                                y_idx = selected_vars.index(selected_y_var)
+                                actual_corr = np.corrcoef(X_data_array[:, x_idx], X_data_array[:, y_idx])[0, 1]
+
+                                st.metric(
+                                    "Correlation (training)",
+                                    f"{actual_corr:.4f}",
+                                    help="Pearson correlation coefficient"
+                                )
+
+                        # Create and display flexible correlation scatter plot
+                        if selected_x_var and selected_y_var:
+                            x_idx = selected_vars.index(selected_x_var)
+                            y_idx = selected_vars.index(selected_y_var)
+                            actual_corr = np.corrcoef(X_data_array[:, x_idx], X_data_array[:, y_idx])[0, 1]
+
+                            fig_corr_scatter = create_correlation_scatter(
+                                X_train=X_data_array,
+                                X_sample=X_data_array[sample_idx, :],
+                                var1_idx=x_idx,
+                                var2_idx=y_idx,
+                                var1_name=selected_x_var,
+                                var2_name=selected_y_var,
+                                correlation_val=actual_corr,
+                                sample_idx=sample_idx
+                            )
+
+                            st.plotly_chart(fig_corr_scatter, use_container_width=True)
 
         # === SECTION 7 - EXPORT ===
         st.markdown("---")

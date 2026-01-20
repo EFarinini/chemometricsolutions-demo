@@ -96,6 +96,14 @@
             border-radius: 4px;
         }
         
+        .enterprise-box {
+            background: #e8f4f8;
+            border-left: 4px solid #0066cc;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        
         strong {
             color: #1f77b4;
         }
@@ -135,6 +143,39 @@
             color: #999;
             font-size: 0.85em;
             margin-top: 20px;
+        }
+
+        .comparison-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+
+        .comparison-table th {
+            background: #1f77b4;
+            color: white;
+            padding: 12px;
+            text-align: left;
+            border: 1px solid #ddd;
+        }
+
+        .comparison-table td {
+            padding: 12px;
+            border: 1px solid #ddd;
+        }
+
+        .comparison-table tr:nth-child(even) {
+            background: #f9f9f9;
+        }
+
+        .checkmark {
+            color: #28a745;
+            font-weight: bold;
+        }
+
+        .cross {
+            color: #dc3545;
+            font-weight: bold;
         }
     </style>
 </head>
@@ -234,7 +275,7 @@
         <p>If your data is subject to GDPR or other EU data protection regulations, uploading to Streamlit Community Cloud may violate these regulations without proper Data Processing Agreements (DPA). For EU data:</p>
         <ul>
             <li><strong>Preferred:</strong> Use local installation (on your own servers)</li>
-            <li><strong>Alternative:</strong> Contact us for Streamlit Cloud Pro (may require legal review)</li>
+            <li><strong>Alternative:</strong> Contact us for enterprise cloud solutions (may require legal review)</li>
         </ul>
 
         <h3>FDA, HIPAA, ISO Standards</h3>
@@ -244,7 +285,167 @@
             <li>HIPAA-protected health information</li>
             <li>ISO 13485 regulated medical device data</li>
         </ul>
-        <p>For compliance-required applications: <strong>Contact us for on-premise or certified cloud solutions.</strong></p>
+        <p>For compliance-required applications: <strong>See section 4b below for enterprise validated solutions.</strong></p>
+
+        <div class="section-divider"></div>
+
+        <h2>4b. Enterprise & Validated Solutions for Regulated Industries</h2>
+        
+        <div class="enterprise-box">
+            <strong>🔒 For Pharmaceutical, Medical Device & Biotech Companies:</strong>
+            <p style="margin-top: 10px;">ChemometricSolutions offers fully validated enterprise deployments meeting FDA 21 CFR Part 11 and international regulatory requirements.</p>
+        </div>
+
+        <h3>Deployment Models</h3>
+
+        <table class="comparison-table">
+            <tr>
+                <th>Feature</th>
+                <th>Community Cloud (Free)</th>
+                <th>Enterprise On-Premise</th>
+                <th>Enterprise Cloud (Private)</th>
+            </tr>
+            <tr>
+                <td><strong>Suitable for regulated data</strong></td>
+                <td><span class="cross">✗ NO</span></td>
+                <td><span class="checkmark">✓ YES</span></td>
+                <td><span class="checkmark">✓ YES</span></td>
+            </tr>
+            <tr>
+                <td><strong>21 CFR Part 11 compliant</strong></td>
+                <td><span class="cross">✗ NO</span></td>
+                <td><span class="checkmark">✓ YES</span></td>
+                <td><span class="checkmark">✓ YES</span></td>
+            </tr>
+            <tr>
+                <td><strong>Audit trails & logging</strong></td>
+                <td><span class="cross">✗ NO</span></td>
+                <td><span class="checkmark">✓ YES</span></td>
+                <td><span class="checkmark">✓ YES</span></td>
+            </tr>
+            <tr>
+                <td><strong>Electronic signatures</strong></td>
+                <td><span class="cross">✗ NO</span></td>
+                <td><span class="checkmark">✓ YES</span></td>
+                <td><span class="checkmark">✓ YES</span></td>
+            </tr>
+            <tr>
+                <td><strong>Access controls & authentication</strong></td>
+                <td><span class="cross">✗ NO</span></td>
+                <td><span class="checkmark">✓ YES</span></td>
+                <td><span class="checkmark">✓ YES</span></td>
+            </tr>
+            <tr>
+                <td><strong>Data integrity verification</strong></td>
+                <td><span class="cross">✗ NO</span></td>
+                <td><span class="checkmark">✓ YES</span></td>
+                <td><span class="checkmark">✓ YES</span></td>
+            </tr>
+            <tr>
+                <td><strong>IQ/OQ/PQ documentation</strong></td>
+                <td><span class="cross">✗ NO</span></td>
+                <td><span class="checkmark">✓ YES</span></td>
+                <td><span class="checkmark">✓ YES</span></td>
+            </tr>
+            <tr>
+                <td><strong>Professional validation support</strong></td>
+                <td><span class="cross">✗ NO</span></td>
+                <td><span class="checkmark">✓ YES</span></td>
+                <td><span class="checkmark">✓ YES</span></td>
+            </tr>
+            <tr>
+                <td><strong>FDA inspection readiness</strong></td>
+                <td><span class="cross">✗ NO</span></td>
+                <td><span class="checkmark">✓ YES</span></td>
+                <td><span class="checkmark">✓ YES</span></td>
+            </tr>
+        </table>
+
+        <h3>Enterprise Deployment Options</h3>
+
+        <h4>Option A: On-Premise Installation</h4>
+        <ul>
+            <li>Full software deployed on your secure infrastructure</li>
+            <li>Complete data control - no external cloud exposure</li>
+            <li>Customizable security controls and firewall rules</li>
+            <li>Dedicated system validation (IQ/OQ/PQ protocols)</li>
+            <li>User training and documentation in your language</li>
+            <li>Ongoing support and regulatory updates</li>
+        </ul>
+
+        <h4>Option B: Private Cloud Deployment</h4>
+        <ul>
+            <li>Dedicated cloud infrastructure (AWS, Azure, Google Cloud)</li>
+            <li>Enhanced security with VPC, encryption, and DLP controls</li>
+            <li>Automated backup and disaster recovery</li>
+            <li>Scalable performance for high-volume data processing</li>
+            <li>Full audit trail and compliance monitoring</li>
+            <li>SOC 2 Type II certified infrastructure</li>
+        </ul>
+
+        <h3>What's Included in Enterprise Validation</h3>
+        
+        <div class="info-box">
+            <strong>✓ Regulatory Compliance Framework</strong>
+            <ul style="margin-top: 10px; margin-bottom: 0;">
+                <li>21 CFR Part 11 (FDA electronic records & signatures)</li>
+                <li>EudraLex Annex 11 (EU equivalent)</li>
+                <li>ISO 13485 (Medical devices quality management)</li>
+                <li>GxP compliance (GMP, GLP, GCP) support</li>
+            </ul>
+        </div>
+
+        <div class="info-box">
+            <strong>✓ Technical Implementation</strong>
+            <ul style="margin-top: 10px; margin-bottom: 0;">
+                <li>Complete audit trail with immutable logging</li>
+                <li>Electronic signatures with dual authentication</li>
+                <li>Role-based access control (RBAC)</li>
+                <li>Data integrity verification (hash-based)</li>
+                <li>System monitoring and alerting</li>
+                <li>Automated backup and recovery procedures</li>
+            </ul>
+        </div>
+
+        <div class="info-box">
+            <strong>✓ Documentation & Support</strong>
+            <ul style="margin-top: 10px; margin-bottom: 0;">
+                <li>Installation Qualification (IQ) protocol and report</li>
+                <li>Operational Qualification (OQ) protocol and report</li>
+                <li>Performance Qualification (PQ) protocol and report</li>
+                <li>Risk Assessment and mitigation strategies</li>
+                <li>Standard Operating Procedures (SOPs)</li>
+                <li>User training materials and training logs</li>
+                <li>FDA inspection readiness documentation</li>
+            </ul>
+        </div>
+
+        <h3>Use Cases for Enterprise Validation</h3>
+        <ul>
+            <li><strong>Manufacturing QA:</strong> Batch record management, quality control testing, statistical process control</li>
+            <li><strong>Product Development:</strong> Formulation optimization, process validation, scale-up studies</li>
+            <li><strong>Clinical Trials:</strong> Source data validation, analytical method qualification, stability testing</li>
+            <li><strong>Regulatory Submissions:</strong> FDA dossiers, EMA submissions, data integrity for approval packages</li>
+            <li><strong>Quality Assurance:</strong> Method validation, trend analysis, trending and OOS investigation</li>
+        </ul>
+
+        <div class="warning-box">
+            <strong>⚠️ CRITICAL - Community Cloud NOT Suitable for Regulated Data:</strong>
+            <p style="margin-top: 10px;">Uploading FDA-regulated, HIPAA-protected, or ISO 13485 data to Community Cloud may result in:</p>
+            <ul style="margin-top: 10px; margin-bottom: 0;">
+                <li>FDA warning letters and regulatory enforcement action</li>
+                <li>Data integrity concerns during regulatory inspections</li>
+                <li>Product holds and import alerts</li>
+                <li>Rejection of regulatory submissions</li>
+                <li>Significant financial penalties and operational disruption</li>
+            </ul>
+        </div>
+
+        <div class="success-box">
+            <strong>✅ Enterprise Solution Available:</strong>
+            <p style="margin-top: 10px;">If your organization processes FDA-regulated data, pharmaceutical-grade software, or medical device information, our enterprise team can provide fully validated, 21 CFR Part 11 compliant deployments.</p>
+            <p><strong>Contact for consultation:</strong> <a href="mailto:sales@chemometricsolutions.com">sales@chemometricsolutions.com</a></p>
+        </div>
 
         <div class="section-divider"></div>
 
@@ -252,7 +453,7 @@
         
         <p>ChemometricSolutions uses the following third-party services:</p>
         <ul>
-            <li><strong>Streamlit Community Cloud</strong> - Application hosting
+            <li><strong>Streamlit Community Cloud</strong> - Application hosting (Free tier only)
                 <ul>
                     <li>Terms: <a href="https://streamlit.io/terms-of-use" target="_blank">streamlit.io/terms-of-use</a></li>
                     <li>Privacy: <a href="https://streamlit.io/privacy-policy" target="_blank">streamlit.io/privacy-policy</a></li>
@@ -270,13 +471,15 @@
             </li>
         </ul>
 
+        <p><strong>Enterprise deployments use dedicated infrastructure:</strong> On-premise systems use your own infrastructure. Private cloud deployments use customer-dedicated accounts on AWS, Azure, or Google Cloud with dedicated security controls.</p>
+
         <p><strong>You are responsible for understanding and accepting the terms of all third-party services.</strong></p>
 
         <div class="section-divider"></div>
 
         <h2>6. Data Deletion</h2>
         
-        <p>When you upload data to ChemometricSolutions:</p>
+        <p>When you upload data to ChemometricSolutions Community Cloud:</p>
         <ul>
             <li>Data is stored <strong>in-memory only during your session</strong></li>
             <li>Data is <strong>deleted automatically</strong> when you close the browser or session expires</li>
@@ -284,7 +487,9 @@
             <li>Streamlit may keep logs for infrastructure purposes (see <a href="https://streamlit.io/privacy-policy" target="_blank">Streamlit Privacy Policy</a>)</li>
         </ul>
 
-        <p><strong>We recommend:</strong> Never upload data you're not willing to lose.</p>
+        <p><strong>Enterprise deployments:</strong> Data retention policies are customized per your regulatory requirements. Records are maintained for mandated retention periods with secure disposal procedures.</p>
+
+        <p><strong>We recommend:</strong> Never upload data you're not willing to lose to Community Cloud. For regulated data requiring long-term retention, use enterprise validated solutions.</p>
 
         <div class="section-divider"></div>
 
@@ -295,6 +500,7 @@
             <li><strong>General inquiries:</strong> support@chemometricsolutions.com</li>
             <li><strong>Security/Privacy concerns:</strong> security@chemometricsolutions.com</li>
             <li><strong>Enterprise/On-Premise solutions:</strong> sales@chemometricsolutions.com</li>
+            <li><strong>Regulatory & Validation support:</strong> compliance@chemometricsolutions.com</li>
             <li><strong>GitHub Issues:</strong> <a href="https://github.com/EFarinini/chemometricsolutions-demo/issues" target="_blank">chemometricsolutions-demo/issues</a></li>
         </ul>
 
@@ -302,17 +508,22 @@
 
         <h2>8. Changes to Terms</h2>
         
-        <p>ChemometricSolutions may update these terms at any time. Continued use of the application constitutes acceptance of updated terms.</p>
+        <p>ChemometricSolutions may update these terms at any time. Continued use of the application constitutes acceptance of updated terms. For enterprise customers, material changes to terms will be communicated in advance with negotiation period.</p>
 
         <div class="success-box">
-            <strong>✓ Summary:</strong> Use ChemometricSolutions Community Cloud for learning, demos, and non-sensitive data. For proprietary or regulated data, use the local version or contact us for enterprise solutions.
+            <strong>✅ Summary - Three Deployment Models:</strong>
+            <ul style="margin-top: 10px; margin-bottom: 0;">
+                <li><strong>Community Cloud (Free):</strong> Learning, demos, and non-regulated data only. Shared infrastructure, no warranties, no compliance support.</li>
+                <li><strong>Local Installation:</strong> Proprietary/sensitive data with 100% privacy. Your infrastructure, your control. Suitable for R&D and testing.</li>
+                <li><strong>Enterprise Validated (Commercial):</strong> FDA 21 CFR Part 11 compliant deployments for regulated industries. Includes IQ/OQ/PQ, audit trails, electronic signatures, professional support, and FDA inspection readiness.</li>
+            </ul>
         </div>
 
         <footer>
-            <p><strong>ChemometricSolutions</strong> - Interactive Demos for Chemometrics</p>
+            <p><strong>ChemometricSolutions</strong> - Advanced Chemometric Analysis & Regulatory Compliance</p>
             <p><a href="https://github.com/EFarinini/chemometricsolutions-demo" target="_blank">GitHub Repository</a> | 
             <a href="https://chemometricsolutions.com" target="_blank">Official Website</a></p>
-            <div class="last-updated">Last Updated: December 2025</div>
+            <div class="last-updated">Last Updated: January 2026</div>
         </footer>
     </div>
 </body>

@@ -1125,6 +1125,11 @@ Paracetamol,96.8,6.9,25.8,89.2""")
                     "sheet": "0",
                     "description": "93 samples from 4 Irish whiskey brands with 57 chemico-physical variables. Excellent for product authentication."
                 },
+                "Coffee & Barley - NIR Spectroscopy": {
+                    "file": "coffee_barley.xlsx",
+                    "sheet": "0",
+                    "description": "Coffee and barley samples with near-infrared (NIR) spectroscopy data. Perfect for classification and PCA analysis of agricultural products."
+                },
                 "Milk - Fatty Acids Training (150×71)": {
                     "file": "milk.xls",
                     "sheet": "train",
@@ -1260,11 +1265,6 @@ Paracetamol,96.8,6.9,25.8,89.2""")
                     "sheet": "10 bread",
                     "description": "Experimental design for bread making process optimization."
                 },
-                "Coffee & Barley - NIR Spectroscopy": {
-                    "file": "coffee_barley.xlsx",
-                    "sheet": "0",
-                    "description": "Coffee and barley samples with near-infrared (NIR) spectroscopy data. Perfect for classification and PCA analysis of agricultural products."
-                }
             }
 
             # Info expander
@@ -1421,26 +1421,6 @@ Paracetamol,96.8,6.9,25.8,89.2""")
                             if len(numeric_cols) > 20:
                                 st.info(f"Showing first 20 of {len(numeric_cols)} numeric variables")
 
-                    # Suggestions based on dataset
-                    st.markdown("### 🎯 Suggested Analysis")
-
-                    if "DoE" in selected_sample or "Experimental design" in dataset_info['description']:
-                        st.info("🧪 **Design of Experiments detected** → Try **MLR - Multiple Linear Regression** module for model building")
-                        st.info("📊 **DoE workflow**: Build MLR model → Analyze coefficients → Generate response surfaces → Optimize conditions")
-                        if "Mixture" in dataset_info['description'] or "Thickener" in selected_sample:
-                            st.info("🎨 **Mixture Design** → Use **Mixture Design** module for constrained optimization")
-
-                    if "Spectroscopy" in dataset_info['description'] or "NIR" in dataset_info['description'] or "UV" in dataset_info['description']:
-                        st.info("🧬 **Spectroscopic data detected** → Try **PCA Analysis** for dimensionality reduction and pattern exploration")
-
-                    if "Classification" in dataset_info['description'] or "types" in dataset_info['description']:
-                        st.info("🎯 **Classification dataset** → Use **PCA** to visualize class separation, then build **Classification Models**")
-
-                    if "train" in dataset_info['sheet'].lower() or "Training" in dataset_info['description']:
-                        st.info("📚 **Training set loaded** → Don't forget to load the corresponding **Test set** for validation")
-
-                    if "Quality Control" in dataset_info['description']:
-                        st.info("🏭 **QC data** → Perfect for **PCA Monitoring** and **Hotelling T² / Q statistics**")
 
                 except Exception as e:
                     st.error(f"❌ **Error loading dataset**: {str(e)}")
