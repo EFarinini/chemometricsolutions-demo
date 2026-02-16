@@ -7,12 +7,12 @@
 > **7 core chemometric modules for multivariate data analysis**  
 > Workshop Como 2026 Edition
 
-**🚀 Live Demo:** https://chemometricsolutions-demo.streamlit.app/  
-**🔒 Access:** Password-protected (credentials provided at workshop)
+**Live Demo:** https://chemometricsolutions-demo.streamlit.app/  
+**Access:** Password-protected (credentials provided at workshop)
 
 ---
 
-## 📊 Included Modules
+## Included Modules
 
 1. **Data Handling** - Import/export CSV, Excel, TXT formats
 2. **PCA Analysis** - Principal Component Analysis with diagnostics
@@ -24,7 +24,7 @@
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
 # Clone repository
@@ -42,7 +42,7 @@ streamlit run streamlit_app.py
 
 ---
 
-## 📂 Structure
+## Structure
 
 ```
 chemometricsolutions-demo/
@@ -54,7 +54,7 @@ chemometricsolutions-demo/
 
 ---
 
-## 💼 Full Version
+## Full Version
 
 Includes **12+ advanced modules**: Multi-response DoE, Classification, PLS Calibration, GA Variable Selection, Mixture Design, and more.
 
@@ -63,7 +63,7 @@ Includes **12+ advanced modules**: Multi-response DoE, Classification, PLS Calib
 
 ---
 
-## 📄 License
+## License
 
 MIT License - © 2026 Dr. Emanuele Farinini, PhD
 
